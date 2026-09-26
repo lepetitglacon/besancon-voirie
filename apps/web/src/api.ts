@@ -1,4 +1,4 @@
-import type { Bbox, CarrefoursGeoJson } from '@voirie/schema'
+import type { Bbox, CarrefoursGeoJson, ReseauTram, TramsTempsReel } from '@voirie/schema'
 
 export interface Sante {
   status: 'ok'
@@ -15,4 +15,6 @@ export const api = {
   sante: () => lireJson<Sante>('/api/health'),
   carrefours: (bbox: Bbox) =>
     lireJson<CarrefoursGeoJson>(`/api/carrefours?bbox=${bbox.map((v) => v.toFixed(5)).join(',')}`),
+  reseauTram: () => lireJson<ReseauTram>('/api/tram/reseau'),
+  tramsTempsReel: () => lireJson<TramsTempsReel>('/api/tram/temps-reel'),
 }

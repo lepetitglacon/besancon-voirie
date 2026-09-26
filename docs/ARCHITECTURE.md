@@ -376,6 +376,7 @@ Bande passante = mesure de l'intersection, sur le cercle [0, C), de ces interval
 | `AdminModule` | Authentification admin, modération, édition des carrefours et corridors |
 | `ExportsModule` | GeoJSON, GeoPackage Lambert 93 (`ogr2ogr` sur la base), CSV |
 | `TimeModule` | `GET /time`, pour la synchronisation d'horloge du chrono |
+| `TramModule` | Tram en temps réel : GTFS et GTFS-RT Ginko, mis en cache (voir §8.1) |
 | `JobsModule` | pg-boss : publication des jobs (recalculs, simulations) |
 | `CommandsModule` | nest-commander : `osm:import`, `carrefours:seed`, `corridors:recalculer` |
 
@@ -391,6 +392,8 @@ Public :
 | GET | `/api/corridors/:slug` | Corridor, carrefours ordonnés, distances, plans, décalages actuels |
 | POST | `/api/releves` | 202 : relevé enregistré `en_attente` |
 | GET | `/api/time` | `{ now: <ms epoch> }` |
+| GET | `/api/tram/reseau` | Parcours tram (tracé, arrêts et leur distance le long du tracé) |
+| GET | `/api/tram/temps-reel` | Par rame : tronçon en cours, durée prévue, arrivée prévue à l'arrêt suivant |
 | GET | `/api/exports/carrefours.geojson` | Export ODbL |
 | GET | `/api/exports/carrefours.gpkg?srid=2154` | Export Lambert 93 |
 
@@ -448,6 +451,38 @@ JOIN osm_route_edge e ON e.id = r.edge;
   des personnes différentes.
 - Gros boutons, mode sombre, écran maintenu allumé (Wake Lock API), retour haptique.
 - Aucun accès caméra, micro ni géolocalisation continue. La position ne sert qu'à proposer le carrefour le plus proche, et n'est pas envoyée.
+
+### 8.1 Tram en temps réel
+
+Ginko ne publie pas la position GPS des rames, mais son flux GTFS-RT `tripUpdates` donne,
+pour chaque course, le numéro de la rame et l'heure prévue (à la seconde) à chacun des arrêts
+restants. Clé API dans `GINKO_API_KEY` ; GTFS statique public, licence ODbL.
+
+- **API** (`apps/api/src/tram/`) : le GTFS est lu une fois par jour. On n'en garde que le tram,
+  avec un parcours par ligne et par sens, et les arrêts projetés le long du tracé (`shapes.txt`).
+  Le flux temps réel est relu au plus toutes les 10 s. Pour chaque rame, on retient la course
+  en cours (un arrêt déjà desservi) : son tronçon va de l'arrêt précédent (GTFS statique) à
+  l'arrêt suivant (premier arrêt restant du flux). La durée d'un tronçon est la médiane des
+  écarts entre arrêts consécutifs dans les prévisions de toutes les courses du flux. À défaut,
+  on prend les horaires théoriques, arrondis à la minute.
+- **Moteur** (`estimerPositionTram`) : la rame roule à la vitesse moyenne du tronçon, arrêt en
+  station exclu, et se trouve à `temps restant × vitesse` avant l'arrêt suivant.
+- **Arrêt en station** : Ginko ne publie aucune durée d'arrêt. L'arrivée et le départ sont
+  identiques dans le flux comme dans le GTFS, et SIRI n'est pas ouvert à notre clé. Le moteur
+  applique donc un temps fixe (`PARAMETRES_TRAM.tempsArret`, 15 s), compté après l'heure prévue
+  à l'arrêt : la rame reste à quai en début de tronçon. Une fois l'arrivée prévue passée, elle
+  attend aussi à l'arrêt suivant jusqu'à la prochaine prévision. Mesure du 26/09/2026 (22 arrêts) :
+  un arrêt disparaît du flux en médiane 8 s après son heure prévue (de -3 à 12 s, 33 s pour un
+  départ de terminus). C'est cohérent avec une heure prévue qui marque l'arrivée à quai. La zone probable
+  applique une marge sur le temps restant (plancher, part du temps restant, âge de la donnée) et
+  une marge sur la vitesse. Elle reste bornée au tronçon. Les paramètres (`PARAMETRES_TRAM`)
+  sont indicatifs, à recaler en comparant les prévisions successives aux passages réels.
+- **Front** : le flux est relu toutes les 15 s. La position est recalculée à chaque image
+  (`requestAnimationFrame`), hors de React : les sources MapLibre reçoivent directement les
+  nouvelles données. Quand une nouvelle prévision déplace l'estimation, `lisserDistance` fait
+  glisser la rame le long de la voie (~1 s) au lieu de la faire sauter. Si l'estimation recule
+  un peu, la rame attend sur place : elle ne recule jamais. Un clic sur une rame ouvre le détail
+  (tronçon, arrivée prévue, vitesse moyenne, longueur de la zone).
 
 ---
 

@@ -1,5 +1,6 @@
 import type { Bbox, CarrefoursGeoJson } from '@voirie/schema'
 import type { Map as CarteMapLibre } from 'maplibre-gl'
+import type { ReactNode } from 'react'
 import Map, {
   Layer,
   NavigationControl,
@@ -41,9 +42,11 @@ function emprise(carte: CarteMapLibre): Bbox {
 interface Props {
   carrefours: CarrefoursGeoJson | undefined
   onEmprise: (bbox: Bbox) => void
+  /** Couches supplémentaires (trams…). */
+  children?: ReactNode
 }
 
-export function CarteCarrefours({ carrefours, onEmprise }: Props) {
+export function CarteCarrefours({ carrefours, onEmprise, children }: Props) {
   return (
     <Map
       initialViewState={VUE_INITIALE}
@@ -53,6 +56,7 @@ export function CarteCarrefours({ carrefours, onEmprise }: Props) {
       onMoveEnd={(evenement) => onEmprise(emprise(evenement.target))}
     >
       <NavigationControl position="top-right" />
+      {children}
       {carrefours && (
         <Source id="carrefours" type="geojson" data={carrefours}>
           <Layer {...coucheCarrefours} />

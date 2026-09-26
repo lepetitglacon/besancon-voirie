@@ -81,3 +81,19 @@ body,
   margin-top: 8px !important;
   font-size: 12px !important;
 }
+
+.bascule {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.popup-rame {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: #1d2330;
+  font-size: 12px;
+}
