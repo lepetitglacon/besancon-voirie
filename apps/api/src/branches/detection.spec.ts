@@ -52,9 +52,9 @@ describe('proposerBranches', () => {
       ],
       [6, 47],
     );
-    expect(branches.map((b) => [b.code, b.nom, b.sens, b.voies.length, b.voies_sortantes])).toEqual([
-      ['E', 'Boulevard Léon Blum', 'double', 2, 2],
-      ['O', 'Rue A', 'double', 1, 1],
+    expect(branches.map((b) => [b.code, b.nom, b.fleches.length, b.sortantes])).toEqual([
+      ['E', 'Boulevard Léon Blum', 2, 2],
+      ['O', 'Rue A', 1, 1],
     ]);
     expect(branches[0]!.azimut).toBe(90);
     expect(branches[0]!.geom![0]).toEqual([6, 47]);

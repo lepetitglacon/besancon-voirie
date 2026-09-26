@@ -2,6 +2,8 @@ import type {
   Bbox,
   BranchesCarrefour,
   ConfigurationBranches,
+  ConfigurationLignes,
+  LignesCarrefour,
   DetectionBranches,
   CarrefourResume,
   CarrefoursGeoJson,
@@ -22,8 +24,9 @@ async function requete<T>(url: string, init?: RequestInit): Promise<T> {
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
   })
   if (!reponse.ok) {
-    const corps = (await reponse.json().catch(() => null)) as { message?: unknown } | null
-    const message = typeof corps?.message === 'string' ? corps.message : `HTTP ${reponse.status}`
+    const corps = (await reponse.json().catch(() => null)) as { message?: unknown; erreurs?: unknown } | null
+    const detail = Array.isArray(corps?.erreurs) ? ` : ${corps.erreurs.join(' ; ')}` : ''
+    const message = typeof corps?.message === 'string' ? `${corps.message}${detail}` : `HTTP ${reponse.status}`
     throw new Error(message)
   }
   return (reponse.status === 204 ? undefined : await reponse.json()) as T
@@ -47,6 +50,12 @@ export const api = {
     requete<DetectionBranches>(`/api/carrefours/${carrefourId}/branches/detection`),
   enregistrerBranches: (carrefourId: string, configuration: ConfigurationBranches) =>
     requete<BranchesCarrefour>(`/api/carrefours/${carrefourId}/branches`, {
+      method: 'PUT',
+      body: JSON.stringify(configuration),
+    }),
+  lignes: (carrefourId: string) => requete<LignesCarrefour>(`/api/carrefours/${carrefourId}/lignes`),
+  enregistrerLignes: (carrefourId: string, configuration: ConfigurationLignes) =>
+    requete<LignesCarrefour>(`/api/carrefours/${carrefourId}/lignes`, {
       method: 'PUT',
       body: JSON.stringify(configuration),
     }),

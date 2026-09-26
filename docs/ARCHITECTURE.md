@@ -420,6 +420,7 @@ Public :
 | GET | `/api/carrefours/suggestion-nom?feux=…` | Nom proposé pour un groupe de feux |
 | GET | `/api/carrefours/:id/branches` | Branches, voies et mouvements calculés ([CONFIGURATION.md](CONFIGURATION.md) §3) |
 | GET | `/api/carrefours/:id/branches/detection` | Proposition de branches depuis OSM, non enregistrée |
+| GET | `/api/carrefours/:id/lignes` | Lignes de feux, matrice des conflits, mouvements non commandés ([CONFIGURATION.md](CONFIGURATION.md) §4) |
 | GET | `/api/carrefours/:slug` | Carrefour complet : branches, lignes, plans, synthèse des relevés validés |
 | GET | `/api/corridors` | Liste + géométrie |
 | GET | `/api/corridors/:slug` | Corridor, carrefours ordonnés, distances, plans, décalages actuels |
@@ -438,6 +439,7 @@ Admin (cookie de session, un seul compte) :
 | PUT | `/api/admin/carrefours/:id` | Édition (nom, branches, lignes, contrôleur) |
 | POST / PATCH / DELETE | `/api/carrefours[/:id]` | Composition manuelle des carrefours (§5.3). Pour l'instant protégée par `EDITION_LOCALE` |
 | PUT | `/api/carrefours/:id/branches` | Remplace branches et voies (`EDITION_LOCALE`) |
+| PUT | `/api/carrefours/:id/lignes` | Remplace lignes de feux, feux physiques et conflits admis (`EDITION_LOCALE`) |
 | PUT | `/api/admin/corridors/:id` | Création/édition, recalcul des distances |
 | POST | `/api/admin/simulations` | Phase 2 : met un job en file |
 

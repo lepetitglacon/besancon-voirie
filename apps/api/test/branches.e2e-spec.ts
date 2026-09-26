@@ -3,15 +3,16 @@ import type { INestApplication } from '@nestjs/common';
 import type { Server } from 'node:http';
 import pg from 'pg';
 import request from 'supertest';
-import type { Branche } from '@voirie/schema';
+import type { BrancheLue, Connexion, DetectionBranches } from '@voirie/schema';
 import { AppModule } from '../src/app.module.js';
 import { chargerOsm, trierElements } from '../scripts/osm.js';
 import { ELEMENTS_OSM, FEUX_A } from './fixtures/osm.js';
 
-describe('Branches et voies (e2e)', () => {
+describe('Branches, voies et connexions (e2e)', () => {
   let app: INestApplication<Server>;
   const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
   let carrefourA: string;
+  const http = () => request(app.getHttpServer());
 
   beforeAll(async () => {
     await client.connect();
@@ -25,11 +26,7 @@ describe('Branches et voies (e2e)', () => {
     app.setGlobalPrefix('api');
     await app.init();
 
-    const { body } = await request(app.getHttpServer())
-      .post('/api/carrefours')
-      .send({ feux: rows.map((r) => r.id) })
-      .expect(201);
-    carrefourA = body.id;
+    carrefourA = (await http().post('/api/carrefours').send({ feux: rows.map((r) => r.id) }).expect(201)).body.id;
   });
 
   afterAll(async () => {
@@ -39,23 +36,31 @@ describe('Branches et voies (e2e)', () => {
     await client.end();
   });
 
-  let proposition: Branche[];
+  let proposition: DetectionBranches;
+  const sans = <T extends object>(objet: T, ...cles: Array<keyof T>) =>
+    Object.fromEntries(Object.entries(objet).filter(([cle]) => !cles.includes(cle as keyof T)));
 
-  it('GET /branches/detection should propose one branch per road leaving the junction, without saving', async () => {
-    const { body } = await request(app.getHttpServer()).get(`/api/carrefours/${carrefourA}/branches/detection`).expect(200);
-    proposition = body.branches;
+  it('GET /branches/detection should propose lanes, crossings and connections, without saving', async () => {
+    const { body } = await http().get(`/api/carrefours/${carrefourA}/branches/detection`).expect(200);
+    proposition = body;
 
-    // Triées par azimut : l'ordre exact dépend du centre, on compare par code.
-    expect(Object.fromEntries(body.branches.map((b: Branche) => [b.code, [b.nom, b.sens]]))).toEqual({
-      N: ['Avenue B', 'double'],
-      E: ['Rue A', 'double'],
-      S: ['Avenue B', 'double'],
-      O: ['Rue A', 'double'],
-    });
-    const sud = body.branches.find((b: Branche) => b.code === 'S');
-    expect(sud.voies.map((v: { mouvements: string[] }) => v.mouvements)).toEqual([['gauche'], ['tout_droit', 'droite']]);
-    expect(sud.voies_sortantes).toBe(1);
-    expect(body.sources).toMatchObject({ S: 'osm', N: 'defaut', E: 'defaut' });
+    const parCode = Object.fromEntries(body.branches.map((b: BrancheLue) => [b.code, b]));
+    expect(Object.keys(parCode).sort()).toEqual(['E', 'N', 'O', 'S']);
+    // Arrivée par le sud : deux voies entrantes (flèches OSM), une sortante, un passage piéton.
+    const sud: BrancheLue = parCode.S;
+    expect(sud).toMatchObject({ nom: 'Avenue B', sens: 'double' });
+    expect(sud.voies.map((v) => `${v.sens}${v.rang}`)).toEqual(['entrante0', 'entrante1', 'sortante0']);
+    expect(sud.voies[0]!.geom).toHaveLength(2);
+    expect(sud.traversee).toHaveLength(2);
+
+    expect(body.connexions).toEqual(
+      expect.arrayContaining([
+        { de: 'S:e0', vers: 'O:s0' },
+        { de: 'S:e1', vers: 'N:s0' },
+        { de: 'S:e1', vers: 'E:s0' },
+      ]),
+    );
+    expect(body.fleches).toMatchObject({ 'S:e0': ['gauche'], 'S:e1': ['tout_droit', 'droite'] });
     expect(body.mouvements).toEqual(
       expect.arrayContaining([
         { origine: 'S', destination: 'O', direction: 'gauche', voies: [0] },
@@ -63,45 +68,54 @@ describe('Branches et voies (e2e)', () => {
         { origine: 'S', destination: 'E', direction: 'droite', voies: [1] },
       ]),
     );
+    expect(body.sources).toMatchObject({ S: 'osm', N: 'defaut' });
 
-    const { body: enregistrees } = await request(app.getHttpServer()).get(`/api/carrefours/${carrefourA}/branches`).expect(200);
+    const { body: enregistrees } = await http().get(`/api/carrefours/${carrefourA}/branches`).expect(200);
     expect(enregistrees.branches).toEqual([]);
   });
 
-  it('PUT /branches should save the corrected branches and return the movements', async () => {
-    const corrigees = proposition.map((b) => (b.code === 'E' ? { ...b, nom: 'Rue A (est)', sens: 'sortant', voies: [] } : b));
-    const { body } = await request(app.getHttpServer())
-      .put(`/api/carrefours/${carrefourA}/branches`)
-      .send({ branches: corrigees })
-      .expect(200);
+  it('PUT /branches should save lanes moved on the photo and the chosen connections', async () => {
+    const branches = proposition.branches.map((b) => sans(b, 'sens'));
+    // Voie 1 du sud recalée d'un mètre vers l'est ; le tourne-à-gauche du sud est retiré.
+    const sud = branches.find((b) => b.code === 'S') as BrancheLue;
+    const [[lon, lat], bout] = sud.voies[1]!.geom;
+    sud.voies[1]!.geom = [[lon + 0.000013, lat], bout];
+    const connexions = proposition.connexions.filter((c: Connexion) => !(c.de === 'S:e0' && c.vers === 'O:s0'));
 
-    expect(body.branches.find((b: Branche) => b.code === 'E')).toMatchObject({ nom: 'Rue A (est)', sens: 'sortant', voies: [] });
-    expect(body.branches.find((b: Branche) => b.code === 'S').geom).toHaveLength(2);
-    expect(body.mouvements.some((m: { origine: string }) => m.origine === 'E')).toBe(false);
+    const { body } = await http().put(`/api/carrefours/${carrefourA}/branches`).send({ branches, connexions }).expect(200);
 
-    const { body: relues } = await request(app.getHttpServer()).get(`/api/carrefours/${carrefourA}/branches`).expect(200);
+    const relue = body.branches.find((b: BrancheLue) => b.code === 'S');
+    expect(relue.voies[1].geom[0][0]).toBeCloseTo(lon + 0.000013, 9);
+    expect(body.connexions).toHaveLength(connexions.length);
+    expect(body.mouvements.some((m: { origine: string; destination: string }) => m.origine === 'S' && m.destination === 'O')).toBe(false);
+    expect(body.alertes).toContain('S, voie entrante 1 : aucune connexion');
+
+    const { body: relues } = await http().get(`/api/carrefours/${carrefourA}/branches`).expect(200);
     expect(relues).toEqual(body);
   });
 
-  it('PUT /branches should reject duplicated codes and outgoing branches with lanes', async () => {
-    const [premiere] = proposition;
-    await request(app.getHttpServer())
-      .put(`/api/carrefours/${carrefourA}/branches`)
-      .send({ branches: [premiere, premiere] })
-      .expect(400);
-    await request(app.getHttpServer())
-      .put(`/api/carrefours/${carrefourA}/branches`)
-      .send({ branches: [{ ...premiere, sens: 'sortant' }] })
-      .expect(400);
+  it('PUT /branches should reject invalid connections and lane ranks', async () => {
+    const branches = proposition.branches.map((b) => sans(b, 'sens'));
+    const envoyer = (corps: object) => http().put(`/api/carrefours/${carrefourA}/branches`).send(corps);
+
+    const sortanteEnDepart = await envoyer({ branches, connexions: [{ de: 'S:s0', vers: 'N:s0' }] }).expect(400);
+    expect(JSON.stringify(sortanteEnDepart.body.issues)).toContain("S:s0 n'est pas une voie entrante");
+    await envoyer({ branches, connexions: [{ de: 'S:e0', vers: 'X:s0' }] }).expect(400);
+    await envoyer({ branches: [branches[0], branches[0]], connexions: [] }).expect(400);
+
+    const trou = branches.map((b) =>
+      b.code === 'S' ? { ...b, voies: (b as BrancheLue).voies.filter((v) => !(v.sens === 'entrante' && v.rang === 0)) } : b,
+    );
+    await envoyer({ branches: trou, connexions: [] }).expect(400);
   });
 
   it('should answer 404 for an unknown carrefour and 403 when edition is disabled', async () => {
-    await request(app.getHttpServer()).get('/api/carrefours/00000000-0000-4000-8000-000000000000/branches').expect(404);
+    await http().get('/api/carrefours/00000000-0000-4000-8000-000000000000/branches').expect(404);
     process.env.EDITION_LOCALE = 'false';
     try {
-      await request(app.getHttpServer())
+      await http()
         .put(`/api/carrefours/${carrefourA}/branches`)
-        .send({ branches: proposition })
+        .send({ branches: proposition.branches.map((b) => sans(b, 'sens')), connexions: [] })
         .expect(403);
     } finally {
       process.env.EDITION_LOCALE = 'true';

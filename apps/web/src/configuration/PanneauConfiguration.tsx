@@ -1,99 +1,261 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { calculerMouvements } from '@voirie/engine'
-import type { Branche, CarrefourResume, Mouvement, SensBranche } from '@voirie/schema'
-import { useEffect, useState } from 'react'
+import type { LonLat } from '@voirie/engine'
+import type { Branche, BranchesCarrefour, CarrefourResume, Connexion, FeuResume } from '@voirie/schema'
+import { useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react'
 import { api } from '../api'
+import type { ModeEdition } from './calque/CalqueCarrefour'
+import { basculerConnexion, deplacerPoignee, type Brouillon, type Poignee } from './modele'
+import { OngletBranches } from './OngletBranches'
+import { OngletLignes, type BrouillonLignes } from './OngletLignes'
 
-const FLECHES: Array<{ direction: Mouvement; symbole: string; titre: string }> = [
-  { direction: 'demi_tour', symbole: '↶', titre: 'Demi-tour' },
-  { direction: 'gauche', symbole: '←', titre: 'Tourne-à-gauche' },
-  { direction: 'tout_droit', symbole: '↑', titre: 'Tout droit' },
-  { direction: 'droite', symbole: '→', titre: 'Tourne-à-droite' },
-]
+/** Références stables : un `[]` littéral relancerait les effets de synchronisation à chaque rendu. */
+const AUCUNE_BRANCHE: Branche[] = []
+const AUCUNE_CONNEXION: Connexion[] = []
+const AUCUN_FEU: string[] = []
 
-const DIRECTIONS: Record<Mouvement, string> = {
-  gauche: 'à gauche',
-  tout_droit: 'tout droit',
-  droite: 'à droite',
-  demi_tour: 'demi-tour',
+/** Ce qui s'enregistre : sans les champs déduits (sens des branches). */
+const pourEnregistrer = (brouillon: Brouillon) => ({
+  branches: brouillon.branches.map((b) => {
+    const { sens: _sens, ...branche } = b as Branche & { sens?: unknown }
+    return branche
+  }),
+  connexions: brouillon.connexions,
+})
+
+/** Ce que la carte doit dessiner pendant la configuration. */
+export interface AffichageConfiguration {
+  branches: Branche[]
+  connexions: Connexion[]
+  /** null : dessin seul (onglet des lignes), sans poignées. */
+  mode: ModeEdition | null
+  feuxSurlignes: string[]
+  /** Connexions de la ligne de feux active (« de>vers »), mises en avant sur la carte. */
+  connexionsSurlignees: string[]
 }
 
-/** Référence stable : un `[]` littéral relancerait l'effet de synchronisation à chaque rendu. */
-const AUCUNE_BRANCHE: Branche[] = []
+type Onglet = 'branches' | 'lignes'
+
+/** Ce que le parent peut demander au panneau : relayer un clic sur un feu de la carte. */
+export interface PanneauConfigurationHandle {
+  clicFeu: (feu: FeuResume) => void
+  deplacerPoignee: (poignee: Poignee, position: LonLat) => void
+  connecter: (de: string, vers: string) => void
+}
 
 interface Props {
+  ref?: Ref<PanneauConfigurationHandle>
   carrefour: CarrefourResume
-  /** Branches en cours d'édition, dessinées sur la carte par le parent. */
-  onBrouillon: (branches: Branche[]) => void
+  onAffichage: (affichage: AffichageConfiguration) => void
   onFermer: () => void
 }
 
-export function PanneauConfiguration({ carrefour, onBrouillon, onFermer }: Props) {
+export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: Props) {
   const queryClient = useQueryClient()
-  const [brouillon, setBrouillon] = useState<Branche[] | null>(null)
-  const [sources, setSources] = useState<Record<string, 'osm' | 'defaut'>>({})
-  const [modifie, setModifie] = useState(false)
+  const [onglet, setOnglet] = useState<Onglet>('branches')
 
-  const enregistrees = useQuery({
+  // ── Étape 1 : branches ──
+  const branchesEnregistrees = useQuery({
     queryKey: ['branches', carrefour.id],
     queryFn: () => api.branches(carrefour.id),
   })
-
-  const branches = brouillon ?? enregistrees.data?.branches ?? AUCUNE_BRANCHE
-  useEffect(() => onBrouillon(branches), [branches, onBrouillon])
-
-  const changer = (suivantes: Branche[]) => {
-    setBrouillon(suivantes)
-    setModifie(true)
-  }
-  const changerBranche = (index: number, branche: Branche) =>
-    changer(branches.map((b, i) => (i === index ? branche : b)))
+  const [brouillonBranches, setBrouillonBranches] = useState<Brouillon | null>(null)
+  const [sources, setSources] = useState<Record<string, 'osm' | 'defaut'>>({})
+  const [mode, setMode] = useState<ModeEdition>('ajuster')
+  const enregistre: BranchesCarrefour | undefined = branchesEnregistrees.data
+  const configuration: Brouillon = useMemo(
+    () => brouillonBranches ?? { branches: enregistre?.branches ?? AUCUNE_BRANCHE, connexions: enregistre?.connexions ?? AUCUNE_CONNEXION },
+    [brouillonBranches, enregistre],
+  )
+  const branches = configuration.branches
+  const centre: LonLat = enregistre?.centre ?? [0, 0]
 
   const detection = useMutation({
     mutationFn: () => api.detecterBranches(carrefour.id),
     onSuccess: (proposition) => {
-      setBrouillon(proposition.branches)
+      setBrouillonBranches({ branches: proposition.branches, connexions: proposition.connexions })
       setSources(proposition.sources)
-      setModifie(true)
     },
   })
-
-  const enregistrement = useMutation({
-    mutationFn: () => api.enregistrerBranches(carrefour.id, { branches }),
+  const enregistrementBranches = useMutation({
+    mutationFn: () => api.enregistrerBranches(carrefour.id, pourEnregistrer(configuration)),
     onSuccess: async (resultat) => {
       queryClient.setQueryData(['branches', carrefour.id], resultat)
-      setBrouillon(null)
-      setModifie(false)
+      setBrouillonBranches(null)
+      await queryClient.invalidateQueries({ queryKey: ['lignes', carrefour.id] })
     },
   })
 
-  const detecter = () => {
-    if (branches.length === 0 || window.confirm('Remplacer les branches actuelles par la proposition OSM ?')) {
-      detection.mutate()
-    }
-  }
+  // ── Étape 2 : lignes de feux ──
+  const lignesEnregistrees = useQuery({
+    queryKey: ['lignes', carrefour.id],
+    queryFn: () => api.lignes(carrefour.id),
+  })
+  const [brouillonLignes, setBrouillonLignes] = useState<BrouillonLignes | null>(null)
+  const lignesEnregistreesData = lignesEnregistrees.data
+  const lignes: BrouillonLignes = useMemo(
+    () =>
+      brouillonLignes ?? {
+        lignes: lignesEnregistreesData?.lignes ?? [],
+        conflits_admis: lignesEnregistreesData?.conflits_admis ?? [],
+      },
+    [brouillonLignes, lignesEnregistreesData],
+  )
+  const [ligneActive, setLigneActive] = useState<string | null>(null)
 
-  const { mouvements, alertes } = calculerMouvements(branches)
+  const enregistrementLignes = useMutation({
+    mutationFn: () => api.enregistrerLignes(carrefour.id, lignes),
+    onSuccess: (resultat) => {
+      queryClient.setQueryData(['lignes', carrefour.id], resultat)
+      setBrouillonLignes(null)
+      setLigneActive(null)
+    },
+  })
+
+  // Actions venues de la carte : clic sur un feu (lignes), glisser-déposer (branches).
+  useImperativeHandle(
+    ref,
+    () => ({
+      deplacerPoignee: (poignee, position) => setBrouillonBranches(deplacerPoignee(configuration, poignee, position)),
+      connecter: (de, vers) => setBrouillonBranches(basculerConnexion(configuration, de, vers)),
+      clicFeu: (feu) => {
+        if (onglet !== 'lignes' || !ligneActive || feu.carrefour_id !== carrefour.id) return
+        setBrouillonLignes({
+          ...lignes,
+          lignes: lignes.lignes.map((l) =>
+            l.code !== ligneActive
+              ? l
+              : { ...l, feux: l.feux.includes(feu.id) ? l.feux.filter((f) => f !== feu.id) : [...l.feux, feu.id] },
+          ),
+        })
+      },
+    }),
+    [onglet, ligneActive, lignes, carrefour.id, configuration],
+  )
+
+  // Ce que la carte doit montrer.
+  const feuxSurlignes =
+    onglet === 'lignes' && ligneActive ? (lignes.lignes.find((l) => l.code === ligneActive)?.feux ?? AUCUN_FEU) : AUCUN_FEU
+  const modeCarte = onglet === 'branches' ? mode : null
+  const mouvementsActifs =
+    onglet === 'lignes' && ligneActive ? lignes.lignes.find((l) => l.code === ligneActive)?.mouvements : undefined
+  const connexionsSurlignees = useMemo(
+    () =>
+      mouvementsActifs
+        ? configuration.connexions
+            .filter((c) => mouvementsActifs.includes(`${c.de.split(':')[0]}>${c.vers.split(':')[0]}`))
+            .map((c) => `${c.de}>${c.vers}`)
+        : AUCUN_FEU,
+    [mouvementsActifs, configuration.connexions],
+  )
+  useEffect(
+    () =>
+      onAffichage({ branches, connexions: configuration.connexions, mode: modeCarte, feuxSurlignes, connexionsSurlignees }),
+    [branches, configuration.connexions, modeCarte, feuxSurlignes, connexionsSurlignees, onAffichage],
+  )
+
+  const modifie = brouillonBranches !== null || brouillonLignes !== null
+  const erreur = [detection, enregistrementBranches, enregistrementLignes].find((m) => m.error)?.error
 
   return (
     <div className="configuration">
       <h2>Configuration · {carrefour.nom}</h2>
-      <p>
-        <strong>Étape 1 : branches et voies.</strong> Vérifiez chaque rue qui arrive au carrefour et les
-        flèches de ses voies, de gauche à droite en arrivant.
-      </p>
-
-      <div className="actions">
-        <button onClick={detecter} disabled={detection.isPending}>
-          {detection.isPending ? 'Détection…' : 'Détecter depuis OSM'}
+      <div className="onglets" role="tablist">
+        <button role="tab" aria-selected={onglet === 'branches'} onClick={() => setOnglet('branches')}>
+          1. Branches
         </button>
         <button
-          className="principal"
-          onClick={() => enregistrement.mutate()}
-          disabled={!modifie || enregistrement.isPending}
+          role="tab"
+          aria-selected={onglet === 'lignes'}
+          onClick={() => {
+            setOnglet('lignes')
+            setLigneActive(null)
+          }}
         >
-          {enregistrement.isPending ? 'Enregistrement…' : 'Enregistrer'}
+          2. Lignes de feux
         </button>
+      </div>
+
+      {onglet === 'branches' ? (
+        <>
+          <p>
+            Calez les voies de chaque rue sur la photo aérienne, puis reliez les voies entrantes aux voies sortantes.
+          </p>
+          <div className="actions">
+            <button
+              onClick={() => {
+                if (branches.length === 0 || window.confirm('Remplacer les branches actuelles par la proposition OSM ?')) {
+                  detection.mutate()
+                }
+              }}
+              disabled={detection.isPending}
+            >
+              {detection.isPending ? 'Détection…' : 'Détecter depuis OSM'}
+            </button>
+            <button
+              className="principal"
+              onClick={() => enregistrementBranches.mutate()}
+              disabled={brouillonBranches === null || enregistrementBranches.isPending}
+            >
+              Enregistrer les branches
+            </button>
+          </div>
+          {brouillonBranches && <p className="a-enregistrer">Branches non enregistrées</p>}
+          {branchesEnregistrees.isPending ? (
+            <p>Chargement…</p>
+          ) : (
+            <OngletBranches
+              brouillon={configuration}
+              centre={centre}
+              sources={sources}
+              mode={mode}
+              onMode={setMode}
+              onChanger={setBrouillonBranches}
+            />
+          )}
+        </>
+      ) : (
+        <>
+          <p>
+            Regroupez les mouvements par <strong>ligne de feux</strong> (les feux qui changent toujours ensemble) et
+            indiquez les feux physiques qui les affichent.
+          </p>
+          {brouillonBranches && (
+            <p className="a-enregistrer">Les branches ont des modifications non enregistrées : les lignes utilisent la version enregistrée.</p>
+          )}
+          <div className="actions">
+            <button
+              className="principal"
+              onClick={() => enregistrementLignes.mutate()}
+              disabled={brouillonLignes === null || enregistrementLignes.isPending}
+            >
+              Enregistrer les lignes
+            </button>
+          </div>
+          {brouillonLignes && <p className="a-enregistrer">Lignes non enregistrées</p>}
+          {lignesEnregistrees.data?.alertes.map((alerte) => (
+            <p key={alerte} className="etat-erreur">
+              {alerte}
+            </p>
+          ))}
+          {lignesEnregistrees.isPending ? (
+            <p>Chargement…</p>
+          ) : (
+            enregistre && (
+            <OngletLignes
+              configuration={enregistre}
+              brouillon={lignes}
+              onChanger={setBrouillonLignes}
+              ligneActive={ligneActive}
+              onActiver={setLigneActive}
+            />
+            )
+          )}
+        </>
+      )}
+
+      {erreur && <p className="etat-erreur">{erreur.message}</p>}
+
+      <div className="actions">
         <button
           onClick={() => {
             if (!modifie || window.confirm('Abandonner les modifications non enregistrées ?')) onFermer()
@@ -102,171 +264,6 @@ export function PanneauConfiguration({ carrefour, onBrouillon, onFermer }: Props
           Fermer
         </button>
       </div>
-      {detection.error && <p className="etat-erreur">{detection.error.message}</p>}
-      {enregistrement.error && <p className="etat-erreur">{enregistrement.error.message}</p>}
-      {modifie && <p className="a-enregistrer">Modifications non enregistrées</p>}
-
-      {enregistrees.isPending && <p>Chargement…</p>}
-      {!enregistrees.isPending && branches.length === 0 && (
-        <p>Aucune branche. Lancez la détection depuis OpenStreetMap, puis corrigez la proposition.</p>
-      )}
-
-      {branches.map((branche, index) => (
-        <CarteBranche
-          key={`${index}-${branche.osm_way_id ?? 'manuelle'}`}
-          branche={branche}
-          source={sources[branche.code]}
-          onChanger={(b) => changerBranche(index, b)}
-          onSupprimer={() => changer(branches.filter((_, i) => i !== index))}
-        />
-      ))}
-
-      {branches.length > 0 && (
-        <>
-          <h3>Mouvements déduits ({mouvements.length})</h3>
-          <ul className="mouvements">
-            {mouvements.map((m) => (
-              <li key={`${m.origine}>${m.destination}`}>
-                <strong>
-                  {m.origine} → {m.destination}
-                </strong>{' '}
-                {DIRECTIONS[m.direction]} · voie{m.voies.length > 1 ? 's' : ''} {m.voies.map((v) => v + 1).join(', ')}
-              </li>
-            ))}
-          </ul>
-          {alertes.map((a) => (
-            <p key={`${a.branche}-${a.rang}-${a.direction}`} className="etat-erreur">
-              {a.branche}, voie {a.rang + 1} : flèche « {DIRECTIONS[a.direction]} » sans sortie correspondante
-            </p>
-          ))}
-        </>
-      )}
     </div>
-  )
-}
-
-interface PropsBranche {
-  branche: Branche
-  source: 'osm' | 'defaut' | undefined
-  onChanger: (branche: Branche) => void
-  onSupprimer: () => void
-}
-
-function CarteBranche({ branche, source, onChanger, onSupprimer }: PropsBranche) {
-  const entrante = branche.sens !== 'sortant'
-
-  const changerSens = (sens: SensBranche) =>
-    onChanger({
-      ...branche,
-      sens,
-      voies:
-        sens === 'sortant'
-          ? []
-          : branche.voies.length > 0
-            ? branche.voies
-            : [{ rang: 0, mouvements: ['gauche', 'tout_droit', 'droite'], type: 'generale' }],
-    })
-
-  const basculerFleche = (rang: number, direction: Mouvement) =>
-    onChanger({
-      ...branche,
-      voies: branche.voies.map((v) =>
-        v.rang !== rang
-          ? v
-          : {
-              ...v,
-              mouvements: v.mouvements.includes(direction)
-                ? v.mouvements.filter((d) => d !== direction)
-                : [...v.mouvements, direction],
-            },
-      ),
-    })
-
-  return (
-    <section className="branche">
-      <div className="branche-entete">
-        <input
-          className="code"
-          value={branche.code}
-          aria-label="Code de la branche"
-          onChange={(e) => onChanger({ ...branche, code: e.target.value.toUpperCase().slice(0, 4) })}
-        />
-        <input
-          value={branche.nom ?? ''}
-          placeholder="Nom de la rue"
-          aria-label="Nom de la rue"
-          onChange={(e) => onChanger({ ...branche, nom: e.target.value || null })}
-        />
-        <button className="danger" title="Supprimer la branche" onClick={onSupprimer}>
-          ✕
-        </button>
-      </div>
-      <div className="branche-ligne">
-        <select value={branche.sens} onChange={(e) => changerSens(e.target.value as SensBranche)}>
-          <option value="double">Double sens</option>
-          <option value="entrant">Entrant seulement</option>
-          <option value="sortant">Sortant seulement</option>
-        </select>
-        <span className="discret">{Math.round(branche.azimut)}°</span>
-        {branche.sens !== 'entrant' && (
-          <label className="en-ligne">
-            voies sortantes
-            <input
-              type="number"
-              min={0}
-              max={9}
-              value={branche.voies_sortantes}
-              onChange={(e) => onChanger({ ...branche, voies_sortantes: Number(e.target.value) })}
-            />
-          </label>
-        )}
-      </div>
-
-      {entrante && (
-        <>
-          <div className="voies">
-            {branche.voies.map((voie) => (
-              <div key={voie.rang} className="voie" title={`Voie ${voie.rang + 1}`}>
-                {FLECHES.map(({ direction, symbole, titre }) => (
-                  <button
-                    key={direction}
-                    className={voie.mouvements.includes(direction) ? 'fleche active' : 'fleche'}
-                    title={titre}
-                    aria-pressed={voie.mouvements.includes(direction)}
-                    onClick={() => basculerFleche(voie.rang, direction)}
-                  >
-                    {symbole}
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
-          <div className="actions">
-            <button
-              onClick={() =>
-                onChanger({
-                  ...branche,
-                  voies: [...branche.voies, { rang: branche.voies.length, mouvements: ['tout_droit'], type: 'generale' }],
-                })
-              }
-              disabled={branche.voies.length >= 10}
-            >
-              + voie
-            </button>
-            <button
-              onClick={() => onChanger({ ...branche, voies: branche.voies.slice(0, -1) })}
-              disabled={branche.voies.length <= 1}
-            >
-              − voie
-            </button>
-            {source && (
-              <span className={source === 'osm' ? 'badge osm' : 'badge defaut'}>
-                {source === 'osm' ? 'flèches OSM' : 'flèches par défaut, à vérifier'}
-              </span>
-            )}
-          </div>
-        </>
-      )}
-    </section>
   )
 }

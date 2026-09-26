@@ -1,8 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { Bbox, Branche, CarrefourResume, FeuResume } from '@voirie/schema'
-import { useState } from 'react'
+import type { Bbox, CarrefourResume, FeuResume } from '@voirie/schema'
+import { useCallback, useRef, useState } from 'react'
 import { api } from './api'
-import { PanneauConfiguration } from './configuration/PanneauConfiguration'
+import {
+  PanneauConfiguration,
+  type AffichageConfiguration,
+  type PanneauConfigurationHandle,
+} from './configuration/PanneauConfiguration'
 import { PanneauEdition, type Edition } from './edition/PanneauEdition'
 import { CarteCarrefours } from './map/CarteCarrefours'
 
@@ -13,7 +17,23 @@ function App() {
   const [configuration, setConfiguration] = useState<{ carrefour: CarrefourResume; position: [number, number] } | null>(
     null,
   )
-  const [branchesDessinees, setBranchesDessinees] = useState<Branche[]>([])
+  const [affichageConfiguration, setAffichageConfiguration] = useState<AffichageConfiguration>({
+    branches: [],
+    connexions: [],
+    mode: null,
+    feuxSurlignes: [],
+    connexionsSurlignees: [],
+  })
+  const panneauConfiguration = useRef<PanneauConfigurationHandle>(null)
+  // Relais stables des gestes de la carte vers le panneau de configuration.
+  const deplacerPoignee = useCallback<PanneauConfigurationHandle['deplacerPoignee']>(
+    (poignee, position) => panneauConfiguration.current?.deplacerPoignee(poignee, position),
+    [],
+  )
+  const connecter = useCallback<PanneauConfigurationHandle['connecter']>(
+    (de, vers) => panneauConfiguration.current?.connecter(de, vers),
+    [],
+  )
 
   const sante = useQuery({ queryKey: ['sante'], queryFn: api.sante, retry: false })
   const carrefours = useQuery({
@@ -117,7 +137,16 @@ function App() {
           setEdition(null)
           setConfiguration({ carrefour, position })
         }}
-        configuration={configuration && { position: configuration.position, branches: branchesDessinees }}
+        configuration={
+          configuration && {
+            carrefourId: configuration.carrefour.id,
+            position: configuration.position,
+            ...affichageConfiguration,
+          }
+        }
+        onClicFeuConfiguration={(feu) => panneauConfiguration.current?.clicFeu(feu)}
+        onDeplacerPoignee={deplacerPoignee}
+        onConnecter={connecter}
         onSupprimer={(carrefour) => {
           if (window.confirm(`Supprimer « ${carrefour.nom} » ? Ses feux redeviendront libres.`)) {
             supprimer.mutate(carrefour)
@@ -138,7 +167,8 @@ function App() {
           <PanneauConfiguration
             key={configuration.carrefour.id}
             carrefour={configuration.carrefour}
-            onBrouillon={setBranchesDessinees}
+            ref={panneauConfiguration}
+            onAffichage={setAffichageConfiguration}
             onFermer={() => setConfiguration(null)}
           />
         ) : edition ? (

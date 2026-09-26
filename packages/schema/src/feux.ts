@@ -26,16 +26,35 @@ export type Controleur = z.infer<typeof Controleur>;
 /** Code court d'une ligne de feux : F1, P2, V1… */
 export const CodeLigne = z.string().regex(/^[A-Z]{1,2}\d{1,2}$/);
 
-export const LigneFeux = z.object({
-  code: CodeLigne,
-  signal: Signal,
-  branche: z.string().min(1).max(8).optional(),
-  mouvements: z.array(Mouvement).default([]),
-  voies: z.number().int().min(1).max(6).optional(),
-  /** Piétons / vélos : code de la branche traversée. */
-  traverse: z.string().min(1).max(8).optional(),
-});
+/** Clé d'un mouvement : « branche d'origine>branche de destination », par exemple S>O. */
+export const CleMouvement = z.string().regex(/^[A-Z0-9]{1,4}>[A-Z0-9]{1,4}$/, 'Mouvement attendu sous la forme S>O');
+
+/**
+ * Ligne de feux (signal group) : les feux qui changent toujours ensemble.
+ * Véhicules, vélos, transports en commun : les mouvements commandés.
+ * Piétons (R12) : la branche traversée.
+ */
+export const LigneFeux = z
+  .object({
+    code: CodeLigne,
+    signal: Signal,
+    mouvements: z.array(CleMouvement).max(40).default([]),
+    traverse: z.string().regex(/^[A-Z0-9]{1,4}$/).nullable().default(null),
+    /** Feux physiques (table feu) qui affichent cette ligne. */
+    feux: z.array(z.uuid()).max(40).default([]),
+  })
+  .superRefine((ligne, ctx) => {
+    if (ligne.signal === 'R12') {
+      if (!ligne.traverse) ctx.addIssue({ code: 'custom', path: ['traverse'], message: 'Branche traversée manquante' });
+      if (ligne.mouvements.length) ctx.addIssue({ code: 'custom', path: ['mouvements'], message: 'Une ligne piétonne ne commande pas de mouvement' });
+    } else {
+      if (ligne.mouvements.length === 0) ctx.addIssue({ code: 'custom', path: ['mouvements'], message: 'Aucun mouvement commandé' });
+      if (ligne.traverse) ctx.addIssue({ code: 'custom', path: ['traverse'], message: 'Seule une ligne piétonne traverse une branche' });
+    }
+  });
 export type LigneFeux = z.infer<typeof LigneFeux>;
+
+export const typeLigne = (signal: Signal): 'vehicule' | 'pieton' => (signal === 'R12' ? 'pieton' : 'vehicule');
 
 /** Intervalle de vert [début, fin] en secondes depuis le début du cycle. */
 export const IntervalleVert = z

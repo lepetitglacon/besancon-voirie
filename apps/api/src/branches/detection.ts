@@ -3,7 +3,6 @@
  * carrefour — docs/CONFIGURATION.md §3. Logique pure (sans base), testée à part.
  */
 import { codesBranches, lireTurnLanes, voiesParDefaut, type Direction } from '@voirie/engine';
-import type { Branche } from '@voirie/schema';
 
 /** Point où une voie OSM traverse le cercle autour du carrefour. */
 export interface Passage {
@@ -109,8 +108,21 @@ function fusionner(groupe: BrancheBrute[]): BrancheBrute {
   };
 }
 
+/** Branche proposée : de quoi générer ses voies et proposer ses connexions. */
+export interface BrancheProposee {
+  code: string;
+  nom: string | null;
+  azimut: number;
+  osm_way_id: number;
+  /** Axe du centre vers le point de passage. */
+  geom: [number, number][];
+  /** Flèches de chaque voie entrante, rang 0 = la plus à gauche. */
+  fleches: Direction[][];
+  sortantes: number;
+}
+
 export interface Proposition {
-  branches: Branche[];
+  branches: BrancheProposee[];
   sources: Record<string, 'osm' | 'defaut'>;
 }
 
@@ -132,18 +144,17 @@ export function proposerBranches(passages: Passage[], centre: [number, number]):
   const codes = codesBranches(fusionnees.map((b) => b.azimut));
   const sources: Record<string, 'osm' | 'defaut'> = {};
 
-  const branches = fusionnees.map((b, i): Branche => {
+  const branches = fusionnees.map((b, i): BrancheProposee => {
     const code = codes[i]!;
     if (b.entrant) sources[code] = b.source;
     return {
       code,
       nom: b.nom,
       azimut: Math.round(b.azimut * 10) / 10,
-      sens: b.entrant && b.sortant ? 'double' : b.entrant ? 'entrant' : 'sortant',
-      voies_sortantes: b.voiesSortantes,
       osm_way_id: b.osmWayId,
       geom: [centre, [b.lon, b.lat]],
-      voies: b.voiesEntrantes.map((mouvements, rang) => ({ rang, mouvements, type: 'generale' })),
+      fleches: b.voiesEntrantes,
+      sortantes: b.voiesSortantes,
     };
   });
   return { branches, sources };

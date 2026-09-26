@@ -8,6 +8,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   real,
   smallint,
   text,
@@ -54,6 +55,8 @@ export const carrefour = pgTable(
     nature: natureCarrefour('nature').notNull().default('carrefour'),
     controleur: jsonb('controleur').$type<Partial<Controleur>>().notNull().default({}),
     presTram: boolean('pres_tram').notNull().default(false),
+    /** Paires de lignes en conflit tolérées (tourne-à-droite avec piétons…). */
+    conflitsAdmis: jsonb('conflits_admis').$type<Array<[string, string]>>().notNull().default([]),
     creeLe: creeLe(),
     modifieLe: timestamp('modifie_le', { withTimezone: true })
       .notNull()
@@ -86,6 +89,7 @@ export const feu = pgTable(
 
 export const sensBranche = pgEnum('sens_branche', ['entrant', 'sortant', 'double']);
 export const typeVoie = pgEnum('type_voie', ['generale', 'bus', 'velo', 'tram']);
+export const sensVoie = pgEnum('sens_voie', ['entrante', 'sortante']);
 
 /** Rue qui arrive au carrefour — docs/CONFIGURATION.md §3. */
 export const branche = pgTable(
@@ -100,15 +104,20 @@ export const branche = pgTable(
     osmWayId: bigint('osm_way_id', { mode: 'number' }),
     /** Degrés, sens horaire depuis le nord, du centre du carrefour vers la branche. */
     azimutDeg: real('azimut_deg'),
+    /** Déduit des voies à l'enregistrement. */
     sens: sensBranche('sens').notNull().default('double'),
-    voiesSortantes: smallint('voies_sortantes').notNull().default(1),
     /** Du centre du carrefour vers la branche. */
     geom: ligne('geom'),
+    /** Passage piéton en travers de la branche, d'un trottoir à l'autre. */
+    traversee: ligne('traversee'),
   },
   (t) => [unique().on(t.carrefourId, t.code)],
 );
 
-/** Voie entrante d'une branche : rang 0 = la plus à gauche dans le sens d'arrivée. */
+/**
+ * Voie d'une branche, dessinée sur la photo : rang 0 = la plus à gauche dans son sens de
+ * circulation ; `geom` = [bout côté carrefour, bout éloigné].
+ */
 export const voie = pgTable(
   'voie',
   {
@@ -116,13 +125,36 @@ export const voie = pgTable(
     brancheId: uuid('branche_id')
       .notNull()
       .references(() => branche.id, { onDelete: 'cascade' }),
+    sens: sensVoie('sens').notNull(),
     rang: smallint('rang').notNull(),
-    mouvements: text('mouvements').array().notNull(),
     type: typeVoie('type').notNull().default('generale'),
+    geom: ligne('geom').notNull(),
   },
-  (t) => [unique().on(t.brancheId, t.rang)],
+  (t) => [unique().on(t.brancheId, t.sens, t.rang)],
 );
 
+/** Connexion d'une voie entrante vers une voie sortante (« lane connector »). */
+export const connexion = pgTable(
+  'connexion',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    carrefourId: uuid('carrefour_id')
+      .notNull()
+      .references(() => carrefour.id, { onDelete: 'cascade' }),
+    voieEntreeId: uuid('voie_entree_id')
+      .notNull()
+      .references(() => voie.id, { onDelete: 'cascade' }),
+    voieSortieId: uuid('voie_sortie_id')
+      .notNull()
+      .references(() => voie.id, { onDelete: 'cascade' }),
+  },
+  (t) => [unique().on(t.voieEntreeId, t.voieSortieId)],
+);
+
+/**
+ * Ligne de feux (signal group) — docs/CONFIGURATION.md §4. `mouvements` : clés « S>O » des
+ * mouvements commandés ; `traverse` : branche traversée par une ligne piétonne (R12).
+ */
 export const ligneFeux = pgTable(
   'ligne_feux',
   {
@@ -132,16 +164,27 @@ export const ligneFeux = pgTable(
       .references(() => carrefour.id, { onDelete: 'cascade' }),
     code: text('code').notNull(),
     signal: text('signal').notNull(),
-    brancheCode: text('branche_code'),
     mouvements: text('mouvements')
       .array()
       .notNull()
       .default(sql`'{}'`),
-    voies: smallint('voies'),
     traverse: text('traverse'),
-    geom: geometry('geom', { type: 'point', mode: 'xy', srid: 4326 }),
   },
   (t) => [unique().on(t.carrefourId, t.code)],
+);
+
+/** Feux physiques qui affichent une ligne de feux. */
+export const ligneFeuxFeu = pgTable(
+  'ligne_feux_feu',
+  {
+    ligneFeuxId: uuid('ligne_feux_id')
+      .notNull()
+      .references(() => ligneFeux.id, { onDelete: 'cascade' }),
+    feuId: uuid('feu_id')
+      .notNull()
+      .references(() => feu.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.ligneFeuxId, t.feuId] })],
 );
 
 export const releve = pgTable(

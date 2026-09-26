@@ -3,8 +3,6 @@ import type {
   CircleLayerSpecification,
   RasterLayerSpecification,
   RasterSourceSpecification,
-  LineLayerSpecification,
-  SymbolLayerSpecification,
 } from 'react-map-gl/maplibre'
 
 export const COULEURS = {
@@ -76,35 +74,6 @@ export function coucheFeux(selection: string[], carrefourEdite: string | null, e
       'circle-stroke-color': ['case', ['==', ['get', 'present_osm'], false], '#c0392b', '#ffffff'],
     },
   }
-}
-
-/** Branches du carrefour en configuration : du centre vers chaque rue. */
-export const coucheBranches: LineLayerSpecification = {
-  id: 'branches',
-  type: 'line',
-  source: 'branches',
-  filter: ['==', ['geometry-type'], 'LineString'],
-  layout: { 'line-cap': 'round' },
-  paint: {
-    'line-color': COULEURS.selection,
-    'line-width': 5,
-    'line-opacity': 0.75,
-    'line-dasharray': ['case', ['==', ['get', 'sens'], 'sortant'], ['literal', [1, 1.5]], ['literal', [1, 0]]],
-  },
-}
-
-export const coucheCodesBranches: SymbolLayerSpecification = {
-  id: 'branches-codes',
-  type: 'symbol',
-  source: 'branches',
-  filter: ['==', ['geometry-type'], 'Point'],
-  layout: {
-    'text-field': ['get', 'code'],
-    'text-size': 15,
-    'text-font': ['Noto Sans Bold'],
-    'text-allow-overlap': true,
-  },
-  paint: { 'text-color': '#ffffff', 'text-halo-color': COULEURS.selection, 'text-halo-width': 3 },
 }
 
 /**

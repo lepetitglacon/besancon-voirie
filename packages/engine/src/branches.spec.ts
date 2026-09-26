@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  calculerMouvements,
   codeCardinal,
   codesBranches,
   directionMouvement,
   lireTurnLanes,
   normaliserAngle,
   voiesParDefaut,
-  type BrancheGeometrie,
 } from './branches.js';
 
 describe('angles et codes', () => {
@@ -44,45 +42,5 @@ describe('lireTurnLanes / voiesParDefaut', () => {
     expect(voiesParDefaut(1)).toEqual([['gauche', 'tout_droit', 'droite']]);
     expect(voiesParDefaut(3)).toEqual([['gauche', 'tout_droit'], ['tout_droit'], ['tout_droit', 'droite']]);
     expect(voiesParDefaut(0)).toEqual([]);
-  });
-});
-
-describe('calculerMouvements', () => {
-  const croix: BrancheGeometrie[] = [
-    { code: 'N', azimut: 0, sens: 'double', voies: [{ rang: 0, mouvements: ['gauche', 'tout_droit', 'droite'] }] },
-    { code: 'E', azimut: 90, sens: 'double', voies: [{ rang: 0, mouvements: ['tout_droit'] }] },
-    {
-      code: 'S',
-      azimut: 180,
-      sens: 'entrant',
-      voies: [
-        { rang: 0, mouvements: ['gauche'] },
-        { rang: 1, mouvements: ['tout_droit', 'droite'] },
-      ],
-    },
-    { code: 'O', azimut: 270, sens: 'sortant', voies: [] },
-  ];
-
-  it('déduit les mouvements des flèches, sans entrer par une branche sortante', () => {
-    const { mouvements, alertes } = calculerMouvements(croix);
-    expect(mouvements).toEqual([
-      { origine: 'N', destination: 'E', direction: 'gauche', voies: [0] },
-      { origine: 'N', destination: 'O', direction: 'droite', voies: [0] },
-      { origine: 'E', destination: 'O', direction: 'tout_droit', voies: [0] },
-      { origine: 'S', destination: 'O', direction: 'gauche', voies: [0] },
-      { origine: 'S', destination: 'N', direction: 'tout_droit', voies: [1] },
-      { origine: 'S', destination: 'E', direction: 'droite', voies: [1] },
-    ]);
-    // N tout droit mène au sud, qui est entrant seulement.
-    expect(alertes).toEqual([{ branche: 'N', rang: 0, direction: 'tout_droit' }]);
-  });
-
-  it('alimente toutes les sorties d’une même direction', () => {
-    const cinq: BrancheGeometrie[] = [
-      { code: 'S', azimut: 180, sens: 'entrant', voies: [{ rang: 0, mouvements: ['gauche'] }] },
-      { code: 'O', azimut: 270, sens: 'sortant', voies: [] },
-      { code: 'NO', azimut: 315, sens: 'sortant', voies: [] },
-    ];
-    expect(calculerMouvements(cinq).mouvements.map((m) => m.destination)).toEqual(['O', 'NO']);
   });
 });

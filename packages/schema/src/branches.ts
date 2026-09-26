@@ -4,48 +4,88 @@ import { Mouvement } from './feux.js';
 export const SensBranche = z.enum(['entrant', 'sortant', 'double']);
 export type SensBranche = z.infer<typeof SensBranche>;
 
+export const SensVoie = z.enum(['entrante', 'sortante']);
+export type SensVoie = z.infer<typeof SensVoie>;
+
 export const TypeVoie = z.enum(['generale', 'bus', 'velo', 'tram']);
 export type TypeVoie = z.infer<typeof TypeVoie>;
 
-/** Voie entrante : rang 0 = la plus à gauche dans le sens d'arrivée. */
+export const LonLat = z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]);
+/** Segment orienté : [bout côté carrefour, bout éloigné]. */
+export const SegmentGeo = z.tuple([LonLat, LonLat]);
+export type SegmentGeo = z.infer<typeof SegmentGeo>;
+
+export const CoordonneesLigne = z.array(LonLat).min(2).max(50);
+
+/**
+ * Voie d'une branche, dessinée sur la photo : rang 0 = la plus à gauche dans son sens de
+ * circulation. Les connexions partent du bout côté carrefour des voies entrantes et arrivent
+ * au bout côté carrefour des voies sortantes.
+ */
 export const Voie = z.object({
+  sens: SensVoie,
   rang: z.number().int().min(0).max(9),
-  mouvements: z.array(Mouvement).max(4),
   type: TypeVoie.default('generale'),
+  geom: SegmentGeo,
 });
 export type Voie = z.infer<typeof Voie>;
 
-export const CoordonneesLigne = z.array(z.tuple([z.number(), z.number()])).min(2).max(50);
+const CodeBranche = z.string().trim().regex(/^[A-Z0-9]{1,4}$/, 'Code en majuscules, 4 caractères au plus (N, NE, S2…)');
 
 export const Branche = z
   .object({
-    code: z.string().trim().regex(/^[A-Z0-9]{1,4}$/, 'Code en majuscules, 4 caractères au plus (N, NE, S2…)'),
+    code: CodeBranche,
     nom: z.string().trim().max(200).nullable().default(null),
     /** Degrés, sens horaire depuis le nord, du centre du carrefour vers la branche. */
     azimut: z.number().min(0).max(360),
-    sens: SensBranche,
-    voies_sortantes: z.number().int().min(0).max(9),
     osm_way_id: z.number().int().nullable().default(null),
-    /** Du centre du carrefour vers la branche, en [lon, lat]. */
+    /** Axe de la branche, du centre du carrefour vers la rue, en [lon, lat]. */
     geom: CoordonneesLigne.nullable().default(null),
-    voies: z.array(Voie).max(10),
+    voies: z.array(Voie).max(16),
+    /** Passage piéton en travers de la branche, d'un trottoir à l'autre. */
+    traversee: SegmentGeo.nullable().default(null),
   })
   .superRefine((branche, ctx) => {
-    const rangs = branche.voies.map((v) => v.rang);
-    if (new Set(rangs).size !== rangs.length) ctx.addIssue({ code: 'custom', path: ['voies'], message: 'Rangs de voie en double' });
-    if (branche.sens === 'sortant' && branche.voies.length > 0) {
-      ctx.addIssue({ code: 'custom', path: ['voies'], message: 'Une branche sortante n’a pas de voie entrante' });
+    for (const sens of SensVoie.options) {
+      const rangs = branche.voies.filter((v) => v.sens === sens).map((v) => v.rang).sort((a, b) => a - b);
+      if (rangs.some((rang, i) => rang !== i)) {
+        ctx.addIssue({ code: 'custom', path: ['voies'], message: `Rangs des voies ${sens}s non consécutifs depuis 0` });
+      }
     }
   });
 export type Branche = z.infer<typeof Branche>;
 
+/** Clé de voie : branche, e (entrante) ou s (sortante), rang. Exemple : S:e0. */
+export const CleVoie = z.string().regex(/^[A-Z0-9]{1,4}:[es]\d$/, 'Voie attendue sous la forme S:e0');
+
+export const Connexion = z.object({ de: CleVoie, vers: CleVoie });
+export type Connexion = z.infer<typeof Connexion>;
+
 export const ConfigurationBranches = z
-  .object({ branches: z.array(Branche).max(12) })
-  .superRefine(({ branches }, ctx) => {
+  .object({
+    branches: z.array(Branche).max(12),
+    connexions: z.array(Connexion).max(300).default([]),
+  })
+  .superRefine(({ branches, connexions }, ctx) => {
     const codes = branches.map((b) => b.code);
     if (new Set(codes).size !== codes.length) {
       ctx.addIssue({ code: 'custom', path: ['branches'], message: 'Codes de branche en double' });
     }
+    const voies = new Set(
+      branches.flatMap((b) => b.voies.map((v) => `${b.code}:${v.sens === 'entrante' ? 'e' : 's'}${v.rang}`)),
+    );
+    const vues = new Set<string>();
+    connexions.forEach((c, i) => {
+      if (!c.de.includes(':e') || !voies.has(c.de)) {
+        ctx.addIssue({ code: 'custom', path: ['connexions', i, 'de'], message: `${c.de} n'est pas une voie entrante` });
+      }
+      if (!c.vers.includes(':s') || !voies.has(c.vers)) {
+        ctx.addIssue({ code: 'custom', path: ['connexions', i, 'vers'], message: `${c.vers} n'est pas une voie sortante` });
+      }
+      const cle = `${c.de}>${c.vers}`;
+      if (vues.has(cle)) ctx.addIssue({ code: 'custom', path: ['connexions', i], message: `Connexion ${cle} en double` });
+      vues.add(cle);
+    });
   });
 export type ConfigurationBranches = z.infer<typeof ConfigurationBranches>;
 
@@ -53,20 +93,30 @@ export interface MouvementCarrefour {
   origine: string;
   destination: string;
   direction: Mouvement;
+  /** Rangs des voies entrantes qui ont une connexion pour ce mouvement. */
   voies: number[];
 }
 
+export type BrancheLue = Branche & {
+  /** Déduit des voies : entrant, sortant ou double. */
+  sens: SensBranche;
+};
+
 export interface BranchesCarrefour {
-  branches: Branche[];
+  centre: [number, number];
+  branches: BrancheLue[];
+  connexions: Connexion[];
+  /** Mouvements déduits des connexions. */
   mouvements: MouvementCarrefour[];
-  /** Flèches qui ne mènent à aucune sortie. */
-  alertes: Array<{ branche: string; rang: number; direction: Mouvement }>;
+  /** Flèches de chaque voie entrante (clé de voie → directions), déduites des connexions. */
+  fleches: Record<string, Mouvement[]>;
+  /** Voies entrantes sans connexion, etc. */
+  alertes: string[];
 }
 
-/** Proposition de branches détectée depuis OSM, non enregistrée. */
+/** Proposition de branches, voies et connexions détectée depuis OSM, non enregistrée. */
 export interface DetectionBranches extends BranchesCarrefour {
-  centre: [number, number];
   rayon_m: number;
-  /** Par code de branche : d'où viennent les flèches des voies entrantes. */
+  /** Par code de branche : d'où viennent les flèches qui ont servi à proposer les connexions. */
   sources: Record<string, 'osm' | 'defaut'>;
 }
