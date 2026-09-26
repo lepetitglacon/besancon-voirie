@@ -4,6 +4,8 @@ import {
   contexteProgramme,
   degagementsRetenus,
   etatLigne,
+  simulerGraphe,
+  validerGraphe,
   type LonLat,
 } from '@voirie/engine'
 import type { Branche, BranchesCarrefour, CarrefourResume, Connexion, FeuResume, PlanSaisi } from '@voirie/schema'
@@ -14,6 +16,7 @@ import type { EtatFeu } from './calque/elements'
 import { basculerConnexion, deplacerPoignee, type Brouillon, type Poignee } from './modele'
 import { OngletBranches } from './OngletBranches'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
+import { OngletGraphe, type Scenario } from './OngletGraphe'
 import { OngletProgramme } from './OngletProgramme'
 import { feuxDesLignes, geometrieEnregistree, lignesPourMoteur, plansSaisis } from './programme'
 
@@ -45,7 +48,7 @@ export interface AffichageConfiguration {
   feux: { connexions: ReadonlyMap<string, EtatFeu>; traversees: ReadonlyMap<string, EtatFeu> } | null
 }
 
-type Onglet = 'branches' | 'lignes' | 'programme'
+type Onglet = 'branches' | 'lignes' | 'programme' | 'graphe'
 
 /** Ce que le parent peut demander au panneau : relayer un clic sur un feu de la carte. */
 export interface PanneauConfigurationHandle {
@@ -161,9 +164,35 @@ export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: 
         : null,
     [contexte, plan],
   )
-  const cycle = resultat?.cycle_s ?? 0
+
+  // ── Étape 4 : graphe des étapes et simulation d'un scénario de demandes ──
+  const [scenario, setScenario] = useState<Scenario>({ demandes: [], duree_s: 240 })
+  const simulation = useMemo(
+    () =>
+      onglet === 'graphe' && contexte && plan?.mode === 'cycle' && plan.etapes.length > 0
+        ? simulerGraphe({
+            ...contexte,
+            etapes: plan.etapes,
+            jaune_s: plan.jaune_s,
+            degagements: degagementsRetenus(contexte.degagements, plan.degagements),
+            arcs: plan.arcs,
+            demandes: scenario.demandes,
+            duree_s: scenario.duree_s,
+          })
+        : null,
+    [onglet, contexte, plan, scenario],
+  )
+  const erreurGraphe =
+    contexte && plan?.mode === 'cycle'
+      ? validerGraphe(plan.etapes, plan.arcs, contexte.lignes.map((l) => l.code)).some((c) => c.niveau === 'erreur')
+      : false
+
+  // Ce que lisent le curseur et la carte : le cycle calculé (onglet 3) ou la simulation (onglet 4).
+  const chronologie =
+    onglet === 'programme' && resultat ? { ...resultat, duree_s: resultat.cycle_s } : onglet === 'graphe' ? simulation : null
+  const cycle = chronologie?.duree_s ?? 0
   const instantCycle = cycle > 0 ? instant % cycle : 0
-  const erreurProgramme = resultat?.controles.some((c) => c.niveau === 'erreur') ?? false
+  const erreurProgramme = (resultat?.controles.some((c) => c.niveau === 'erreur') ?? false) || erreurGraphe
 
   const enregistrementProgramme = useMutation({
     mutationFn: () => api.enregistrerProgramme(carrefour.id, { plans }),
@@ -175,7 +204,7 @@ export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: 
 
   // Lecture du cycle : le curseur avance en temps réel (multiplié par la vitesse).
   useEffect(() => {
-    if (!vitesse || cycle <= 0 || onglet !== 'programme') return
+    if (!vitesse || cycle <= 0) return
     let precedent = performance.now()
     let image = requestAnimationFrame(function avancer(maintenant) {
       const ecoule = (maintenant - precedent) / 1000
@@ -224,8 +253,7 @@ export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: 
   )
   // État de chaque ligne à l'instant lu, résumé en une chaîne : la carte n'est redessinée
   // que lorsqu'un feu change de couleur, pas à chaque image de la lecture.
-  const etatsLignes =
-    onglet === 'programme' && resultat ? lignesFeux.map((l) => etatLigne(resultat, l.code, instantCycle)).join(',') : ''
+  const etatsLignes = chronologie ? lignesFeux.map((l) => etatLigne(chronologie, l.code, instantCycle)).join(',') : ''
   const connexionsEnregistrees = enregistre?.connexions ?? AUCUNE_CONNEXION
   const feux = useMemo(() => {
     if (!etatsLignes) return null
@@ -257,10 +285,20 @@ export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: 
             setLigneActive(null)
           }}
         >
-          2. Lignes de feux
+          2. Lignes
         </button>
         <button role="tab" aria-selected={onglet === 'programme'} onClick={() => setOnglet('programme')}>
           3. Programme
+        </button>
+        <button
+          role="tab"
+          aria-selected={onglet === 'graphe'}
+          onClick={() => {
+            setOnglet('graphe')
+            setInstant(0)
+          }}
+        >
+          4. Graphe
         </button>
       </div>
 
@@ -342,10 +380,17 @@ export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: 
         </>
       ) : (
         <>
-          <p>
-            Découpez le cycle en <strong>étapes</strong> : les lignes au vert ensemble, et pendant combien de temps. Le
-            jaune et les rouges de dégagement s'ajoutent entre les étapes.
-          </p>
+          {onglet === 'programme' ? (
+            <p>
+              Découpez le cycle en <strong>étapes</strong> : les lignes au vert ensemble, et pendant combien de temps. Le
+              jaune et les rouges de dégagement s'ajoutent entre les étapes.
+            </p>
+          ) : (
+            <p>
+              Le <strong>graphe des étapes</strong> décrit les feux à la demande : étapes servies sur appel (bouton
+              piéton, boucle), étapes prioritaires hors cycle (tram). La simulation le déroule sur un scénario.
+            </p>
+          )}
           {brouillonLignes && (
             <p className="a-enregistrer">Les lignes ont des modifications non enregistrées : le programme utilise la version enregistrée.</p>
           )}
@@ -370,6 +415,24 @@ export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: 
             ))}
           {programmeEnregistre.isPending || !contexte ? (
             <p>Chargement…</p>
+          ) : onglet === 'graphe' ? (
+            <OngletGraphe
+              contexte={contexte}
+              plans={plans}
+              onChanger={setBrouillonProgramme}
+              planActif={planActif}
+              onPlanActif={(index) => {
+                setPlanActif(index)
+                setInstant(0)
+              }}
+              scenario={scenario}
+              onScenario={setScenario}
+              simulation={simulation}
+              instant={instantCycle}
+              onInstant={setInstant}
+              vitesse={vitesse}
+              onVitesse={setVitesse}
+            />
           ) : (
             <OngletProgramme
               contexte={contexte}

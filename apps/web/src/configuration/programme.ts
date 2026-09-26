@@ -16,6 +16,7 @@ import {
   type Connexion,
   type Jour,
   type LigneFeux,
+  type ArcGraphe,
   type Plage,
   type PlanEtapes,
   type PlanProgramme,
@@ -68,6 +69,7 @@ export function nouveauPlan(plans: readonly PlanSaisi[], contexte: ContexteProgr
     jaune_s: 3,
     etapes: proposerEtapes(contexte.lignes, contexte.conflits),
     degagements: {},
+    arcs: [],
   }
 }
 
@@ -100,12 +102,78 @@ export function basculerLigneEtape(plan: PlanEtapes, index: number, code: string
   }
 }
 
+/** Échange deux étapes, en suivant leurs arcs. */
 export function deplacerEtape(plan: PlanEtapes, index: number, decalage: -1 | 1): PlanEtapes {
   const cible = index + decalage
   if (cible < 0 || cible >= plan.etapes.length) return plan
   const etapes = [...plan.etapes]
   ;[etapes[index], etapes[cible]] = [etapes[cible]!, etapes[index]!]
-  return { ...plan, etapes }
+  const suivre = (i: number) => (i === index ? cible : i === cible ? index : i)
+  return { ...plan, etapes, arcs: plan.arcs.map((a) => ({ ...a, de: suivre(a.de), vers: suivre(a.vers) })) }
+}
+
+/** Retire une étape et les arcs qui la touchent ; les arcs suivants sont renumérotés. */
+export function retirerEtape(plan: PlanEtapes, index: number): PlanEtapes {
+  const suivre = (i: number) => (i > index ? i - 1 : i)
+  return {
+    ...plan,
+    etapes: plan.etapes.filter((_, i) => i !== index),
+    arcs: plan.arcs
+      .filter((a) => a.de !== index && a.vers !== index)
+      .map((a) => ({ ...a, de: suivre(a.de), vers: suivre(a.vers) })),
+  }
+}
+
+/** Met une étape sur appel d'une de ses lignes, ou la sert toujours (null). */
+export function changerAppel(plan: PlanEtapes, index: number, appel: string | null): PlanEtapes {
+  return { ...plan, etapes: plan.etapes.map((e, i) => (i === index ? { ...e, appel } : e)) }
+}
+
+/** Sort une étape du cycle de base (étape tram) ou l'y remet ; une étape hors cycle n'a pas d'appel. */
+export function basculerHorsCycle(plan: PlanEtapes, index: number): PlanEtapes {
+  return {
+    ...plan,
+    etapes: plan.etapes.map((e, i) => (i === index ? { ...e, hors_cycle: !e.hors_cycle, appel: null } : e)),
+  }
+}
+
+export function ajouterArc(plan: PlanEtapes, arc: ArcGraphe): PlanEtapes {
+  return { ...plan, arcs: [...plan.arcs, arc] }
+}
+
+export function modifierArc(plan: PlanEtapes, k: number, modification: Partial<ArcGraphe>): PlanEtapes {
+  return {
+    ...plan,
+    arcs: plan.arcs.map((a, j) => {
+      if (j !== k) return a
+      const arc = { ...a, ...modification }
+      return arc.demande === null ? { ...arc, anticipe: false } : arc
+    }),
+  }
+}
+
+export function retirerArc(plan: PlanEtapes, k: number): PlanEtapes {
+  return { ...plan, arcs: plan.arcs.filter((_, j) => j !== k) }
+}
+
+/**
+ * Priorité (tram, bus) : une étape hors cycle qui sert `ligne`, atteinte depuis chaque étape
+ * du cycle dès que `ligne` est demandée (en écourtant l'étape en cours) ; le cycle reprend
+ * ensuite après l'étape interrompue.
+ */
+export function ajouterPriorite(plan: PlanEtapes, ligne: string, duree_s = 12): PlanEtapes {
+  const index = plan.etapes.length
+  const base = plan.etapes.flatMap((e, i) => (e.hors_cycle ? [] : [i]))
+  // Une étape où la ligne est déjà au vert sert sa demande sans détour.
+  const depuis = base.filter((i) => !plan.etapes[i]!.lignes.includes(ligne))
+  return {
+    ...plan,
+    etapes: [...plan.etapes, { lignes: [ligne], duree_s, hors_cycle: true, appel: null }],
+    arcs: [
+      ...plan.arcs,
+      ...depuis.map((de) => ({ de, vers: index, demande: ligne, anticipe: true })),
+    ],
+  }
 }
 
 /** Rouge de dégagement saisi à la main ; null revient à la valeur calculée. */

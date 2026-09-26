@@ -131,6 +131,44 @@ describe('Programme par étapes (e2e)', () => {
     expect(rows).toEqual([{ code: 'jour', reference: { ligne: 'F1', t0: '2026-10-07T08:02:17.400+02:00' } }]);
   });
 
+  it('PUT /programme should store the stage graph and leave out-of-cycle stages from the base cycle', async () => {
+    const graphe = jour({
+      etapes: [
+        { lignes: ['F1', 'P1'], duree_s: 25 },
+        { lignes: ['F2'], duree_s: 15 },
+        { lignes: ['F3'], duree_s: 15, appel: 'F3' },
+        { lignes: ['F4'], duree_s: 15 },
+        { lignes: ['F2'], duree_s: 10, hors_cycle: true },
+      ],
+      arcs: [
+        { de: 0, vers: 4, demande: 'F2', anticipe: true },
+        { de: 4, vers: 1 },
+      ],
+    });
+    const sansHorsCycle = jour({ etapes: graphe.etapes.slice(0, 4) });
+    const reference = plan((await http().put(`/api/carrefours/${carrefourA}/programme`).send({ plans: [sansHorsCycle] }).expect(200)).body, 'jour');
+    const { body } = await http().put(`/api/carrefours/${carrefourA}/programme`).send({ plans: [graphe] }).expect(200);
+    const p = plan(body, 'jour');
+    expect(p).toMatchObject({ arcs: [{ de: 0, vers: 4, demande: 'F2', anticipe: true }, { de: 4, vers: 1, demande: null, anticipe: false }] });
+    expect(p).toMatchObject({ etapes: [{}, {}, { appel: 'F3' }, {}, { hors_cycle: true }] });
+    expect(p.cycle_s).toBe(reference.cycle_s);
+  });
+
+  it('PUT /programme should reject an arc whose demand the target stage does not serve', async () => {
+    const { body } = await http()
+      .put(`/api/carrefours/${carrefourA}/programme`)
+      .send({
+        plans: [
+          jour({
+            etapes: [...jour().etapes, { lignes: ['F2'], duree_s: 10, hors_cycle: true }],
+            arcs: [{ de: 0, vers: 4, demande: 'F3' }],
+          }),
+        ],
+      })
+      .expect(400);
+    expect(body.erreurs).toContain('Plan jour : Arc É1 → É5 : F3 doit être au vert dans É5 pour que sa demande soit servie');
+  });
+
   it('GET /programme should rebuild the stages of a plan entered as a signal diagram', async () => {
     await client.query(
       `INSERT INTO plan_feux (carrefour_id, code, mode, plages, cycle_s, jaune_s, lignes)

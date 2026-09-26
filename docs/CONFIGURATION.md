@@ -14,7 +14,7 @@
 3. [Étape 1 — Branches et voies](#3-étape-1--branches-et-voies)
 4. [Étape 2 — Lignes de feux et conflits](#4-étape-2--lignes-de-feux-et-conflits)
 5. [Étape 3 — Programme par étapes](#5-étape-3--programme-par-étapes)
-6. [Étape 4 — Graphes](#6-étape-4--graphes)
+6. [Étape 4 — Graphe des étapes et simulation](#6-étape-4--graphe-des-étapes-et-simulation)
 7. [Ce qu'OSM fournit déjà](#7-ce-quosm-fournit-déjà)
 8. [Découpage en worktrees](#8-découpage-en-worktrees)
 
@@ -31,8 +31,8 @@
  3. Lignes        groupes de feux : quels mouvements, quels feux physiques
         │         ⇒ matrice des conflits calculée (qui croise qui)
  4. Programme     étapes à la TM:PE : lignes au vert + durée ; jaune et dégagement ajoutés
-        │         ⇒ contrôle : jamais deux lignes en conflit au vert ensemble
- 5. Graphes       diagramme de feux (chronogramme) et graphe des étapes (feux actués, tram)
+        │         ⇒ contrôle : jamais deux lignes en conflit au vert ensemble ; chronogramme
+ 5. Graphe        étapes sur appel, étapes prioritaires (tram), arcs conditionnels ; simulation
 ```
 
 Même règle que pour la composition des carrefours : **rien n'est enregistré sans validation
@@ -286,7 +286,7 @@ autres périodes sont les étapes. L'API renvoie alors `etapes_deduites: true`.
 | Méthode | Route | Effet |
 |---|---|---|
 | GET | `/api/carrefours/:id/programme` | Plans (étapes saisies ou reconstruites, cycle), rouges de dégagement calculés, plans devenus incohérents |
-| PUT | `/api/carrefours/:id/programme` | Remplace les plans ; calcule et enregistre cycle et diagramme ; refuse un plan en erreur (`EditionGuard`). Un plan conservé garde sa référence de synchronisation (`reference`) |
+| PUT | `/api/carrefours/:id/programme` | Remplace les plans (étapes, arcs du graphe) ; calcule et enregistre cycle et diagramme ; refuse un plan en erreur, y compris dans son graphe (`EditionGuard`). Un plan conservé garde sa référence de synchronisation (`reference`) |
 
 ### Interface (onglet « 3. Programme »)
 
@@ -307,29 +307,73 @@ autres périodes sont les étapes. L'API renvoie alors `etapes_deduites: true`.
 - Le programme s'appuie sur les lignes **enregistrées** (comme les lignes sur les branches
   enregistrées).
 
-## 6. Étape 4 — Graphes
+## 6. Étape 4 — Graphe des étapes et simulation
 
 **Diagramme de feux** (chronogramme) : une ligne par ligne de feux, sur un cycle. C'est la
-forme enregistrée, comparée au terrain et envoyée à SUMO. Il est affiché dès l'étape 3
-(onglet « 3. Programme ») ; reste à le comparer aux relevés terrain.
+forme enregistrée (`plan_feux.lignes`), affichée dès l'étape 3 ; reste à la comparer aux
+relevés terrain quand le chrono existera.
+
+**Graphe des étapes** : nœuds = étapes, arcs = enchaînements possibles et leurs conditions.
+Indispensable pour les feux à la demande (bouton piéton, boucle de détection) et la
+**priorité tram** (48 carrefours à moins de 25 m d'une voie de tram), qu'un chronogramme seul
+ne décrit pas.
 
 ```text
-      0s        20        40        60        80s
-F1  ██████████████████▒░░░░░░░░░░░░░░░░░░░░░░░
-F3  ░░░░░░░░░░░░░░░░░░░░░██████████████████▒░░
-P1  ██████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-    █ vert  ▒ jaune  ░ rouge
+        ┌──────────── É1 : axe 34 s ◄──────────────┐
+        │  si T1 (écourte)     │                    │
+        ▼                      ▼                    │
+ [É-tram T1 12 s]      [É2 : piétons, sur appel P1] │ sans P1 : É2 sautée
+        │ reprise après        │                    │
+        │ l'étape interrompue  ▼                    │
+        └──────────────► É3 : transversale 20 s ────┘
 ```
 
-**Graphe des étapes** : nœuds = étapes, arcs = transitions et leurs conditions. Indispensable
-pour les feux actués (bouton piéton, détection) et la **priorité tram** (48 carrefours à
-moins de 25 m d'une voie de tram), qu'un chronogramme seul ne décrit pas.
+### Modèle (en plus de l'étape 3)
 
-```text
-[É1 : axe 34 s] ──> [É2 : transversale 20 s] ──> [É1]
-      │ tram détecté
-      └──> [É-tram : tram seul 12 s] ──> reprise en É2
-```
+- Une étape peut être **sur appel** d'une de ses lignes (`appel: "P1"`) : elle n'est servie
+  que si cette ligne est demandée, sinon on la saute.
+- Une étape peut être **hors cycle** (`hors_cycle: true`) : absente du cycle de base, elle
+  n'est atteinte que par un arc (étape tram).
+- **Arcs saisis** (`plan_feux.arcs`) : `{ de, vers, demande, anticipe }`. Depuis l'étape
+  `de`, aller à `vers` si la ligne `demande` est demandée ; `anticipe` écourte l'étape `de`
+  dès son vert minimal (6 s). Un arc sans demande remplace la suite du cycle.
+- À la fin d'une étape : premier arc saisi dont la demande est présente, sinon arc saisi sans
+  condition, sinon prochaine étape servie du cycle de base — après une étape hors cycle, celle
+  qui suit **l'étape interrompue**.
+- Une demande reste présente jusqu'à ce que sa ligne passe au vert.
+- Les transitions entre deux étapes quelconques se calculent comme à l'étape 3 (jaune, rouges
+  de dégagement, démarrages anticipés).
+- Le cycle de base enregistré (`cycle_s`, `lignes`) ignore les étapes hors cycle et compte les
+  étapes sur appel comme toujours demandées (cycle le plus long).
+
+### Contrôles du graphe (`validerGraphe`)
+
+| Niveau | Contrôle |
+|---|---|
+| erreur | étape 1 hors cycle ; toutes les étapes du cycle sur appel ; ligne d'appel inconnue ou pas au vert dans l'étape ; arc vers une étape inexistante ou vers elle-même ; ligne demandée inconnue, ou pas au vert dans l'étape d'arrivée (sa demande ne serait jamais servie) ; arc sans demande qui écourte |
+| avertissement | étape hors cycle jamais atteinte ; plusieurs arcs sans condition depuis une étape ; appel sur une étape hors cycle |
+
+### Simulation (`simulerGraphe`)
+
+Déroule le graphe sur une durée donnée, à partir du début de l'étape 1, avec un scénario de
+demandes `{ ligne, t }` (appui piéton, détection, tram). Sortie : étapes et transitions
+parcourues, diagramme de feux sur la durée, journal (« É2 sautée : pas d'appel P1 »,
+« Demande T1 : É1 écourtée à 8 s »), **attente de chaque demande** jusqu'au vert de sa ligne.
+C'est l'outil pour comparer des variantes de graphe sur un même scénario, en attendant SUMO.
+
+### Interface (onglet « 4. Graphe »)
+
+- Même plans que l'onglet 3, même brouillon, même bouton d'enregistrement.
+- **Graphe** : cycle de base sur un cercle, étapes hors cycle au centre ; arcs de suite (gris),
+  sauts d'étape sur appel (bleu pointillé), arcs sur demande (orange), durée de transition sur
+  chaque arc ; l'étape et l'arc en cours de simulation sont en vert.
+- **Étapes** : « toujours servie » ou « sur appel » d'une de ses lignes, case « hors cycle ».
+  « Ajouter une étape prioritaire » : étape hors cycle pour une ligne (tram, bus), atteinte
+  depuis chaque étape qui ne la sert pas déjà, en écourtant l'étape en cours.
+- **Arcs ajoutés** : départ, arrivée, condition, « écourte ».
+- **Simulation** : demandes (ligne, instant), durée ; chronogramme avec les demandes marquées,
+  curseur et lecture qui pilotent les feux sur la carte, tableau des attentes, journal
+  cliquable.
 
 ## 7. Ce qu'OSM fournit déjà
 
@@ -353,4 +397,4 @@ Les flèches sont donc **surtout à saisir à la main** : la détection propose,
 | `config-branches` | Étape 1, première version : branches et flèches par voie (remplacée par `config-lignes`) |
 | `config-lignes` | Étape 1 refondue (voies sur la photo, connexions, passages piétons) et étape 2 : lignes de feux, feux physiques, conflits géométriques |
 | `config-programme` | Étape 3 : plans et plages horaires, éditeur d'étapes, jaune et rouges de dégagement calculés, diagramme de feux et lecture du cycle sur la carte |
-| `config-graphes` | Étape 4 : graphe des étapes (feux actués, priorité tram), comparaison du diagramme avec les relevés terrain |
+| `config-graphes` | Étape 4 : graphe des étapes (étapes sur appel, priorité tram, arcs conditionnels) et simulation d'un scénario de demandes |

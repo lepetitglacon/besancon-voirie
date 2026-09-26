@@ -236,8 +236,9 @@ CREATE TABLE plan_feux (
   jaune_s       numeric(3,1),
   reference     jsonb,                          -- {ligne:"F1", t0:"2026-10-07T08:02:17.400+02:00"}
   lignes        jsonb,                          -- {"F1":[[0,34]], "F3":[[40,74]], …}
-  etapes        jsonb,                          -- [{lignes:["F1","P2"], duree_s:34}, …] (saisie de l'étape 3)
+  etapes        jsonb,                          -- [{lignes:["F1","P2"], duree_s:34, appel?:"P1", hors_cycle?:true}, …]
   degagements   jsonb NOT NULL DEFAULT '{}',    -- rouges saisis à la main {"F1>F2": 4}
+  arcs          jsonb NOT NULL DEFAULT '[]',    -- graphe des étapes [{de:0, vers:4, demande:"T1", anticipe:true}]
   source_releve uuid,                           -- relevé validé qui a produit ce plan
   UNIQUE (carrefour_id, code)
 );

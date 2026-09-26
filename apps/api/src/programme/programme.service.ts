@@ -5,11 +5,14 @@ import {
   contexteProgramme,
   degagementsRetenus,
   etapesDepuisDiagramme,
+  validerGraphe,
   type ContexteProgramme,
+  type ControleProgramme,
   type ResultatProgramme,
 } from '@voirie/engine';
 import {
   typeLigne,
+  type ArcGraphe,
   type ConfigurationProgramme,
   type Etape,
   type Plage,
@@ -33,6 +36,7 @@ type LignePlan = {
   lignes: Record<string, Array<[number, number]>> | null;
   etapes: Etape[] | null;
   degagements: Record<string, number>;
+  arcs: ArcGraphe[];
 };
 
 @Injectable()
@@ -63,11 +67,17 @@ export class ProgrammeService {
     });
   }
 
+  /** Erreurs bloquantes d'un plan : étapes (conflits), cycle de base, graphe des étapes. */
+  private erreurs(contexte: ContexteProgramme, plan: PlanEtapes, resultat: ResultatProgramme): ControleProgramme[] {
+    const codes = contexte.lignes.map((l) => l.code);
+    return [...resultat.controles, ...validerGraphe(plan.etapes, plan.arcs, codes)].filter((c) => c.niveau === 'erreur');
+  }
+
   /** Plans de feux du carrefour, avec leurs étapes (saisies, ou reconstruites depuis le diagramme). */
   async lire(carrefourId: string): Promise<ProgrammeCarrefour> {
     const contexte = await this.contexte(carrefourId);
     const { rows } = await this.db.execute<LignePlan>(sql`
-      SELECT code, mode, plages, cycle_s, jaune_s, lignes, etapes, degagements
+      SELECT code, mode, plages, cycle_s, jaune_s, lignes, etapes, degagements, arcs
       FROM plan_feux WHERE carrefour_id = ${carrefourId} ORDER BY code
     `);
     const plans = rows.map((r): PlanProgramme => {
@@ -80,15 +90,14 @@ export class ProgrammeService {
         jaune_s: r.jaune_s ?? 3,
         etapes: r.etapes ?? (r.lignes && r.cycle_s ? etapesDepuisDiagramme(r.lignes, r.cycle_s) : []),
         degagements: r.degagements,
+        arcs: r.arcs,
         cycle_s: r.cycle_s,
         etapes_deduites: deduites,
       };
     });
     const alertes = plans.flatMap((plan) =>
       plan.mode === 'cycle' && plan.etapes.length > 0
-        ? this.calculer(contexte, plan)
-            .controles.filter((c) => c.niveau === 'erreur')
-            .map((c) => `Plan ${plan.code} : ${c.message}`)
+        ? this.erreurs(contexte, plan, this.calculer(contexte, plan)).map((c) => `Plan ${plan.code} : ${c.message}`)
         : [],
     );
     return { plans, degagements: contexte.degagements, alertes };
@@ -107,7 +116,7 @@ export class ProgrammeService {
       if (plan.mode !== 'cycle') continue;
       const resultat = this.calculer(contexte, plan);
       calculs.set(plan.code, resultat);
-      erreurs.push(...resultat.controles.filter((c) => c.niveau === 'erreur').map((c) => `Plan ${plan.code} : ${c.message}`));
+      erreurs.push(...this.erreurs(contexte, plan, resultat).map((c) => `Plan ${plan.code} : ${c.message}`));
       if (resultat.cycle_s > CYCLE_MAX_S) erreurs.push(`Plan ${plan.code} : cycle de ${resultat.cycle_s} s, au-delà de ${CYCLE_MAX_S} s`);
     }
     if (erreurs.length > 0) throw new BadRequestException({ message: 'Programme invalide', erreurs });
@@ -125,14 +134,15 @@ export class ProgrammeService {
           lignes: JSON.stringify(Object.fromEntries(Object.entries(calcul!.verts).filter(([, v]) => v.length > 0))),
           etapes: JSON.stringify(plan.etapes),
           degagements: JSON.stringify(plan.degagements),
-        } : { cycle_s: null, jaune_s: null, lignes: null, etapes: null, degagements: '{}' };
+          arcs: JSON.stringify(plan.arcs),
+        } : { cycle_s: null, jaune_s: null, lignes: null, etapes: null, degagements: '{}', arcs: '[]' };
         await tx.execute(sql`
-          INSERT INTO plan_feux (carrefour_id, code, mode, plages, cycle_s, jaune_s, lignes, etapes, degagements)
+          INSERT INTO plan_feux (carrefour_id, code, mode, plages, cycle_s, jaune_s, lignes, etapes, degagements, arcs)
           VALUES (${carrefourId}, ${plan.code}, ${plan.mode}, ${JSON.stringify(plan.plages)}::jsonb, ${cycle.cycle_s},
-                  ${cycle.jaune_s}, ${cycle.lignes}::jsonb, ${cycle.etapes}::jsonb, ${cycle.degagements}::jsonb)
+                  ${cycle.jaune_s}, ${cycle.lignes}::jsonb, ${cycle.etapes}::jsonb, ${cycle.degagements}::jsonb, ${cycle.arcs}::jsonb)
           ON CONFLICT (carrefour_id, code) DO UPDATE SET
             mode = excluded.mode, plages = excluded.plages, cycle_s = excluded.cycle_s, jaune_s = excluded.jaune_s,
-            lignes = excluded.lignes, etapes = excluded.etapes, degagements = excluded.degagements
+            lignes = excluded.lignes, etapes = excluded.etapes, degagements = excluded.degagements, arcs = excluded.arcs
         `);
       }
     });

@@ -6,6 +6,7 @@ import {
   basculerLigneEtape,
   changerMode,
   deplacerEtape,
+  retirerEtape,
   JOURS,
   nouveauPlan,
   saisirDegagement,
@@ -188,7 +189,12 @@ export function OngletProgramme({ contexte, plans, onChanger, planActif, onPlanA
                     ))}
                     <span className="discret">t = {secondes(Math.floor(instant * 10) / 10)}</span>
                   </div>
-                  <Chronogramme resultat={resultat} lignes={contexte.lignes} instant={instant} onInstant={onInstant} />
+                  <Chronogramme
+                    chronologie={{ ...resultat, duree_s: resultat.cycle_s }}
+                    lignes={contexte.lignes}
+                    instant={instant}
+                    onInstant={onInstant}
+                  />
                   {resultat.controles.map((c) => (
                     <p key={c.message} className={c.niveau === 'erreur' ? 'etat-erreur' : 'a-enregistrer'}>
                       {c.message}
@@ -200,9 +206,9 @@ export function OngletProgramme({ contexte, plans, onChanger, planActif, onPlanA
 
               <h3>Étapes</h3>
               {plan.etapes.map((etape, i) => {
-                const calculee = resultat?.etapes[i]
+                const calculee = resultat?.etapes.find((e) => e.index === i)
                 const courante = calculee !== undefined && instant >= calculee.debut_s && instant < calculee.fin_s
-                const transition = resultat?.transitions[i]
+                const transition = resultat?.transitions.find((tr) => tr.de === i)
                 const inconnues = etape.lignes.filter((c) => !codes.includes(c))
                 return (
                   <div key={i}>
@@ -211,6 +217,8 @@ export function OngletProgramme({ contexte, plans, onChanger, planActif, onPlanA
                         <button className="lien titre-etape" title="Placer le curseur sur cette étape" onClick={() => calculee && onInstant(calculee.debut_s)}>
                           Étape {i + 1}
                         </button>
+                        {etape.hors_cycle && <span className="badge defaut">hors cycle</span>}
+                        {etape.appel && !etape.hors_cycle && <span className="badge osm">sur appel {etape.appel}</span>}
                         <label className="en-ligne">
                           <input
                             type="number"
@@ -238,7 +246,7 @@ export function OngletProgramme({ contexte, plans, onChanger, planActif, onPlanA
                           className="danger"
                           title="Supprimer l'étape"
                           disabled={plan.etapes.length === 1}
-                          onClick={() => changerPlan({ ...plan, etapes: plan.etapes.filter((_, j) => j !== i) })}
+                          onClick={() => changerPlan(retirerEtape(plan, i))}
                         >
                           ✕
                         </button>
@@ -278,7 +286,7 @@ export function OngletProgramme({ contexte, plans, onChanger, planActif, onPlanA
                           ` · ${transition.contrainte.vers} attend ${transition.contrainte.de} : ${
                             transition.contrainte.jaune_s ? `jaune ${transition.contrainte.jaune_s} s + ` : ''
                           }dégagement ${transition.contrainte.rouge_s} s`}
-                        {i === plan.etapes.length - 1 && ' · retour à l’étape 1'}
+                        {transition.vers !== i + 1 && ` · puis étape ${transition.vers + 1}`}
                       </p>
                     )}
                   </div>

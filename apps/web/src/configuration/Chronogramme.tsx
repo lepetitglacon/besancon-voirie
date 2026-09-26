@@ -1,11 +1,22 @@
-import type { LigneProgramme, ResultatProgramme } from '@voirie/engine'
+import type { Demande, EtapeCalculee, Intervalle, LigneProgramme } from '@voirie/engine'
 import type { PointerEvent } from 'react'
 
+/** Ce que le chronogramme dessine : un cycle calculé, ou une simulation du graphe des étapes. */
+export interface Chronologie {
+  duree_s: number
+  etapes: readonly EtapeCalculee[]
+  transitions: ReadonlyArray<{ debut_s: number; duree_s: number }>
+  verts: Readonly<Record<string, Intervalle[]>>
+  jaunes: Readonly<Record<string, Intervalle[]>>
+}
+
 interface Props {
-  resultat: ResultatProgramme
+  chronologie: Chronologie
   lignes: readonly LigneProgramme[]
   instant: number
   onInstant: (t: number) => void
+  /** Demandes d'un scénario de simulation, marquées sur la rangée de leur ligne. */
+  demandes?: readonly Demande[]
 }
 
 const LARGEUR = 400
@@ -17,12 +28,12 @@ const ECART = 4
 const HAUT_AXE = 16
 
 /**
- * Diagramme de feux (chronogramme) d'un plan : une rangée par ligne de feux sur un cycle,
+ * Diagramme de feux (chronogramme) : une rangée par ligne de feux sur un cycle (ou une simulation),
  * vert, jaune et rouge, avec les étapes au-dessus. Cliquer ou glisser place le curseur de
  * lecture, que la carte reflète.
  */
-export function Chronogramme({ resultat, lignes, instant, onInstant }: Props) {
-  const { cycle_s } = resultat
+export function Chronogramme({ chronologie: resultat, lignes, instant, onInstant, demandes = [] }: Props) {
+  const { duree_s: cycle_s } = resultat
   const largeurUtile = LARGEUR - MARGE_GAUCHE - MARGE_DROITE
   const x = (t: number) => MARGE_GAUCHE + (t / cycle_s) * largeurUtile
   const y = (rang: number) => HAUT_ETAPES + ECART + rang * (HAUT_LIGNE + ECART)
@@ -41,7 +52,7 @@ export function Chronogramme({ resultat, lignes, instant, onInstant }: Props) {
       className="chronogramme"
       viewBox={`0 0 ${LARGEUR} ${hauteur}`}
       role="img"
-      aria-label={`Diagramme de feux, cycle de ${cycle_s} s`}
+      aria-label={`Diagramme de feux sur ${cycle_s} s`}
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId)
         placer(e)
@@ -58,9 +69,11 @@ export function Chronogramme({ resultat, lignes, instant, onInstant }: Props) {
       {resultat.etapes.map((etape, i) => (
         <g key={`e${i}`} className="etape">
           <rect x={x(etape.debut_s)} y={0} width={x(etape.fin_s) - x(etape.debut_s)} height={HAUT_ETAPES} />
-          <text x={(x(etape.debut_s) + x(etape.fin_s)) / 2} y={HAUT_ETAPES / 2} textAnchor="middle" dominantBaseline="central">
-            É{i + 1}
-          </text>
+          {x(etape.fin_s) - x(etape.debut_s) >= 12 && (
+            <text x={(x(etape.debut_s) + x(etape.fin_s)) / 2} y={HAUT_ETAPES / 2} textAnchor="middle" dominantBaseline="central">
+              É{etape.index + 1}
+            </text>
+          )}
         </g>
       ))}
 
@@ -80,6 +93,15 @@ export function Chronogramme({ resultat, lignes, instant, onInstant }: Props) {
               </title>
             </rect>
           ))}
+          {demandes
+            .filter((d) => d.ligne === ligne.code && d.t <= cycle_s)
+            .map((d, k) => (
+              <path key={`d${k}`} className="demande" d={`M${x(d.t)},${y(rang) - 1} l4,${HAUT_LIGNE / 2 + 1} l-4,${HAUT_LIGNE / 2 + 1} l-4,${-HAUT_LIGNE / 2 - 1} Z`}>
+                <title>
+                  Demande {d.ligne} à {d.t} s
+                </title>
+              </path>
+            ))}
         </g>
       ))}
 

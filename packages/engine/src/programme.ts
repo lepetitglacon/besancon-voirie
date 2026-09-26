@@ -29,6 +29,10 @@ export interface LigneProgramme {
 export interface EtapeProgramme {
   lignes: readonly string[];
   duree_s: number;
+  /** Étape servie seulement si cette ligne est demandée (bouton piéton, boucle) — graphe.ts. */
+  appel?: string | null;
+  /** Étape hors du cycle de base, atteinte par un arc du graphe (priorité tram) — graphe.ts. */
+  hors_cycle?: boolean;
 }
 
 /** Étape produite par le moteur (proposition, reconstruction). */
@@ -50,6 +54,8 @@ export interface EntreeProgramme {
 }
 
 export interface EtapeCalculee {
+  /** Indice de l'étape dans le programme saisi. */
+  index: number;
   lignes: string[];
   /** Période où toutes les lignes de l'étape sont au vert. */
   debut_s: number;
@@ -90,7 +96,7 @@ const clePaire = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 const arrondi = (x: number) => Math.round(x * 1000) / 1000;
 
 /** Fusionne les intervalles qui se touchent ou se chevauchent. */
-function fusionner(intervalles: Intervalle[]): Intervalle[] {
+export function fusionner(intervalles: Intervalle[]): Intervalle[] {
   const tries = intervalles.filter(([a, b]) => b - a > EPSILON).sort((x, y) => x[0] - y[0]);
   const resultat: Intervalle[] = [];
   for (const [a, b] of tries) {
@@ -118,7 +124,7 @@ export function dureesDeVert(verts: readonly Intervalle[], cycle_s: number): num
 
 /** État d'une ligne à l'instant t du cycle. */
 export function etatLigne(
-  resultat: Pick<ResultatProgramme, 'verts' | 'jaunes' | 'cycle_s'>,
+  resultat: Pick<ResultatProgramme, 'verts' | 'jaunes'>,
   code: string,
   t: number,
 ): 'vert' | 'jaune' | 'rouge' {
@@ -129,14 +135,77 @@ export function etatLigne(
   return 'rouge';
 }
 
-/** Calcule le cycle, les transitions et le diagramme de feux d'un programme par étapes. */
-export function calculerProgramme(entree: EntreeProgramme): ResultatProgramme {
-  const { lignes, etapes, jaune_s, degagements } = entree;
-  const parCode = new Map(lignes.map((l) => [l.code, l]));
-  const enConflit = new Set(entree.conflits.map(([a, b]) => clePaire(a, b)));
-  const controles: ControleProgramme[] = [];
-  const jaune = (code: string) => (parCode.get(code)?.type === 'pieton' ? 0 : jaune_s);
+export type Transition = Pick<TransitionCalculee, 'duree_s' | 'arrets' | 'demarrages' | 'contrainte'>;
 
+/**
+ * Calcul d'une transition entre deux ensembles de lignes au vert : jaune des lignes qui
+ * s'arrêtent, attente de chaque ligne qui démarre (jaune + rouge de dégagement des lignes en
+ * conflit qui s'arrêtent), durée fixée par le couple le plus exigeant.
+ */
+export function preparerTransitions(
+  entree: Pick<EntreeProgramme, 'lignes' | 'jaune_s' | 'conflits' | 'degagements'>,
+): (courante: ReadonlySet<string>, suivante: ReadonlySet<string>) => Transition {
+  const parCode = new Map(entree.lignes.map((l) => [l.code, l]));
+  const enConflit = new Set(entree.conflits.map(([a, b]) => clePaire(a, b)));
+  const jaune = (code: string) => (parCode.get(code)?.type === 'pieton' ? 0 : entree.jaune_s);
+  return (courante, suivante) => {
+    const arrets = [...courante].filter((c) => !suivante.has(c));
+    const demarrages: Record<string, number> = {};
+    let duree = 0;
+    let contrainte: TransitionCalculee['contrainte'] = null;
+    for (const code of suivante) {
+      if (courante.has(code)) continue;
+      let attente = 0;
+      for (const arret of arrets) {
+        if (!enConflit.has(clePaire(arret, code))) continue;
+        const rouge = entree.degagements.get(cleDegagement(arret, code)) ?? PARAMETRES_CERTU.rougeDegagementDefaut;
+        const besoin = jaune(arret) + rouge;
+        attente = Math.max(attente, besoin);
+        if (!contrainte || besoin > duree) {
+          contrainte = { de: arret, vers: code, jaune_s: jaune(arret), rouge_s: rouge };
+          duree = besoin;
+        }
+      }
+      demarrages[code] = attente;
+    }
+    return { duree_s: duree, arrets, demarrages, contrainte };
+  };
+}
+
+/**
+ * Inscrit une étape puis la transition vers la suivante dans les intervalles de vert et de
+ * jaune ; renvoie l'instant de début de l'étape suivante.
+ */
+export function inscrireEtapeEtTransition(
+  diagramme: { verts: Map<string, Intervalle[]>; jaunes: Map<string, Intervalle[]> },
+  jaune: (code: string) => number,
+  courante: ReadonlySet<string>,
+  suivante: ReadonlySet<string>,
+  debut: number,
+  fin: number,
+  transition: Transition,
+): number {
+  const ajouter = (m: Map<string, Intervalle[]>, code: string, intervalle: Intervalle) => m.get(code)?.push(intervalle);
+  for (const code of courante) ajouter(diagramme.verts, code, [debut, fin]);
+  for (const code of suivante) {
+    if (courante.has(code)) ajouter(diagramme.verts, code, [fin, fin + transition.duree_s]);
+    else ajouter(diagramme.verts, code, [fin + transition.demarrages[code]!, fin + transition.duree_s]);
+  }
+  for (const code of transition.arrets) {
+    if (jaune(code) > 0) ajouter(diagramme.jaunes, code, [fin, fin + jaune(code)]);
+  }
+  return fin + transition.duree_s;
+}
+
+/** Contrôles communs à toutes les étapes : lignes inconnues, conflits dans une même étape. */
+export function controlerEtapes(
+  lignes: readonly LigneProgramme[],
+  etapes: readonly EtapeProgramme[],
+  conflits: ReadonlyArray<readonly [string, string]>,
+): ControleProgramme[] {
+  const parCode = new Map(lignes.map((l) => [l.code, l]));
+  const enConflit = new Set(conflits.map(([a, b]) => clePaire(a, b)));
+  const controles: ControleProgramme[] = [];
   etapes.forEach((etape, i) => {
     const inconnues = etape.lignes.filter((c) => !parCode.has(c));
     if (inconnues.length) controles.push({ niveau: 'erreur', message: `Étape ${i + 1} : ligne(s) inconnue(s) ${inconnues.join(', ')}` });
@@ -150,55 +219,46 @@ export function calculerProgramme(entree: EntreeProgramme): ResultatProgramme {
     }
     if (connues.length === 0) controles.push({ niveau: 'avertissement', message: `Étape ${i + 1} : aucune ligne au vert` });
   });
+  return controles;
+}
 
-  // ── Chronologie : étape 1, transition 1→2, étape 2, …, transition n→1 ──
-  const verts = new Map<string, Intervalle[]>(lignes.map((l) => [l.code, []]));
-  const jaunes = new Map<string, Intervalle[]>(lignes.map((l) => [l.code, []]));
-  const ajouter = (m: Map<string, Intervalle[]>, code: string, intervalle: Intervalle) => m.get(code)?.push(intervalle);
+/**
+ * Calcule le cycle de base, ses transitions et son diagramme de feux. Les étapes hors cycle
+ * (priorité tram) n'y figurent pas ; les étapes sur appel y figurent comme si elles étaient
+ * toujours demandées (cycle le plus long). Le fonctionnement à la demande se simule avec
+ * simulerGraphe (graphe.ts).
+ */
+export function calculerProgramme(entree: EntreeProgramme): ResultatProgramme {
+  const { lignes, etapes, jaune_s } = entree;
+  const parCode = new Map(lignes.map((l) => [l.code, l]));
+  const controles = controlerEtapes(lignes, etapes, entree.conflits);
+  const jaune = (code: string) => (parCode.get(code)?.type === 'pieton' ? 0 : jaune_s);
+  const transition = preparerTransitions(entree);
+
+  // ── Chronologie : étape 1, transition 1→2, étape 2, …, transition n→1 (cycle de base) ──
+  const diagramme = {
+    verts: new Map<string, Intervalle[]>(lignes.map((l) => [l.code, []])),
+    jaunes: new Map<string, Intervalle[]>(lignes.map((l) => [l.code, []])),
+  };
   const etapesCalculees: EtapeCalculee[] = [];
   const transitions: TransitionCalculee[] = [];
-  let t = 0;
+  const base = etapes.flatMap((e, index) => (e.hors_cycle ? [] : [index]));
+  if (base.length === 0 && etapes.length > 0) controles.push({ niveau: 'erreur', message: 'Aucune étape dans le cycle de base' });
   const ensembles = etapes.map((e) => new Set(e.lignes.filter((c) => parCode.has(c))));
-
-  etapes.forEach((etape, i) => {
+  let t = 0;
+  base.forEach((i, rang) => {
+    const etape = etapes[i]!;
     const courante = ensembles[i]!;
-    etapesCalculees.push({ lignes: [...courante], debut_s: t, fin_s: t + etape.duree_s });
-    for (const code of courante) ajouter(verts, code, [t, t + etape.duree_s]);
-    t += etape.duree_s;
-
-    const j = (i + 1) % etapes.length;
+    const j = base[(rang + 1) % base.length]!;
     const suivante = ensembles[j]!;
-    const arrets = [...courante].filter((c) => !suivante.has(c));
-    const demarrages: Record<string, number> = {};
-    let duree = 0;
-    let contrainte: TransitionCalculee['contrainte'] = null;
-    for (const code of suivante) {
-      if (courante.has(code)) continue;
-      let attente = 0;
-      for (const arret of arrets) {
-        if (!enConflit.has(clePaire(arret, code))) continue;
-        const rouge = degagements.get(cleDegagement(arret, code)) ?? PARAMETRES_CERTU.rougeDegagementDefaut;
-        const besoin = jaune(arret) + rouge;
-        attente = Math.max(attente, besoin);
-        if (!contrainte || besoin > duree) {
-          contrainte = { de: arret, vers: code, jaune_s: jaune(arret), rouge_s: rouge };
-          duree = besoin;
-        }
-      }
-      demarrages[code] = attente;
-    }
-    if (etapes.length > 1) {
-      for (const code of suivante) {
-        if (courante.has(code)) ajouter(verts, code, [t, t + duree]);
-        else ajouter(verts, code, [t + demarrages[code]!, t + duree]);
-      }
-      for (const code of arrets) {
-        if (jaune(code) > 0) ajouter(jaunes, code, [t, t + jaune(code)]);
-      }
-      transitions.push({ de: i, vers: j, debut_s: t, duree_s: duree, arrets, demarrages, contrainte });
-      t += duree;
-    }
+    etapesCalculees.push({ index: i, lignes: [...courante], debut_s: t, fin_s: t + etape.duree_s });
+    // Une seule étape : ses lignes restent au vert, sans transition.
+    const calcul = base.length > 1 ? transition(courante, suivante) : { duree_s: 0, arrets: [], demarrages: {}, contrainte: null };
+    const suite = inscrireEtapeEtTransition(diagramme, jaune, courante, base.length > 1 ? suivante : new Set(), t, t + etape.duree_s, calcul);
+    if (base.length > 1) transitions.push({ de: i, vers: j, debut_s: t + etape.duree_s, ...calcul });
+    t = suite;
   });
+  const { verts, jaunes } = diagramme;
 
   const cycle_s = arrondi(t);
   // Les intervalles qui débordent la fin du cycle (jaune de la dernière transition quand elle
@@ -225,9 +285,12 @@ export function calculerProgramme(entree: EntreeProgramme): ResultatProgramme {
       controles.push({ niveau: 'avertissement', message: `Étape ${i + 1} : ${etape.duree_s} s, moins que le vert minimal de ${p.vertMin} s` });
     }
   });
+  const horsCycle = new Set(etapes.filter((e) => e.hors_cycle).flatMap((e) => e.lignes));
   for (const ligne of lignes) {
     const durees = dureesDeVert(resultat.verts[ligne.code]!, cycle_s);
     if (durees.length === 0) {
+      // Une ligne servie seulement hors cycle (tram) n'apparaît pas dans le cycle de base.
+      if (horsCycle.has(ligne.code)) continue;
       controles.push({ niveau: 'avertissement', message: `${ligne.code} n'est jamais au vert` });
       continue;
     }

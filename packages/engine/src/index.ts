@@ -8,3 +8,4 @@ export * from './connexions.js';
 export * from './conflits.js';
 export * from './degagement.js';
 export * from './programme.js';
+export * from './graphe.js';

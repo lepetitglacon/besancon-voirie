@@ -515,7 +515,8 @@ métropole. Un simple mail au service Mobilité peut les obtenir, facultatif. Le
 - [x] Configuration, étape 2 : lignes de feux, feux physiques, matrice des conflits et conflits admis.
 - [x] Fond « Photo aérienne » (IGN BD ORTHO) pour vérifier voies et marquages.
 - [x] Configuration, étape 3 : plans de feux et plages horaires, programme par étapes, jaune et rouges de dégagement calculés sur la géométrie, diagramme de feux, lecture du cycle sur la carte.
-- [ ] Configuration, étape 4 : graphe des étapes (feux actués, priorité tram).
+- [x] Configuration, étape 4 : graphe des étapes (étapes sur appel, priorité tram, arcs conditionnels) et simulation d'un scénario de demandes (attentes, journal, lecture sur la carte).
+- [ ] Comparer le diagramme de feux aux relevés terrain (après le chrono).
 - [x] Carte MapLibre : carrefours colorés par statut, bulle avec nom, nature et tram.
 - [ ] Fiche carrefour avec diagramme de feux ; calcul des branches (`ST_Azimuth`).
 - [ ] `engine/` : capacité par ligne, contrôles de cohérence avec les relevés (phases et rouges de dégagement : faits à l'étape 3).

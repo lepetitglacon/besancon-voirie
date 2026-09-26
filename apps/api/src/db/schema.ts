@@ -16,7 +16,7 @@ import {
   unique,
   uuid,
 } from 'drizzle-orm/pg-core';
-import type { Controleur, Etape, IntervalleVert, Plage } from '@voirie/schema';
+import type { ArcGraphe, Controleur, Etape, IntervalleVert, Plage } from '@voirie/schema';
 
 // Tables du projet — voir docs/ARCHITECTURE.md §4.
 // Les tables issues d'OpenStreetMap (osm_*) sont gérées par l'import, pas par Drizzle.
@@ -225,6 +225,8 @@ export const planFeux = pgTable(
     etapes: jsonb('etapes').$type<Etape[]>(),
     /** Rouges de dégagement saisis à la main (« F1>F2 » → s), qui remplacent le calcul. */
     degagements: jsonb('degagements').$type<Record<string, number>>().notNull().default({}),
+    /** Arcs du graphe des étapes (priorité tram, retours), en plus du cycle de base. */
+    arcs: jsonb('arcs').$type<ArcGraphe[]>().notNull().default([]),
     sourceReleve: uuid('source_releve').references(() => releve.id, { onDelete: 'set null' }),
   },
   (t) => [unique().on(t.carrefourId, t.code)],

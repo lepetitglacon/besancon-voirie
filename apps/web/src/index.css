@@ -875,3 +875,155 @@ svg.chronogramme {
 .degagements input {
   width: 52px;
 }
+
+/* ── Onglet « 4. Graphe » ── */
+
+svg.graphe-etapes {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 6px;
+  font-size: 9px;
+}
+
+.graphe-etapes .noeud rect {
+  fill: var(--champ);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.graphe-etapes .noeud.appel rect {
+  stroke-dasharray: 4 3;
+}
+
+.graphe-etapes .noeud.hors-cycle rect {
+  stroke: #e08a1e;
+  fill: rgba(224, 138, 30, 0.1);
+}
+
+.graphe-etapes .noeud.courant rect {
+  stroke: #16a34a;
+  stroke-width: 3;
+  fill: rgba(34, 197, 94, 0.18);
+}
+
+.graphe-etapes .noeud .titre {
+  fill: var(--texte);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.graphe-etapes .noeud .lignes {
+  fill: var(--texte-doux);
+}
+
+.graphe-etapes .arc path {
+  fill: none;
+  stroke: var(--texte-doux);
+  stroke-width: 1.3;
+}
+
+.graphe-etapes .arc text {
+  fill: var(--texte);
+  paint-order: stroke;
+  stroke: var(--fond);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.graphe-etapes .arc.saut path {
+  stroke: var(--accent);
+  stroke-dasharray: 4 3;
+}
+
+.graphe-etapes .arc.demande path,
+.graphe-etapes .arc.reprise path {
+  stroke: #e08a1e;
+}
+
+.graphe-etapes .arc.reprise path {
+  stroke-dasharray: 4 3;
+}
+
+.graphe-etapes .arc.actif path {
+  stroke: #16a34a;
+  stroke-width: 2.5;
+}
+
+.graphe-etapes .fleche path {
+  fill: var(--texte-doux);
+}
+
+.graphe-etapes .fleche.saut path {
+  fill: var(--accent);
+}
+
+.graphe-etapes .fleche.demande path,
+.graphe-etapes .fleche.reprise path {
+  fill: #e08a1e;
+}
+
+.graphe-etapes .fleche.actif path {
+  fill: #16a34a;
+}
+
+.legende-saut {
+  color: var(--accent);
+}
+
+.legende-demande {
+  color: #e08a1e;
+}
+
+table.table-graphe {
+  margin-top: 4px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.table-graphe th,
+.table-graphe td {
+  padding: 2px 6px 2px 0;
+  text-align: left;
+}
+
+.table-graphe select {
+  font-size: 12px;
+}
+
+.arc-saisi {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.arc-saisi input[type='number'] {
+  width: 64px;
+}
+
+.chronogramme .demande {
+  fill: #2f6fd6;
+}
+
+.onglets button {
+  padding-right: 8px;
+  padding-left: 8px;
+  white-space: nowrap;
+}
+
+.en-ligne input[type='number'] {
+  width: 60px;
+}
+
+.graphe-etapes .noeud .reprise {
+  fill: #a15f0c;
+  font-size: 8px;
+}
+
+.chronogramme .demande {
+  stroke: #ffffff;
+  stroke-width: 1;
+}

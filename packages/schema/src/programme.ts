@@ -5,11 +5,26 @@ import { CodeLigne, PlanBase, PlanSansCycle, type Plage } from './feux.js';
 export const Etape = z.object({
   lignes: z.array(CodeLigne).max(40),
   duree_s: z.number().min(1).max(300),
+  /** Étape servie seulement si cette ligne est demandée (bouton piéton, boucle de détection). */
+  appel: CodeLigne.nullable().optional(),
+  /** Étape hors du cycle de base, atteinte seulement par un arc du graphe (priorité tram). */
+  hors_cycle: z.boolean().optional(),
 });
 export type Etape = z.infer<typeof Etape>;
 
 /** Couple « ligne qui s'arrête>ligne qui démarre » d'un rouge de dégagement, par exemple F1>F2. */
 export const CleDegagement = z.string().regex(/^[A-Z]{1,2}\d{1,2}>[A-Z]{1,2}\d{1,2}$/, 'Couple attendu sous la forme F1>F2');
+
+/** Arc du graphe des étapes (indices dans `etapes`) — docs/CONFIGURATION.md §6. */
+export const ArcGraphe = z.object({
+  de: z.int().min(0).max(15),
+  vers: z.int().min(0).max(15),
+  /** Ligne dont la demande déclenche l'arc ; null : arc sans condition (reprise du cycle). */
+  demande: CodeLigne.nullable().default(null),
+  /** Écourte l'étape de départ dès son vert minimal quand la demande arrive. */
+  anticipe: z.boolean().default(false),
+});
+export type ArcGraphe = z.infer<typeof ArcGraphe>;
 
 /** Plan à cycle saisi par étapes ; le moteur en déduit le cycle et le diagramme de feux. */
 export const PlanEtapes = PlanBase.extend({
@@ -18,6 +33,8 @@ export const PlanEtapes = PlanBase.extend({
   etapes: z.array(Etape).min(1).max(16),
   /** Rouges de dégagement saisis à la main : ils remplacent la valeur calculée. */
   degagements: z.record(CleDegagement, z.number().min(0).max(30)).default({}),
+  /** Arcs du graphe des étapes en plus du cycle de base. */
+  arcs: z.array(ArcGraphe).max(64).default([]),
 });
 export type PlanEtapes = z.infer<typeof PlanEtapes>;
 

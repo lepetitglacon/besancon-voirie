@@ -1,0 +1,1 @@
+ALTER TABLE "plan_feux" ADD COLUMN "arcs" jsonb DEFAULT '[]'::jsonb NOT NULL;
