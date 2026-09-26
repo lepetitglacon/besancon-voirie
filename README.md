@@ -514,11 +514,11 @@ métropole. Un simple mail au service Mobilité peut les obtenir, facultatif. Le
 - [x] Configuration, étape 1 : branches, voies calées sur la photo IGN, passages piétons, connexions entre voies par glisser-déposer (« lane connector » de TM:PE) ; flèches et mouvements déduits — voir [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 - [x] Configuration, étape 2 : lignes de feux, feux physiques, matrice des conflits et conflits admis.
 - [x] Fond « Photo aérienne » (IGN BD ORTHO) pour vérifier voies et marquages.
-- [ ] Configuration, étape 3 : programme par étapes, jaune et dégagement, diagramme de feux.
+- [x] Configuration, étape 3 : plans de feux et plages horaires, programme par étapes, jaune et rouges de dégagement calculés sur la géométrie, diagramme de feux, lecture du cycle sur la carte.
 - [ ] Configuration, étape 4 : graphe des étapes (feux actués, priorité tram).
 - [x] Carte MapLibre : carrefours colorés par statut, bulle avec nom, nature et tram.
 - [ ] Fiche carrefour avec diagramme de feux ; calcul des branches (`ST_Azimuth`).
-- [ ] `engine/` : phases, rouges de dégagement, capacité par ligne, contrôles de cohérence.
+- [ ] `engine/` : capacité par ligne, contrôles de cohérence avec les relevés (phases et rouges de dégagement : faits à l'étape 3).
 - [ ] Chrono de feux (PWA hors-ligne) → `POST /api/releves` → modération.
 - [ ] **Pilote** : relever entièrement **un axe de 4 à 6 carrefours consécutifs**, pour préparer la phase 1 bis.
 - [ ] Ouvrir les contributions (guide de relevé, écran de modération).

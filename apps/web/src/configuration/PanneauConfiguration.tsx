@@ -1,17 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { LonLat } from '@voirie/engine'
-import type { Branche, BranchesCarrefour, CarrefourResume, Connexion, FeuResume } from '@voirie/schema'
+import {
+  calculerProgramme,
+  contexteProgramme,
+  degagementsRetenus,
+  etatLigne,
+  type LonLat,
+} from '@voirie/engine'
+import type { Branche, BranchesCarrefour, CarrefourResume, Connexion, FeuResume, PlanSaisi } from '@voirie/schema'
 import { useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react'
 import { api } from '../api'
 import type { ModeEdition } from './calque/CalqueCarrefour'
+import type { EtatFeu } from './calque/elements'
 import { basculerConnexion, deplacerPoignee, type Brouillon, type Poignee } from './modele'
 import { OngletBranches } from './OngletBranches'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
+import { OngletProgramme } from './OngletProgramme'
+import { feuxDesLignes, geometrieEnregistree, lignesPourMoteur, plansSaisis } from './programme'
 
 /** Références stables : un `[]` littéral relancerait les effets de synchronisation à chaque rendu. */
 const AUCUNE_BRANCHE: Branche[] = []
 const AUCUNE_CONNEXION: Connexion[] = []
 const AUCUN_FEU: string[] = []
+const AUCUNE_LIGNE: never[] = []
 
 /** Ce qui s'enregistre : sans les champs déduits (sens des branches). */
 const pourEnregistrer = (brouillon: Brouillon) => ({
@@ -31,9 +41,11 @@ export interface AffichageConfiguration {
   feuxSurlignes: string[]
   /** Connexions de la ligne de feux active (« de>vers »), mises en avant sur la carte. */
   connexionsSurlignees: string[]
+  /** Lecture du programme : couleur du feu de chaque connexion et passage piéton. */
+  feux: { connexions: ReadonlyMap<string, EtatFeu>; traversees: ReadonlyMap<string, EtatFeu> } | null
 }
 
-type Onglet = 'branches' | 'lignes'
+type Onglet = 'branches' | 'lignes' | 'programme'
 
 /** Ce que le parent peut demander au panneau : relayer un clic sur un feu de la carte. */
 export interface PanneauConfigurationHandle {
@@ -82,6 +94,7 @@ export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: 
       queryClient.setQueryData(['branches', carrefour.id], resultat)
       setBrouillonBranches(null)
       await queryClient.invalidateQueries({ queryKey: ['lignes', carrefour.id] })
+      await queryClient.invalidateQueries({ queryKey: ['programme', carrefour.id] })
     },
   })
 
@@ -104,12 +117,74 @@ export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: 
 
   const enregistrementLignes = useMutation({
     mutationFn: () => api.enregistrerLignes(carrefour.id, lignes),
-    onSuccess: (resultat) => {
+    onSuccess: async (resultat) => {
       queryClient.setQueryData(['lignes', carrefour.id], resultat)
       setBrouillonLignes(null)
       setLigneActive(null)
+      await queryClient.invalidateQueries({ queryKey: ['programme', carrefour.id] })
     },
   })
+
+  // ── Étape 3 : programme par étapes (s'appuie sur les lignes enregistrées) ──
+  const programmeEnregistre = useQuery({
+    queryKey: ['programme', carrefour.id],
+    queryFn: () => api.programme(carrefour.id),
+  })
+  const [brouillonProgramme, setBrouillonProgramme] = useState<PlanSaisi[] | null>(null)
+  const programmeData = programmeEnregistre.data
+  const plans: PlanSaisi[] = useMemo(
+    () => brouillonProgramme ?? plansSaisis(programmeData?.plans ?? AUCUNE_LIGNE),
+    [brouillonProgramme, programmeData],
+  )
+  const [planActif, setPlanActif] = useState(0)
+  const [instant, setInstant] = useState(0)
+  /** Vitesse de lecture du cycle (×1, ×4…), null à l'arrêt. */
+  const [vitesse, setVitesse] = useState<number | null>(null)
+  const lignesFeux = lignesEnregistreesData?.lignes ?? AUCUNE_LIGNE
+  const contexte = useMemo(
+    () =>
+      enregistre && lignesEnregistreesData
+        ? contexteProgramme(lignesPourMoteur(lignesEnregistreesData.lignes), geometrieEnregistree(enregistre), lignesEnregistreesData.conflits_admis)
+        : null,
+    [enregistre, lignesEnregistreesData],
+  )
+  const plan = plans[planActif]
+  const resultat = useMemo(
+    () =>
+      contexte && plan?.mode === 'cycle' && plan.etapes.length > 0
+        ? calculerProgramme({
+            ...contexte,
+            etapes: plan.etapes,
+            jaune_s: plan.jaune_s,
+            degagements: degagementsRetenus(contexte.degagements, plan.degagements),
+          })
+        : null,
+    [contexte, plan],
+  )
+  const cycle = resultat?.cycle_s ?? 0
+  const instantCycle = cycle > 0 ? instant % cycle : 0
+  const erreurProgramme = resultat?.controles.some((c) => c.niveau === 'erreur') ?? false
+
+  const enregistrementProgramme = useMutation({
+    mutationFn: () => api.enregistrerProgramme(carrefour.id, { plans }),
+    onSuccess: (resultat) => {
+      queryClient.setQueryData(['programme', carrefour.id], resultat)
+      setBrouillonProgramme(null)
+    },
+  })
+
+  // Lecture du cycle : le curseur avance en temps réel (multiplié par la vitesse).
+  useEffect(() => {
+    if (!vitesse || cycle <= 0 || onglet !== 'programme') return
+    let precedent = performance.now()
+    let image = requestAnimationFrame(function avancer(maintenant) {
+      const ecoule = (maintenant - precedent) / 1000
+      precedent = maintenant
+      setInstant((t) => (t + ecoule * vitesse) % cycle)
+      image = requestAnimationFrame(avancer)
+    })
+    return () => cancelAnimationFrame(image)
+  }, [vitesse, cycle, onglet])
 
   // Actions venues de la carte : clic sur un feu (lignes), glisser-déposer (branches).
   useImperativeHandle(
@@ -147,14 +222,25 @@ export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: 
         : AUCUN_FEU,
     [mouvementsActifs, configuration.connexions],
   )
+  // État de chaque ligne à l'instant lu, résumé en une chaîne : la carte n'est redessinée
+  // que lorsqu'un feu change de couleur, pas à chaque image de la lecture.
+  const etatsLignes =
+    onglet === 'programme' && resultat ? lignesFeux.map((l) => etatLigne(resultat, l.code, instantCycle)).join(',') : ''
+  const connexionsEnregistrees = enregistre?.connexions ?? AUCUNE_CONNEXION
+  const feux = useMemo(() => {
+    if (!etatsLignes) return null
+    const etats = etatsLignes.split(',') as EtatFeu[]
+    return feuxDesLignes(new Map(lignesFeux.map((l, i) => [l.code, etats[i]!])), lignesFeux, connexionsEnregistrees)
+  }, [etatsLignes, lignesFeux, connexionsEnregistrees])
+
   useEffect(
     () =>
-      onAffichage({ branches, connexions: configuration.connexions, mode: modeCarte, feuxSurlignes, connexionsSurlignees }),
-    [branches, configuration.connexions, modeCarte, feuxSurlignes, connexionsSurlignees, onAffichage],
+      onAffichage({ branches, connexions: configuration.connexions, mode: modeCarte, feuxSurlignes, connexionsSurlignees, feux }),
+    [branches, configuration.connexions, modeCarte, feuxSurlignes, connexionsSurlignees, feux, onAffichage],
   )
 
-  const modifie = brouillonBranches !== null || brouillonLignes !== null
-  const erreur = [detection, enregistrementBranches, enregistrementLignes].find((m) => m.error)?.error
+  const modifie = brouillonBranches !== null || brouillonLignes !== null || brouillonProgramme !== null
+  const erreur = [detection, enregistrementBranches, enregistrementLignes, enregistrementProgramme].find((m) => m.error)?.error
 
   return (
     <div className="configuration">
@@ -172,6 +258,9 @@ export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: 
           }}
         >
           2. Lignes de feux
+        </button>
+        <button role="tab" aria-selected={onglet === 'programme'} onClick={() => setOnglet('programme')}>
+          3. Programme
         </button>
       </div>
 
@@ -213,7 +302,7 @@ export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: 
             />
           )}
         </>
-      ) : (
+      ) : onglet === 'lignes' ? (
         <>
           <p>
             Regroupez les mouvements par <strong>ligne de feux</strong> (les feux qui changent toujours ensemble) et
@@ -249,6 +338,54 @@ export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: 
               onActiver={setLigneActive}
             />
             )
+          )}
+        </>
+      ) : (
+        <>
+          <p>
+            Découpez le cycle en <strong>étapes</strong> : les lignes au vert ensemble, et pendant combien de temps. Le
+            jaune et les rouges de dégagement s'ajoutent entre les étapes.
+          </p>
+          {brouillonLignes && (
+            <p className="a-enregistrer">Les lignes ont des modifications non enregistrées : le programme utilise la version enregistrée.</p>
+          )}
+          <div className="actions">
+            <button
+              className="principal"
+              onClick={() => enregistrementProgramme.mutate()}
+              disabled={brouillonProgramme === null || erreurProgramme || enregistrementProgramme.isPending}
+            >
+              Enregistrer le programme
+            </button>
+          </div>
+          {brouillonProgramme && <p className="a-enregistrer">Programme non enregistré</p>}
+          {!brouillonProgramme && programmeData?.plans[planActif]?.etapes_deduites && (
+            <p className="discret">Étapes reconstruites à partir du diagramme de feux enregistré.</p>
+          )}
+          {!brouillonProgramme &&
+            programmeData?.alertes.map((alerte) => (
+              <p key={alerte} className="etat-erreur">
+                {alerte}
+              </p>
+            ))}
+          {programmeEnregistre.isPending || !contexte ? (
+            <p>Chargement…</p>
+          ) : (
+            <OngletProgramme
+              contexte={contexte}
+              plans={plans}
+              onChanger={setBrouillonProgramme}
+              planActif={planActif}
+              onPlanActif={(index) => {
+                setPlanActif(index)
+                setInstant(0)
+              }}
+              resultat={resultat}
+              instant={instantCycle}
+              onInstant={setInstant}
+              vitesse={vitesse}
+              onVitesse={setVitesse}
+            />
           )}
         </>
       )}

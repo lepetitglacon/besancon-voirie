@@ -236,6 +236,8 @@ CREATE TABLE plan_feux (
   jaune_s       numeric(3,1),
   reference     jsonb,                          -- {ligne:"F1", t0:"2026-10-07T08:02:17.400+02:00"}
   lignes        jsonb,                          -- {"F1":[[0,34]], "F3":[[40,74]], …}
+  etapes        jsonb,                          -- [{lignes:["F1","P2"], duree_s:34}, …] (saisie de l'étape 3)
+  degagements   jsonb NOT NULL DEFAULT '{}',    -- rouges saisis à la main {"F1>F2": 4}
   source_releve uuid,                           -- relevé validé qui a produit ce plan
   UNIQUE (carrefour_id, code)
 );
@@ -421,6 +423,7 @@ Public :
 | GET | `/api/carrefours/:id/branches` | Branches, voies et mouvements calculés ([CONFIGURATION.md](CONFIGURATION.md) §3) |
 | GET | `/api/carrefours/:id/branches/detection` | Proposition de branches depuis OSM, non enregistrée |
 | GET | `/api/carrefours/:id/lignes` | Lignes de feux, matrice des conflits, mouvements non commandés ([CONFIGURATION.md](CONFIGURATION.md) §4) |
+| GET | `/api/carrefours/:id/programme` | Plans de feux par étapes, rouges de dégagement calculés ([CONFIGURATION.md](CONFIGURATION.md) §5) |
 | GET | `/api/carrefours/:slug` | Carrefour complet : branches, lignes, plans, synthèse des relevés validés |
 | GET | `/api/corridors` | Liste + géométrie |
 | GET | `/api/corridors/:slug` | Corridor, carrefours ordonnés, distances, plans, décalages actuels |
@@ -440,6 +443,7 @@ Admin (cookie de session, un seul compte) :
 | POST / PATCH / DELETE | `/api/carrefours[/:id]` | Composition manuelle des carrefours (§5.3). Pour l'instant protégée par `EDITION_LOCALE` |
 | PUT | `/api/carrefours/:id/branches` | Remplace branches et voies (`EDITION_LOCALE`) |
 | PUT | `/api/carrefours/:id/lignes` | Remplace lignes de feux, feux physiques et conflits admis (`EDITION_LOCALE`) |
+| PUT | `/api/carrefours/:id/programme` | Remplace les plans ; cycle et diagramme calculés depuis les étapes (`EDITION_LOCALE`) |
 | PUT | `/api/admin/corridors/:id` | Création/édition, recalcul des distances |
 | POST | `/api/admin/simulations` | Phase 2 : met un job en file |
 

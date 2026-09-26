@@ -184,7 +184,7 @@ Bézier du bout de sa voie entrante au bout de sa voie sortante, dans un repère
 Deux lignes sont en conflit si l'un de leurs mouvements l'est. Un conflit peut être **admis**
 à la main : les deux lignes pourront être au vert ensemble. Exemples : tourne-à-droite avec
 les piétons, tourne-à-gauche qui cède le passage au tout-droit d'en face. L'étape 3
-refusera toute étape qui met au vert deux lignes en conflit non admis.
+refuse toute étape qui met au vert deux lignes en conflit non admis.
 
 ### API
 
@@ -212,28 +212,106 @@ correspondants, selon ce qu'on observe sur place.
 
 ## 5. Étape 3 — Programme par étapes
 
-Saisie comme les feux temporisés de TM:PE :
+### Modèle
+
+Un carrefour a un ou plusieurs **plans de feux** (table `plan_feux`), chacun actif sur des
+plages horaires (jours + heures ; « de 00:00 à 00:00 » = toute la journée) : cycle par étapes
+le jour, jaune clignotant ou éteint la nuit. Un plan à cycle se saisit comme les feux
+temporisés de TM:PE :
 
 ```yaml
-etapes:
-  - { lignes: [F1, F3, P2], duree_s: 34 }
-  - { lignes: [F2, F4, P1], duree_s: 26 }
+code: jour
+plages: [{ jours: [lun, mar, mer, jeu, ven], de: '06:30', a: '20:30' }]
 jaune_s: 3
+etapes:
+  - { lignes: [F1, P2], duree_s: 25 }   # durée où toutes ces lignes sont au vert
+  - { lignes: [F2], duree_s: 15 }
+degagements: { F1>F2: 4 }              # saisie manuelle, remplace le calcul
 ```
 
-- Entre deux étapes, le moteur insère le **jaune** (3 s en agglomération) puis le **rouge
-  de dégagement** entre lignes en conflit (valeur par défaut 2 s, puis calcul CERTU à
-  partir des trajectoires et vitesses de dégagement).
-- Contrôles : aucune paire de lignes en conflit au vert dans une même étape, vert minimal
-  6 s, vert piéton ≥ longueur de traversée / 1 m/s, cycle ≤ 120 s.
-- Le programme par étapes est **converti** en diagramme par ligne (`plan_feux.lignes`,
-  intervalles de vert). Le relevé terrain au chronomètre produit l'inverse (diagramme par
-  ligne) : le moteur sait reconstruire les étapes à partir des instants de changement.
+Le moteur (`@voirie/engine`, `programme.ts`) en déduit le cycle et le **diagramme de feux**
+(intervalles de vert et de jaune par ligne), enregistré dans `plan_feux.lignes` pour la
+suite (onde verte, SUMO). Le temps 0 est le début de la première étape.
+
+### Transitions
+
+Entre deux étapes :
+
+- les lignes qui s'arrêtent passent au **jaune** (3 s en agglomération, 0 pour les piétons)
+  puis au rouge ;
+- chaque ligne qui démarre attend, pour **chaque ligne en conflit** qui s'arrête, la fin de
+  son jaune puis le **rouge de dégagement** du couple ; sans conflit, elle démarre aussitôt
+  (démarrage anticipé) ;
+- une ligne présente dans les deux étapes reste au vert ;
+- la transition dure jusqu'au démarrage de la dernière ligne ; son couple le plus exigeant
+  est affiché (« F2 attend P1 : dégagement 8 s »).
+
+### Rouges de dégagement (`degagement.ts`)
+
+Calculés pour chaque couple ordonné de lignes en conflit non admis, sur les trajectoires de
+l'étape 1 :
+
+```text
+rouge = (d_sortant + 6 m) / v_sortant − d_entrant / v_entrant      arrondi à la seconde supérieure
+```
+
+- `d_sortant` : trajet, depuis la ligne d'arrêt, du dernier usager qui dégage jusqu'au point
+  de conflit (croisement des courbes, bout de la voie de sortie commune, ou passage piéton) ;
+  il a franchi sa ligne d'arrêt au plus tard à la fin du jaune. Les 6 m sont la longueur du
+  véhicule (0 pour un piéton).
+- `d_entrant` : trajet du premier usager de la ligne suivante jusqu'au même point.
+- Vitesses : 10 m/s pour les véhicules et les vélos, 1 m/s pour les piétons. Un piéton qui
+  dégage part du trottoir le plus éloigné du point de conflit ; un piéton qui arrive, du plus
+  proche.
+- On garde le pire des points de conflit ; valeur par défaut 2 s si la géométrie ne donne
+  aucun point. Toute valeur peut être remplacée à la main, plan par plan.
+
+### Contrôles
+
+| Niveau | Contrôle |
+|---|---|
+| erreur (refus d'enregistrement) | deux lignes en conflit non admis dans la même étape ; ligne inconnue ; cycle > 300 s |
+| avertissement | étape plus courte que le vert minimal (6 s) ; ligne jamais au vert ; vert d'une ligne < 6 s ; vert piéton plus court que la traversée à 1 m/s ; cycle > 120 s |
+
+### Diagramme → étapes
+
+Pour un plan saisi comme diagramme de feux (relevé terrain au chronomètre), le moteur
+reconstruit les étapes (`etapesDepuisDiagramme`) : le cycle est découpé aux instants de
+changement ; une période sans aucun vert, ou plus courte que 6 s et dont les verts se
+retrouvent tous dans la période suivante (démarrages anticipés), est une transition ; les
+autres périodes sont les étapes. L'API renvoie alors `etapes_deduites: true`.
+
+### API
+
+| Méthode | Route | Effet |
+|---|---|---|
+| GET | `/api/carrefours/:id/programme` | Plans (étapes saisies ou reconstruites, cycle), rouges de dégagement calculés, plans devenus incohérents |
+| PUT | `/api/carrefours/:id/programme` | Remplace les plans ; calcule et enregistre cycle et diagramme ; refuse un plan en erreur (`EditionGuard`). Un plan conservé garde sa référence de synchronisation (`reference`) |
+
+### Interface (onglet « 3. Programme »)
+
+- Un bouton par plan, « + Plan » (étapes proposées d'emblée) ; nom, mode, plages horaires
+  (jours L M M J V S D, heures).
+- **Diagramme de feux** du plan : une rangée par ligne (vert, jaune, rouge), étapes et
+  transitions au-dessus. Cliquer ou glisser place le curseur ; « Lecture » ×1, ×4, ×10 fait
+  défiler le cycle.
+- **Sur la carte**, chaque trajectoire et chaque passage piéton prend la couleur de son feu à
+  l'instant du curseur (vert, jaune, rouge ; gris pointillé si aucune ligne ne le commande).
+- **Étapes** : durée, ordre (↑ ↓), puces des lignes à mettre au vert ; une ligne en conflit
+  avec une ligne déjà dans l'étape est barrée et désactivée (« F2 est en conflit avec F1 »).
+  Entre deux étapes, la durée de la transition et le couple qui la fixe. « Proposer des
+  étapes » : chaque étape part de la première ligne non servie et reçoit toutes les lignes
+  compatibles (celles de l'étape précédente restent au vert si possible).
+- **Rouges de dégagement** (repliable) : valeur calculée et distances, champ de saisie
+  manuelle.
+- Le programme s'appuie sur les lignes **enregistrées** (comme les lignes sur les branches
+  enregistrées).
 
 ## 6. Étape 4 — Graphes
 
 **Diagramme de feux** (chronogramme) : une ligne par ligne de feux, sur un cycle. C'est la
-forme enregistrée, comparée au terrain et envoyée à SUMO.
+forme enregistrée, comparée au terrain et envoyée à SUMO. Il est affiché dès l'étape 3
+(onglet « 3. Programme ») ; reste à le comparer aux relevés terrain.
 
 ```text
       0s        20        40        60        80s
@@ -274,5 +352,5 @@ Les flèches sont donc **surtout à saisir à la main** : la détection propose,
 |---|---|
 | `config-branches` | Étape 1, première version : branches et flèches par voie (remplacée par `config-lignes`) |
 | `config-lignes` | Étape 1 refondue (voies sur la photo, connexions, passages piétons) et étape 2 : lignes de feux, feux physiques, conflits géométriques |
-| `config-programme` | Étape 3 : éditeur d'étapes, jaune et dégagement, conversion en diagramme |
-| `config-graphes` | Étape 4 : chronogramme, graphe des étapes, comparaison avec les relevés terrain |
+| `config-programme` | Étape 3 : plans et plages horaires, éditeur d'étapes, jaune et rouges de dégagement calculés, diagramme de feux et lecture du cycle sur la carte |
+| `config-graphes` | Étape 4 : graphe des étapes (feux actués, priorité tram), comparaison du diagramme avec les relevés terrain |

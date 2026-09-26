@@ -18,6 +18,7 @@ import {
   Poignee,
   Voie,
   type EtatCourbe,
+  type EtatFeu,
   type EtatPoignee,
   type EtatVoie,
 } from './elements'
@@ -32,6 +33,8 @@ interface Props {
   mode: ModeEdition | null
   /** Connexions à mettre en avant (« de>vers »), par exemple celles de la ligne de feux active. */
   surlignees?: ReadonlySet<string>
+  /** Lecture d'un programme : couleur du feu de chaque connexion (« de>vers ») et passage piéton. */
+  feux?: { connexions: ReadonlyMap<string, EtatFeu>; traversees: ReadonlyMap<string, EtatFeu> } | null
   onDeplacer: (poignee: PoigneeModele, position: LonLat) => void
   /** Ajoute la connexion, ou la retire si elle existe. */
   onConnecter: (de: string, vers: string) => void
@@ -54,7 +57,7 @@ type Glisse =
 const cleConnexion = (c: Connexion) => `${c.de}>${c.vers}`
 const symboles = new Map(FLECHES.map((f) => [f.direction, f.symbole]))
 
-export function CalqueCarrefour({ branches, connexions, mode, surlignees, onDeplacer, onConnecter }: Props) {
+export function CalqueCarrefour({ branches, connexions, mode, surlignees, feux, onDeplacer, onConnecter }: Props) {
   const projection = useProjection()
   const [survol, setSurvol] = useState<Survol>(null)
   const [glisse, setGlisse] = useState<Glisse | null>(null)
@@ -224,7 +227,14 @@ export function CalqueCarrefour({ branches, connexions, mode, surlignees, onDepl
   return (
     <svg className={`calque-carrefour ${mode ?? 'lecture'}`} aria-label="Configuration du carrefour">
       {apercu.branches.map(
-        (b) => b.traversee && <PassagePieton key={`passage-${b.code}`} segment={segmentPx(b.traversee)} largeur={largeurPassage} />,
+        (b) => b.traversee && (
+            <PassagePieton
+              key={`passage-${b.code}`}
+              segment={segmentPx(b.traversee)}
+              largeur={largeurPassage}
+              feu={feux ? (feux.traversees.get(b.code) ?? 'libre') : undefined}
+            />
+          ),
       )}
 
       {[...voies].map(([cle, voie]) => (
@@ -253,6 +263,7 @@ export function CalqueCarrefour({ branches, connexions, mode, surlignees, onDepl
             sortie={segmentPx(sortie.geom)}
             couleur={couleurs.get(c.de) ?? '#ffffff'}
             etat={etatCourbe(cle)}
+            feu={feux ? (feux.connexions.get(cle) ?? 'libre') : undefined}
             titre={mode === 'connecter' ? `${c.de} → ${c.vers} : cliquer pour retirer` : `${c.de} → ${c.vers}`}
             onSurvol={mode ? (actif) => setSurvol(actif ? { type: 'connexion', cle } : null) : undefined}
             onClic={mode === 'connecter' ? () => onConnecter(c.de, c.vers) : undefined}

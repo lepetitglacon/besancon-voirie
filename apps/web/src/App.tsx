@@ -23,6 +23,7 @@ function App() {
     mode: null,
     feuxSurlignes: [],
     connexionsSurlignees: [],
+    feux: null,
   })
   const panneauConfiguration = useRef<PanneauConfigurationHandle>(null)
   // Relais stables des gestes de la carte vers le panneau de configuration.

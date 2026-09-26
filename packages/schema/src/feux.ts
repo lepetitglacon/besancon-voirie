@@ -62,7 +62,8 @@ export const IntervalleVert = z
   .refine(([debut, fin]) => fin > debut, { message: 'La fin du vert doit suivre son début' });
 export type IntervalleVert = z.infer<typeof IntervalleVert>;
 
-const Jour = z.enum(['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim']);
+export const Jour = z.enum(['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim']);
+export type Jour = z.infer<typeof Jour>;
 const Heure = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 
 export const Plage = z.object({
@@ -72,7 +73,7 @@ export const Plage = z.object({
 });
 export type Plage = z.infer<typeof Plage>;
 
-const PlanBase = z.object({
+export const PlanBase = z.object({
   code: z.string().min(1).max(32),
   plages: z.array(Plage).min(1),
 });

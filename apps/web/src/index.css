@@ -636,3 +636,242 @@ table.matrice td.admis {
   stroke: #2f6fd6;
   stroke-width: 5px;
 }
+
+/* Lecture d'un programme : chaque trajectoire et passage piéton prend la couleur de son feu. */
+.calque-courbe[class*='feu-'] .trace {
+  transition: none;
+}
+
+.calque-courbe.feu-vert .trace {
+  stroke: #22c55e;
+  stroke-width: 5;
+}
+
+.calque-courbe.feu-jaune .trace {
+  stroke: #facc15;
+  stroke-width: 5;
+}
+
+.calque-courbe.feu-rouge .trace {
+  stroke: #ef4444;
+  stroke-width: 2;
+  opacity: 0.45;
+}
+
+.calque-courbe.feu-libre .trace {
+  stroke: #9ca3af;
+  stroke-width: 2;
+  stroke-dasharray: 3 4;
+}
+
+.calque-passage.feu-vert {
+  stroke: #22c55e;
+  opacity: 0.9;
+}
+
+.calque-passage.feu-rouge {
+  stroke: #ef4444;
+  opacity: 0.5;
+}
+
+.calque-passage.feu-libre {
+  opacity: 0.3;
+}
+
+/* ── Onglet « 3. Programme » ── */
+
+.plans {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.branche-entete input.code-plan {
+  flex: 0 1 140px;
+  font-weight: 700;
+}
+
+.plage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.jours {
+  display: flex;
+  gap: 2px;
+}
+
+.jours button {
+  width: 24px;
+  padding: 2px 0;
+  font-size: 11px;
+}
+
+.etape {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--bordure);
+  border-radius: 8px;
+}
+
+.etape.courante {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 1px #22c55e;
+}
+
+.etape .en-ligne input {
+  width: 56px;
+}
+
+button.titre-etape {
+  margin-top: 0;
+  color: var(--texte);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.espace {
+  flex: 1;
+}
+
+.puces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+button.puce {
+  min-width: 38px;
+  padding: 2px 6px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+button.puce.au-vert {
+  border-color: #16a34a;
+  background: #22c55e;
+  color: #ffffff;
+}
+
+button.puce.bloquee {
+  text-decoration: line-through;
+}
+
+button.puce.inconnue {
+  border-color: var(--erreur);
+  color: var(--erreur);
+}
+
+.transition-etapes {
+  margin: 4px 0 0 10px;
+}
+
+.lecture {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0;
+}
+
+.lecture .discret {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+svg.chronogramme {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  font-size: 9px;
+}
+
+.chronogramme .etape rect {
+  fill: rgba(47, 111, 214, 0.14);
+  stroke: rgba(47, 111, 214, 0.5);
+  stroke-width: 0.5;
+}
+
+.chronogramme .etape text {
+  fill: var(--accent);
+  font-weight: 700;
+}
+
+.chronogramme .transition {
+  fill: var(--bordure);
+  opacity: 0.6;
+}
+
+.chronogramme .code {
+  fill: var(--texte);
+  font-weight: 700;
+}
+
+.chronogramme .rouge {
+  fill: #ef4444;
+  opacity: 0.55;
+}
+
+.chronogramme .vert {
+  fill: #22c55e;
+}
+
+.chronogramme .jaune {
+  fill: #facc15;
+}
+
+.chronogramme .axe line {
+  stroke: var(--texte-doux);
+  stroke-width: 0.5;
+}
+
+.chronogramme .axe text {
+  fill: var(--texte-doux);
+}
+
+.chronogramme .curseur line {
+  stroke: var(--texte);
+  stroke-width: 1;
+}
+
+.chronogramme .curseur path {
+  fill: var(--texte);
+}
+
+.degagements {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.degagements summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.degagements table {
+  border-collapse: collapse;
+}
+
+.degagements th {
+  padding-right: 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.degagements td {
+  padding: 1px 6px;
+}
+
+.degagements input {
+  width: 52px;
+}

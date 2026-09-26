@@ -262,6 +262,7 @@ export function CarteCarrefours(props: Props) {
           connexions={configuration.connexions}
           mode={configuration.mode}
           surlignees={new Set(configuration.connexionsSurlignees)}
+          feux={configuration.feux}
           onDeplacer={props.onDeplacerPoignee}
           onConnecter={props.onConnecter}
         />

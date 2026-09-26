@@ -3,7 +3,9 @@ import type {
   BranchesCarrefour,
   ConfigurationBranches,
   ConfigurationLignes,
+  ConfigurationProgramme,
   LignesCarrefour,
+  ProgrammeCarrefour,
   DetectionBranches,
   CarrefourResume,
   CarrefoursGeoJson,
@@ -56,6 +58,12 @@ export const api = {
   lignes: (carrefourId: string) => requete<LignesCarrefour>(`/api/carrefours/${carrefourId}/lignes`),
   enregistrerLignes: (carrefourId: string, configuration: ConfigurationLignes) =>
     requete<LignesCarrefour>(`/api/carrefours/${carrefourId}/lignes`, {
+      method: 'PUT',
+      body: JSON.stringify(configuration),
+    }),
+  programme: (carrefourId: string) => requete<ProgrammeCarrefour>(`/api/carrefours/${carrefourId}/programme`),
+  enregistrerProgramme: (carrefourId: string, configuration: ConfigurationProgramme) =>
+    requete<ProgrammeCarrefour>(`/api/carrefours/${carrefourId}/programme`, {
       method: 'PUT',
       body: JSON.stringify(configuration),
     }),
