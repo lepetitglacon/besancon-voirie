@@ -113,6 +113,21 @@ export function Poignee({ centre, rayon, couleur, vide, etat, titre, onSurvol, .
   )
 }
 
+/**
+ * Écart entre la position OSM d'un feu (souvent au milieu de la chaussée) et son mât : trait
+ * pointillé et point creux, sur lequel un clic remet le feu à sa position OSM.
+ */
+export function EcartOsm({ osm, position, onRemettre }: { osm: XY; position: XY; onRemettre?: () => void }) {
+  return (
+    <g className="calque-ecart-osm">
+      <path className="trait" d={d([osm, position])} />
+      <circle className={classes('origine', onRemettre && 'interactive')} cx={osm[0]} cy={osm[1]} r={5} onClick={onRemettre}>
+        <title>Position OSM : cliquer pour y remettre le feu</title>
+      </circle>
+    </g>
+  )
+}
+
 export function Etiquette({ position, children, classe }: { position: XY; children: ReactNode; classe: string }) {
   return (
     <text className={classe} x={position[0]} y={position[1]} textAnchor="middle" dominantBaseline="middle">

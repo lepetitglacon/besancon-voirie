@@ -53,4 +53,18 @@ describe('Import OSM (e2e)', () => {
       { osm_id: 105, carrefour_id: rows[0].id, present_osm: false, lon: 6.0303 },
     ]);
   });
+
+  it('should update the OSM position of a signal placed by hand without moving it', async () => {
+    await client.query(`
+      UPDATE feu SET geom = ST_SetSRID(ST_MakePoint(6.031, 47.25), 4326), position_manuelle = true WHERE osm_id = 102
+    `);
+    const deplace = ELEMENTS_OSM.map((e) => (e.type === 'node' && e.id === 102 ? ({ ...e, lon: 6.0307 } as OverpassElement) : e));
+    await chargerOsm(client, trierElements({ elements: deplace }));
+
+    const { rows } = await client.query(`
+      SELECT round(ST_X(geom)::numeric, 4)::float8 AS lon, round(ST_X(geom_osm)::numeric, 4)::float8 AS lon_osm
+      FROM feu WHERE osm_id = 102
+    `);
+    expect(rows).toEqual([{ lon: 6.031, lon_osm: 6.0307 }]);
+  });
 });

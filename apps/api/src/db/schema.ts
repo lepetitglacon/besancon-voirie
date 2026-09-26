@@ -71,6 +71,9 @@ export const typeFeu = pgEnum('type_feu', ['vehicule', 'pieton']);
 /**
  * Un feu physique, importé d'OpenStreetMap (ou ajouté à la main, osm_id nul). Les carrefours
  * se composent à la main en y rattachant des feux. L'import ne modifie jamais `carrefour_id`.
+ *
+ * `geom` est la position retenue : celle d'OSM (`geom_osm`), qui est souvent au milieu de la
+ * chaussée, ou celle du mât sur la photo si le feu a été placé à la main (`position_manuelle`).
  */
 export const feu = pgTable(
   'feu',
@@ -80,6 +83,9 @@ export const feu = pgTable(
     type: typeFeu('type').notNull(),
     tags: jsonb('tags').$type<Record<string, string>>().notNull().default({}),
     geom: geometry('geom', { type: 'point', mode: 'xy', srid: 4326 }).notNull(),
+    /** Position brute d'OSM, mise à jour à chaque import ; nulle pour un feu ajouté à la main. */
+    geomOsm: geometry('geom_osm', { type: 'point', mode: 'xy', srid: 4326 }),
+    positionManuelle: boolean('position_manuelle').notNull().default(false),
     presentOsm: boolean('present_osm').notNull().default(true),
     carrefourId: uuid('carrefour_id').references(() => carrefour.id, { onDelete: 'set null' }),
     creeLe: creeLe(),

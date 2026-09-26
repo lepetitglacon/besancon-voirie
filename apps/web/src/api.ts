@@ -1,3 +1,4 @@
+import type { LonLat } from '@voirie/engine'
 import type {
   Bbox,
   BranchesCarrefour,
@@ -38,6 +39,12 @@ export const api = {
   sante: () => requete<Sante>('/api/health'),
   carrefours: (bbox: Bbox) => requete<CarrefoursGeoJson>(`/api/carrefours?bbox=${parametreBbox(bbox)}`),
   feux: (bbox: Bbox) => requete<FeuxGeoJson>(`/api/feux?bbox=${parametreBbox(bbox)}`),
+  /** Place un feu sur son mât, ou le remet à sa position OSM (`null`). */
+  placerFeu: (id: string, position: LonLat | null) =>
+    requete<FeuxGeoJson['features'][number]>(`/api/feux/${id}/position`, {
+      method: 'PUT',
+      body: JSON.stringify({ position }),
+    }),
   suggestionNom: (feux: string[], nature: NatureCarrefour) =>
     requete<{ nom: string }>(`/api/carrefours/suggestion-nom?feux=${feux.join(',')}&nature=${nature}`),
   creerCarrefour: (creation: CreerCarrefour) =>

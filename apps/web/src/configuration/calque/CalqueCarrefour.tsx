@@ -5,13 +5,14 @@
  * voit pas les gestes faits sur les éléments interactifs, et le fond du calque laisse passer
  * les clics vers la carte (pointer-events: none).
  */
-import { cleVoie, flechesParVoie, type LonLat, type XY } from '@voirie/engine'
-import type { Branche, Connexion } from '@voirie/schema'
-import { useMemo, useState, type PointerEvent } from 'react'
+import { cleVoie, flechesParVoie, repereLocal, type LonLat, type XY } from '@voirie/engine'
+import type { Branche, Connexion, TypeFeu } from '@voirie/schema'
+import { useEffect, useMemo, useState, type PointerEvent } from 'react'
 import { FLECHES } from '../libelles'
 import { couleursVoies, deplacerPoignee, voiesDe, type Poignee as PoigneeModele } from '../modele'
 import {
   Courbe,
+  EcartOsm,
   Elastique,
   Etiquette,
   PassagePieton,
@@ -23,7 +24,23 @@ import {
 } from './elements'
 import { useProjection } from './projection'
 
-export type ModeEdition = 'ajuster' | 'connecter'
+export type ModeEdition = 'ajuster' | 'connecter' | 'feux'
+
+/** Feu du carrefour, déplaçable en mode « feux » pour le poser sur son mât. */
+export interface FeuPlacable {
+  id: string
+  type: TypeFeu
+  position: LonLat
+  /** Position OSM d'origine, null pour un feu ajouté à la main. */
+  osm: LonLat | null
+  placeALaMain: boolean
+}
+
+/** Feu en cours de déplacement : la carte le dessine à cette position. */
+export interface ApercuFeu {
+  id: string
+  position: LonLat
+}
 
 interface Props {
   branches: Branche[]
@@ -35,6 +52,10 @@ interface Props {
   onDeplacer: (poignee: PoigneeModele, position: LonLat) => void
   /** Ajoute la connexion, ou la retire si elle existe. */
   onConnecter: (de: string, vers: string) => void
+  feux: FeuPlacable[]
+  /** Pose le feu (ou le remet à sa position OSM : null) ; l'aperçu reste jusqu'à la fin de la promesse. */
+  onPlacerFeu: (id: string, position: LonLat | null) => Promise<void>
+  onApercuFeu: (apercu: ApercuFeu | null) => void
 }
 
 /** Part de la largeur réelle (3,25 m) occupée par le dessin d'une voie. */
@@ -50,14 +71,27 @@ type Survol = { type: 'voie'; cle: string } | { type: 'connexion'; cle: string }
 type Glisse =
   | { type: 'poignee'; poignee: PoigneeModele; position: LonLat }
   | { type: 'connexion'; de: string; position: LonLat; cible: string | null }
+  /** `enregistrement` : lâché, en attente de l'API (le feu reste affiché à sa nouvelle place). */
+  | { type: 'feu'; id: string; depart: LonLat; position: LonLat; enregistrement: boolean }
+
+/** En dessous (m), un glisser de feu est un simple clic : rien n'est enregistré. */
+const DEPLACEMENT_FEU_MIN_M = 0.2
+const COULEUR_FEU: Record<TypeFeu, string> = { vehicule: '#e0561e', pieton: '#1f8a4c' }
 
 const cleConnexion = (c: Connexion) => `${c.de}>${c.vers}`
 const symboles = new Map(FLECHES.map((f) => [f.direction, f.symbole]))
 
-export function CalqueCarrefour({ branches, connexions, mode, surlignees, onDeplacer, onConnecter }: Props) {
+export function CalqueCarrefour(props: Props) {
+  const { branches, connexions, mode, surlignees, onDeplacer, onConnecter, feux, onPlacerFeu, onApercuFeu } = props
   const projection = useProjection()
   const [survol, setSurvol] = useState<Survol>(null)
   const [glisse, setGlisse] = useState<Glisse | null>(null)
+
+  const apercuFeu = useMemo<ApercuFeu | null>(
+    () => (glisse?.type === 'feu' ? { id: glisse.id, position: glisse.position } : null),
+    [glisse],
+  )
+  useEffect(() => onApercuFeu(apercuFeu), [apercuFeu, onApercuFeu])
 
   // Pendant un ajustement, on dessine le brouillon avec la poignée déjà déplacée : les voies
   // et leurs connexions suivent le pointeur en direct.
@@ -114,7 +148,7 @@ export function CalqueCarrefour({ branches, connexions, mode, surlignees, onDepl
   }
 
   // ── Glisser-déposer (capture du pointeur sur la poignée) ──
-  const positionPointeur = (e: PointerEvent<SVGCircleElement>): LonLat => {
+  const positionPointeur = (e: PointerEvent<SVGElement>): LonLat => {
     const cadre = e.currentTarget.ownerSVGElement!.getBoundingClientRect()
     return lonLat(e.clientX - cadre.left, e.clientY - cadre.top)
   }
@@ -141,13 +175,22 @@ export function CalqueCarrefour({ branches, connexions, mode, surlignees, onDepl
     }
   }
 
-  const suivre = (e: PointerEvent<SVGCircleElement>) => {
-    if (!glisse) return
+  const suivre = (e: PointerEvent<SVGElement>) => {
+    if (!glisse || (glisse.type === 'feu' && glisse.enregistrement)) return
     const position = positionPointeur(e)
     setGlisse(glisse.type === 'connexion' ? { ...glisse, position, cible: sortanteLaPlusProche(position) } : { ...glisse, position })
   }
 
   const terminer = () => {
+    if (glisse?.type === 'feu') {
+      if (glisse.enregistrement) return
+      const [est, nord] = repereLocal(glisse.depart).versXY(glisse.position)
+      if (Math.hypot(est, nord) < DEPLACEMENT_FEU_MIN_M) return setGlisse(null)
+      setGlisse({ ...glisse, enregistrement: true })
+      // Succès ou échec (signalé par l'appelant), l'aperçu disparaît une fois la carte à jour.
+      void onPlacerFeu(glisse.id, glisse.position).finally(() => setGlisse(null))
+      return
+    }
     if (glisse?.type === 'poignee') onDeplacer(glisse.poignee, glisse.position)
     if (glisse?.type === 'connexion' && glisse.cible) onConnecter(glisse.de, glisse.cible)
     setGlisse(null)
@@ -162,7 +205,7 @@ export function CalqueCarrefour({ branches, connexions, mode, surlignees, onDepl
 
   // ── Poignées selon le mode ──
   const poignees: Array<{ cle: string; centre: XY; rayon: number; couleur: string; vide: boolean; etat: EtatPoignee; titre: string; gestes?: ReturnType<typeof gestes> }> = []
-  if (mode) {
+  if (mode === 'ajuster' || mode === 'connecter') {
     for (const [cle, voie] of voies) {
       const sortante = voie.sens === 'sortante'
       for (const extremite of [0, 1] as const) {
@@ -217,6 +260,29 @@ export function CalqueCarrefour({ branches, connexions, mode, surlignees, onDepl
       }
     }
   }
+
+  // Mode « feux » : chaque feu se tire jusqu'à son mât ; un feu déjà placé montre sa position OSM.
+  const feuxPlacables =
+    mode === 'feux'
+      ? feux.map((feu) => {
+          const enCours = glisse?.type === 'feu' && glisse.id === feu.id ? glisse : null
+          const position = enCours?.position ?? feu.position
+          return { ...feu, position, enCours: enCours !== null, deplace: feu.placeALaMain || enCours !== null }
+        })
+      : []
+  const gestesFeu = (id: string, position: LonLat) => ({
+    onPointerDown: (e: PointerEvent<SVGElement>) => {
+      if (glisse) return
+      e.stopPropagation()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      setGlisse({ type: 'feu', id, depart: position, position, enregistrement: false })
+    },
+    onPointerMove: suivre,
+    onPointerUp: terminer,
+    onPointerCancel: () => {
+      if (glisse?.type === 'feu' && !glisse.enregistrement) setGlisse(null)
+    },
+  })
 
   const depart = glisse?.type === 'connexion' ? voies.get(glisse.de) : undefined
   const cible = cibleEnCours ? voies.get(cibleEnCours) : undefined
@@ -289,6 +355,31 @@ export function CalqueCarrefour({ branches, connexions, mode, surlignees, onDepl
 
       {poignees.map(({ cle, gestes: g, ...poignee }) => (
         <Poignee key={cle} {...poignee} {...g} />
+      ))}
+
+      {feuxPlacables.map(
+        (feu) =>
+          feu.deplace &&
+          feu.osm && (
+            <EcartOsm
+              key={`osm-${feu.id}`}
+              osm={px(feu.osm)}
+              position={px(feu.position)}
+              onRemettre={feu.enCours ? undefined : () => void onPlacerFeu(feu.id, null)}
+            />
+          ),
+      )}
+      {feuxPlacables.map((feu) => (
+        <Poignee
+          key={`feu-${feu.id}`}
+          centre={px(feu.position)}
+          rayon={feu.type === 'pieton' ? 6 : 8}
+          couleur={COULEUR_FEU[feu.type]}
+          vide={false}
+          etat={feu.enCours ? 'active' : 'normale'}
+          titre={`Feu ${feu.type === 'pieton' ? 'piéton' : 'véhicule'} : glisser jusqu’à son mât sur la photo`}
+          {...gestesFeu(feu.id, feu.position)}
+        />
       ))}
     </svg>
   )

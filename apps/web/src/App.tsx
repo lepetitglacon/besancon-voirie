@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { LonLat } from '@voirie/engine'
 import type { Bbox, CarrefourResume, FeuResume } from '@voirie/schema'
 import { useCallback, useRef, useState } from 'react'
 import { api } from './api'
@@ -48,6 +49,21 @@ function App() {
     enabled: bbox !== undefined,
     placeholderData: (precedent) => precedent,
   })
+
+  const placerFeu = useCallback(
+    async (id: string, position: LonLat | null) => {
+      try {
+        await api.placerFeu(id, position)
+        // Le centre du carrefour suit ses feux.
+        await Promise.all(
+          [['feux'], ['carrefours'], ['branches']].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+        )
+      } catch (erreur) {
+        window.alert((erreur as Error).message)
+      }
+    },
+    [queryClient],
+  )
 
   const rafraichir = () =>
     Promise.all([
@@ -147,6 +163,7 @@ function App() {
         onClicFeuConfiguration={(feu) => panneauConfiguration.current?.clicFeu(feu)}
         onDeplacerPoignee={deplacerPoignee}
         onConnecter={connecter}
+        onPlacerFeu={placerFeu}
         onSupprimer={(carrefour) => {
           if (window.confirm(`Supprimer « ${carrefour.nom} » ? Ses feux redeviendront libres.`)) {
             supprimer.mutate(carrefour)
@@ -167,6 +184,7 @@ function App() {
           <PanneauConfiguration
             key={configuration.carrefour.id}
             carrefour={configuration.carrefour}
+            feux={feux.data?.features.filter((f) => f.properties.carrefour_id === configuration.carrefour.id)}
             ref={panneauConfiguration}
             onAffichage={setAffichageConfiguration}
             onFermer={() => setConfiguration(null)}

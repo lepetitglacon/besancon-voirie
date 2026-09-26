@@ -192,19 +192,21 @@ export interface BilanImport {
 
 /**
  * Synchronise la table `feu` avec les feux OSM situés dans la commune. Ne touche jamais au
- * rattachement d'un feu à un carrefour.
+ * rattachement d'un feu à un carrefour. La position OSM va dans `geom_osm` ; `geom` la suit,
+ * sauf pour un feu placé à la main sur la photo.
  */
 async function synchroniserFeux(client: pg.ClientBase): Promise<BilanFeux> {
   const { rows } = await client.query<{ nouveau: boolean }>(`
-    INSERT INTO feu (osm_id, type, tags, geom, present_osm)
+    INSERT INTO feu (osm_id, type, tags, geom, geom_osm, present_osm)
     SELECT s.osm_id,
            CASE WHEN coalesce(s.tags->>'highway' = 'traffic_signals', false)
                 THEN 'vehicule' ELSE 'pieton' END::type_feu,
-           s.tags, s.geom, true
+           s.tags, s.geom, s.geom, true
     FROM osm_signal s
     JOIN osm_commune c ON ST_Intersects(s.geom, c.geom)
     ON CONFLICT (osm_id) DO UPDATE
-      SET type = EXCLUDED.type, tags = EXCLUDED.tags, geom = EXCLUDED.geom, present_osm = true
+      SET type = EXCLUDED.type, tags = EXCLUDED.tags, geom_osm = EXCLUDED.geom_osm, present_osm = true,
+          geom = CASE WHEN feu.position_manuelle THEN feu.geom ELSE EXCLUDED.geom_osm END
     RETURNING (xmax = 0) AS nouveau
   `);
   const { rowCount: disparus } = await client.query(`

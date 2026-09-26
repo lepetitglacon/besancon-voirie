@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LonLat } from './branches.js';
 import { NatureCarrefour, StatutCarrefour } from './feux.js';
 
 /** Emprise de la carte : minLon, minLat, maxLon, maxLat (WGS84). */
@@ -59,7 +60,16 @@ export type FeuResume = {
   type: TypeFeu;
   carrefour_id: string | null;
   present_osm: boolean;
+  /** Placé à la main sur la photo (sur son mât) : l'import OSM ne le déplace plus. */
+  position_manuelle: boolean;
+  /** Position d'origine dans OSM (au milieu de la chaussée en général), nulle pour un feu ajouté à la main. */
+  osm_lon: number | null;
+  osm_lat: number | null;
 };
+
+/** Place un feu sur la photo, ou le remet à sa position OSM (`position: null`). */
+export const PlacementFeu = z.object({ position: LonLat.nullable() });
+export type PlacementFeu = z.infer<typeof PlacementFeu>;
 
 export interface PointGeoJson {
   type: 'Point';

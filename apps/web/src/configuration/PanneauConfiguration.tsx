@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { LonLat } from '@voirie/engine'
-import type { Branche, BranchesCarrefour, CarrefourResume, Connexion, FeuResume } from '@voirie/schema'
+import type { Branche, BranchesCarrefour, CarrefourResume, Connexion, FeuResume, FeuxGeoJson } from '@voirie/schema'
 import { useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react'
 import { api } from '../api'
 import type { ModeEdition } from './calque/CalqueCarrefour'
@@ -45,11 +45,13 @@ export interface PanneauConfigurationHandle {
 interface Props {
   ref?: Ref<PanneauConfigurationHandle>
   carrefour: CarrefourResume
+  /** Feux du carrefour (pour compter ceux posés sur leur mât). */
+  feux: FeuxGeoJson['features'] | undefined
   onAffichage: (affichage: AffichageConfiguration) => void
   onFermer: () => void
 }
 
-export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: Props) {
+export function PanneauConfiguration({ ref, carrefour, feux, onAffichage, onFermer }: Props) {
   const queryClient = useQueryClient()
   const [onglet, setOnglet] = useState<Onglet>('branches')
 
@@ -153,6 +155,7 @@ export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: 
     [branches, configuration.connexions, modeCarte, feuxSurlignes, connexionsSurlignees, onAffichage],
   )
 
+  const feuxPlaces = feux?.filter((f) => f.properties.position_manuelle).length ?? 0
   const modifie = brouillonBranches !== null || brouillonLignes !== null
   const erreur = [detection, enregistrementBranches, enregistrementLignes].find((m) => m.error)?.error
 
@@ -200,6 +203,27 @@ export function PanneauConfiguration({ ref, carrefour, onAffichage, onFermer }: 
             </button>
           </div>
           {brouillonBranches && <p className="a-enregistrer">Branches non enregistrées</p>}
+          <div className="placement-feux">
+            <button
+              aria-pressed={mode === 'feux'}
+              className={mode === 'feux' ? 'actif' : undefined}
+              onClick={() => setMode(mode === 'feux' ? 'ajuster' : 'feux')}
+            >
+              ⚑ Placer les feux
+            </button>
+            <span className="discret">
+              {feuxPlaces === 0
+                ? 'Feux à leur position OSM'
+                : `${feuxPlaces} feu${feuxPlaces > 1 ? 'x' : ''} sur ${feux?.length ?? 0} posé${feuxPlaces > 1 ? 's' : ''} sur leur mât`}
+            </span>
+          </div>
+          {mode === 'feux' && (
+            <p className="discret">
+              OSM place les feux au milieu de la chaussée : faites glisser chacun jusqu’à son mât sur la photo
+              (enregistré dès que vous lâchez). La position OSM reste conservée : le point creux relié par des
+              pointillés, sur lequel un clic remet le feu.
+            </p>
+          )}
           {branchesEnregistrees.isPending ? (
             <p>Chargement…</p>
           ) : (

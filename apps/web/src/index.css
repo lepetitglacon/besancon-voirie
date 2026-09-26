@@ -447,6 +447,14 @@ table.matrice td.admis {
   margin-top: 8px;
 }
 
+.placement-feux {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 8px;
+}
+
 .libelle-sens {
   min-width: 62px;
 }
@@ -613,6 +621,32 @@ table.matrice td.admis {
   fill: #1f8a4c;
   stroke: #ffffff;
   stroke-width: 3;
+}
+
+.calque-ecart-osm {
+  filter: drop-shadow(0 0 1.5px #1d2330);
+}
+
+.calque-ecart-osm .trait {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+
+.calque-ecart-osm .origine {
+  fill: rgb(255 255 255 / 0.25);
+  stroke: #ffffff;
+  stroke-width: 2;
+}
+
+.calque-ecart-osm .origine.interactive {
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.calque-ecart-osm .origine.interactive:hover {
+  fill: #ffffff;
 }
 
 .calque-fleches,

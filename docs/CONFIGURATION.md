@@ -142,6 +142,16 @@ Sur la **photo aérienne** (bouton « Photo aérienne »), l'éditeur dessine :
   « Replacer » (revenir à la position proposée). Puis la liste des connexions, les mouvements
   déduits et les voies entrantes sans connexion.
 
+### Feux posés sur leur mât
+
+OSM place en général un feu au milieu de la chaussée, au niveau de la ligne d'arrêt, pas sur
+son mât. **⚑ Placer les feux** rend chaque feu du carrefour déplaçable : on le fait glisser
+jusqu'à son mât sur la photo, et c'est enregistré au lâcher (`PUT /api/feux/:id/position`). La
+position OSM reste connue (`feu.geom_osm`), dessinée par un point creux relié au feu en
+pointillés ; un clic dessus remet le feu à sa position OSM. Un feu posé à la main
+(`position_manuelle`) ne bouge plus aux imports suivants. Le centre du carrefour (centre de
+ses feux) est recalculé ; les voies, elles, se calent à la main (mode « Ajuster »).
+
 Premier essai, Léon Blum × Chopin : 4 branches, 12 connexions et 10 mouvements proposés.
 Les flèches déduites correspondent au marquage OSM (SO : tourne-à-gauche et deux tout droit).
 Les voies générées tombent près des chaussées mais doivent être recalées à la main. C'est le
@@ -274,5 +284,6 @@ Les flèches sont donc **surtout à saisir à la main** : la détection propose,
 |---|---|
 | `config-branches` | Étape 1, première version : branches et flèches par voie (remplacée par `config-lignes`) |
 | `config-lignes` | Étape 1 refondue (voies sur la photo, connexions, passages piétons) et étape 2 : lignes de feux, feux physiques, conflits géométriques |
+| `config-recalage` | Feux posés sur leur mât sur la photo, position OSM conservée |
 | `config-programme` | Étape 3 : éditeur d'étapes, jaune et dégagement, conversion en diagramme |
 | `config-graphes` | Étape 4 : chronogramme, graphe des étapes, comparaison avec les relevés terrain |

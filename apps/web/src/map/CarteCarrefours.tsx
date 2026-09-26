@@ -1,7 +1,7 @@
 import type { LonLat } from '@voirie/engine'
 import type { Bbox, CarrefourResume, CarrefoursGeoJson, FeuResume, FeuxGeoJson } from '@voirie/schema'
 import type { Map as CarteMapLibre } from 'maplibre-gl'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Map, {
   Layer,
   NavigationControl,
@@ -11,7 +11,7 @@ import Map, {
   type MapMouseEvent,
   type MapRef,
 } from 'react-map-gl/maplibre'
-import { CalqueCarrefour } from '../configuration/calque/CalqueCarrefour'
+import { CalqueCarrefour, type ApercuFeu, type FeuPlacable } from '../configuration/calque/CalqueCarrefour'
 import type { Poignee } from '../configuration/modele'
 import type { AffichageConfiguration } from '../configuration/PanneauConfiguration'
 import {
@@ -97,6 +97,8 @@ interface Props {
   /** Glisser-déposer dans l'éditeur de configuration. */
   onDeplacerPoignee: (poignee: Poignee, position: LonLat) => void
   onConnecter: (de: string, vers: string) => void
+  /** Pose un feu sur son mât, ou le remet à sa position OSM (null). */
+  onPlacerFeu: (id: string, position: LonLat | null) => Promise<void>
 }
 
 const CLE_FOND = 'besancon-voirie:fond'
@@ -125,8 +127,36 @@ function useFondPhoto(): [boolean, (photo: boolean) => void] {
 const ZOOM_CONFIGURATION = 18.3
 
 export function CarteCarrefours(props: Props) {
-  const { carrefours, feux, edition, configuration } = props
+  const { carrefours, edition, configuration } = props
   const carte = useRef<MapRef>(null)
+
+  // Feux du carrefour configuré, déplaçables ; celui qu'on tire est dessiné à sa nouvelle place.
+  const [apercuFeu, setApercuFeu] = useState<ApercuFeu | null>(null)
+  const idConfigure = configuration?.carrefourId
+  const feuxPlacables = useMemo(
+    () =>
+      (props.feux?.features ?? [])
+        .filter((f) => f.properties.carrefour_id === idConfigure)
+        .map(
+          ({ id, geometry, properties: p }): FeuPlacable => ({
+            id,
+            type: p.type,
+            position: geometry.coordinates,
+            osm: p.osm_lon === null || p.osm_lat === null ? null : [p.osm_lon, p.osm_lat],
+            placeALaMain: p.position_manuelle,
+          }),
+        ),
+    [props.feux, idConfigure],
+  )
+  const feux = useMemo(() => {
+    if (!props.feux || !apercuFeu) return props.feux
+    return {
+      ...props.feux,
+      features: props.feux.features.map((f) =>
+        f.id === apercuFeu.id ? { ...f, geometry: { ...f.geometry, coordinates: apercuFeu.position } } : f,
+      ),
+    }
+  }, [props.feux, apercuFeu])
   const [photo, setPhoto] = useFondPhoto()
   /** Premier calque de texte du fond de carte : la photo passe dessous, les noms de rues restent lisibles. */
   const [premierTexte, setPremierTexte] = useState<string>()
@@ -264,6 +294,9 @@ export function CarteCarrefours(props: Props) {
           surlignees={new Set(configuration.connexionsSurlignees)}
           onDeplacer={props.onDeplacerPoignee}
           onConnecter={props.onConnecter}
+          feux={feuxPlacables}
+          onPlacerFeu={props.onPlacerFeu}
+          onApercuFeu={setApercuFeu}
         />
       )}
 
@@ -305,6 +338,7 @@ export function CarteCarrefours(props: Props) {
               <strong>Feu {bulle.feu.type === 'pieton' ? 'piéton' : 'véhicule'} libre</strong>
               {bulle.feu.osm_id && <div>Nœud OSM {bulle.feu.osm_id}</div>}
               {!bulle.feu.present_osm && <div>Disparu d'OpenStreetMap</div>}
+              {bulle.feu.position_manuelle && <div>Placé sur son mât (position OSM conservée)</div>}
               <div className="actions">
                 <button onClick={() => (setBulle(undefined), props.onComposerDepuis(bulle.feu))}>
                   Composer un carrefour

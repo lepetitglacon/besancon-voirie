@@ -54,11 +54,13 @@ export function OngletBranches({ brouillon, centre, sources, mode, onMode, onCha
           ⤳ Connecter
         </button>
       </div>
-      <p className="discret">
-        {mode === 'ajuster'
-          ? 'Faites glisser les extrémités des voies et des passages piétons pour les caler sur le marquage de la photo (bouton « Photo aérienne »).'
-          : 'Glissez du point coloré d’une voie entrante vers le point blanc d’une voie sortante. Refaire le même geste retire la connexion.'}
-      </p>
+      {mode !== 'feux' && (
+        <p className="discret">
+          {mode === 'ajuster'
+            ? 'Faites glisser les extrémités des voies et des passages piétons pour les caler sur le marquage de la photo (bouton « Photo aérienne »).'
+            : 'Glissez du point coloré d’une voie entrante vers le point blanc d’une voie sortante. Refaire le même geste retire la connexion.'}
+        </p>
+      )}
 
       {branches.map((branche, index) => (
         <section key={index} className="branche">

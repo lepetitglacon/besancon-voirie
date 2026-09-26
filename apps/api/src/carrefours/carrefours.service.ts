@@ -12,12 +12,11 @@ import type {
 } from '@voirie/schema';
 import { DRIZZLE, type Db } from '../db/db.module.js';
 import { tableExiste, uuids, type Executeur, type Tx } from '../db/sql.js';
+import { recalculerCarrefour } from './positions.js';
 
 const LIMITE_CARREFOURS = 2000;
 /** Voies prises en compte pour proposer un nom. */
 const RAYON_NOMMAGE_M = 20;
-/** Un carrefour à moins de cette distance d'une voie de tram est marqué `pres_tram`. */
-const RAYON_TRAM_M = 25;
 
 const RANG_VOIE = sql.raw(
   `array_position(ARRAY[${HIERARCHIE_VOIES.map((h) => `'${h}'`).join(',')}], regexp_replace(w.tags->>'highway', '_link$', ''))`,
@@ -75,7 +74,7 @@ export class CarrefoursService {
       `);
       const id = rows[0]!.id;
       await tx.execute(sql`UPDATE feu SET carrefour_id = ${id} WHERE id = ANY (${uuids(feux)})`);
-      await this.recalculer(tx, id);
+      await recalculerCarrefour(tx, id);
       return this.resume(tx, id);
     });
   }
@@ -101,7 +100,7 @@ export class CarrefoursService {
           WHERE id = ${id}
         `);
       }
-      await this.recalculer(tx, id);
+      await recalculerCarrefour(tx, id);
       return this.resume(tx, id);
     });
   }
@@ -139,18 +138,6 @@ export class CarrefoursService {
         feux: pris.map((f) => f.id),
       });
     }
-  }
-
-  /** Position (centre des feux) et proximité du tram. */
-  private async recalculer(tx: Tx, id: string): Promise<void> {
-    const presTram = (await tableExiste(tx, 'osm_tram'))
-      ? sql`EXISTS (SELECT 1 FROM osm_tram t WHERE ST_DWithin(t.geom::geography, f.centre::geography, ${RAYON_TRAM_M}))`
-      : sql`false`;
-    await tx.execute(sql`
-      UPDATE carrefour c SET geom = f.centre, pres_tram = ${presTram}
-      FROM (SELECT ST_Centroid(ST_Collect(geom)) AS centre FROM feu WHERE carrefour_id = ${id}) f
-      WHERE c.id = ${id} AND f.centre IS NOT NULL
-    `);
   }
 
   private async resume(db: Executeur, id: string): Promise<CarrefourResume> {

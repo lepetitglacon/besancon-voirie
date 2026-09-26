@@ -198,7 +198,9 @@ CREATE TABLE feu (
   osm_id        bigint UNIQUE,
   type          type_feu NOT NULL,                -- vehicule | pieton
   tags          jsonb NOT NULL DEFAULT '{}',
-  geom          geometry(Point, 4326) NOT NULL,
+  geom          geometry(Point, 4326) NOT NULL,  -- position retenue : OSM, ou le mât sur la photo
+  geom_osm      geometry(Point, 4326),           -- position OSM brute (nulle si ajouté à la main)
+  position_manuelle boolean NOT NULL DEFAULT false, -- posé sur son mât : l'import ne le déplace plus
   present_osm   boolean NOT NULL DEFAULT true,   -- false : disparu d'OSM au dernier import
   carrefour_id  uuid REFERENCES carrefour ON DELETE SET NULL
 );
@@ -335,7 +337,9 @@ Chaque feu OSM **situé dans la commune** devient une ligne de `feu` : type `veh
 `highway=traffic_signals`, sinon `pieton` (`crossing=traffic_signals`, avec ou sans
 `highway`). La synchronisation se fait dans la transaction de l'import (`ON CONFLICT (osm_id)`) :
 - feu nouveau → ajouté, libre (`carrefour_id` nul) ;
-- feu existant → position, type et balises mis à jour, **rattachement conservé** ;
+- feu existant → position OSM (`geom_osm`), type et balises mis à jour, **rattachement
+  conservé** ; `geom` suit la position OSM, sauf pour un feu posé à la main sur son mât
+  (`position_manuelle`), qui ne bouge plus ;
 - feu disparu d'OSM → `present_osm = false`, jamais supprimé.
 
 ### 5.3 Composition manuelle des carrefours
@@ -346,7 +350,8 @@ sur la carte :
 
 | Méthode | Route | Effet |
 |---|---|---|
-| GET | `/api/feux?bbox=` | Feux de l'emprise (type, carrefour, présence OSM) |
+| GET | `/api/feux?bbox=` | Feux de l'emprise (type, carrefour, présence OSM, position OSM) |
+| PUT | `/api/feux/:id/position` `{ position: [lon, lat] \| null }` | Pose le feu sur son mât (à moins de 50 m de sa position OSM), ou le remet à sa position OSM (`null`, 409 pour un feu sans OSM) ; le centre du carrefour suit |
 | GET | `/api/carrefours/suggestion-nom?feux=<uuid>,…&nature=` | Nom proposé d'après les rues proches |
 | POST | `/api/carrefours` `{ feux, nature?, nom? }` | Crée un carrefour à partir de feux **libres** (409 sinon) |
 | PATCH | `/api/carrefours/:id` `{ feux?, nature?, nom? }` | Recompose (les feux retirés redeviennent libres), renomme ; le slug ne change pas |
@@ -416,7 +421,7 @@ Public :
 | Méthode | Route | Réponse |
 |---|---|---|
 | GET | `/api/carrefours?bbox=minLon,minLat,maxLon,maxLat` | GeoJSON FeatureCollection léger (id, nom, statut, nature, pres_tram, nb_feux) |
-| GET | `/api/feux?bbox=…` | GeoJSON des feux (type, carrefour_id, present_osm) |
+| GET | `/api/feux?bbox=…` | GeoJSON des feux (type, carrefour_id, present_osm, position_manuelle, osm_lon, osm_lat) |
 | GET | `/api/carrefours/suggestion-nom?feux=…` | Nom proposé pour un groupe de feux |
 | GET | `/api/carrefours/:id/branches` | Branches, voies et mouvements calculés ([CONFIGURATION.md](CONFIGURATION.md) §3) |
 | GET | `/api/carrefours/:id/branches/detection` | Proposition de branches depuis OSM, non enregistrée |
