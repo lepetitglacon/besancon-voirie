@@ -1,0 +1,26 @@
+# Développement local : PostgreSQL 17 + PostGIS 3.5 + pgRouting 4.0
+# Nom de projet fixe : tous les checkouts (dépôt principal et worktrees) partagent le même
+# conteneur et le même volume. Pas de montage relatif, pour que `docker compose up` lancé
+# depuis un worktree ne recrée pas le conteneur. Bases et extensions : `pnpm db:prepare`.
+name: besancon-voirie
+
+services:
+  db:
+    image: pgrouting/pgrouting:17-3.5-4.0.1
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-voirie}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voirie}
+      POSTGRES_DB: ${POSTGRES_DB:-voirie}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  db-data:

@@ -1,0 +1,83 @@
+:root {
+  --texte: #1d2330;
+  --texte-doux: #5b6475;
+  --fond: #ffffff;
+  --panneau: rgba(255, 255, 255, 0.94);
+  --bordure: #dde1e8;
+  --ok: #1f8a4c;
+  --erreur: #c0392b;
+  --ombre: 0 4px 16px rgba(15, 23, 42, 0.12);
+
+  /* Couleurs des statuts de carrefour (docs/ARCHITECTURE.md §8) */
+  --statut-a-confirmer: #9aa1ad;
+  --statut-non-releve: #6b7280;
+  --statut-estime: #e08a1e;
+  --statut-mesure: #2f6fd6;
+  --statut-verifie: #1f8a4c;
+
+  font: 15px/1.45 system-ui, 'Segoe UI', Roboto, sans-serif;
+  color-scheme: light dark;
+  color: var(--texte);
+  background: var(--fond);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --texte: #e6e9ef;
+    --texte-doux: #a3abba;
+    --fond: #11151c;
+    --panneau: rgba(22, 27, 36, 0.94);
+    --bordure: #2c3442;
+    --ombre: 0 4px 16px rgba(0, 0, 0, 0.45);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+.panneau {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 12px 14px;
+  border: 1px solid var(--bordure);
+  border-radius: 10px;
+  background: var(--panneau);
+  box-shadow: var(--ombre);
+}
+
+.panneau h1 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
+.panneau p {
+  margin: 2px 0;
+  color: var(--texte-doux);
+  font-size: 13px;
+}
+
+.etat-ok {
+  color: var(--ok);
+}
+
+.etat-erreur {
+  color: var(--erreur);
+}
+
+.avertissement {
+  margin-top: 8px !important;
+  font-size: 12px !important;
+}

@@ -1,0 +1,30 @@
+{
+  "name": "besancon-voirie",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.23.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "db:up": "docker compose up -d --wait db",
+    "db:down": "docker compose down",
+    "db:reset": "docker compose down -v && docker compose up -d --wait db",
+    "db:psql": "docker compose exec db psql -U voirie -d voirie",
+    "db:migrate": "pnpm --filter api db:migrate",
+    "build": "pnpm -r build",
+    "build:packages": "pnpm --filter \"./packages/*\" build",
+    "dev": "pnpm build:packages && pnpm -r --parallel dev",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test:e2e": "pnpm --filter api test:e2e",
+    "db:prepare": "pnpm --filter api db:prepare"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.6",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.11"
+  },
+  "license": "AGPL-3.0-only"
+}
