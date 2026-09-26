@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { Bbox, CarrefourResume, FeuResume } from '@voirie/schema'
+import type { Bbox, Branche, CarrefourResume, FeuResume } from '@voirie/schema'
 import { useState } from 'react'
 import { api } from './api'
+import { PanneauConfiguration } from './configuration/PanneauConfiguration'
 import { PanneauEdition, type Edition } from './edition/PanneauEdition'
 import { CarteCarrefours } from './map/CarteCarrefours'
 
@@ -9,6 +10,10 @@ function App() {
   const queryClient = useQueryClient()
   const [bbox, setBbox] = useState<Bbox>()
   const [edition, setEdition] = useState<Edition | null>(null)
+  const [configuration, setConfiguration] = useState<{ carrefour: CarrefourResume; position: [number, number] } | null>(
+    null,
+  )
+  const [branchesDessinees, setBranchesDessinees] = useState<Branche[]>([])
 
   const sante = useQuery({ queryKey: ['sante'], queryFn: api.sante, retry: false })
   const carrefours = useQuery({
@@ -108,13 +113,18 @@ function App() {
           })
         }
         onModifier={modifier}
+        onConfigurer={(carrefour, position) => {
+          setEdition(null)
+          setConfiguration({ carrefour, position })
+        }}
+        configuration={configuration && { position: configuration.position, branches: branchesDessinees }}
         onSupprimer={(carrefour) => {
           if (window.confirm(`Supprimer « ${carrefour.nom} » ? Ses feux redeviendront libres.`)) {
             supprimer.mutate(carrefour)
           }
         }}
       />
-      <aside className="panneau">
+      <aside className={configuration ? 'panneau large' : 'panneau'}>
         <h1>Besançon Voirie</h1>
         <p>Inventaire citoyen des feux tricolores.</p>
         {sante.isSuccess && (
@@ -124,7 +134,14 @@ function App() {
         )}
         {sante.isError && <p className="etat-erreur">API injoignable</p>}
 
-        {edition ? (
+        {configuration ? (
+          <PanneauConfiguration
+            key={configuration.carrefour.id}
+            carrefour={configuration.carrefour}
+            onBrouillon={setBranchesDessinees}
+            onFermer={() => setConfiguration(null)}
+          />
+        ) : edition ? (
           <PanneauEdition
             edition={edition}
             enregistrement={{ enCours: enregistrer.isPending, erreur: enregistrer.error?.message ?? null }}

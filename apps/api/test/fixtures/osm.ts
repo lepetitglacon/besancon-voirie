@@ -44,7 +44,12 @@ export const ELEMENTS_OSM: OverpassElement[] = [
   noeud(104, 6.03, 47.2498, FEU_PIETON),
   noeud(105, 6.0303, 47.2503, FEU_PIETON_SANS_HIGHWAY),
   voie(1001, { highway: 'residential', name: 'Rue A' }, [[6.028, 47.25], [6.032, 47.25]]),
-  voie(1002, { highway: 'primary', name: 'Avenue B' }, [[6.03, 47.248], [6.03, 47.252]]),
+  // Tracée du sud vers le nord : les flèches « forward » concernent l'arrivée par le sud.
+  voie(
+    1002,
+    { highway: 'primary', name: 'Avenue B', lanes: '3', 'lanes:forward': '2', 'turn:lanes:forward': 'left|through;right' },
+    [[6.03, 47.248], [6.03, 47.252]],
+  ),
   // B : deux graphies de la même avenue et une voie de tram
   noeud(201, 6.06, 47.25, FEU),
   voie(2001, { highway: 'secondary', name: 'Avenue du Maréchal Foch' }, [[6.058, 47.25], [6.06, 47.25]]),

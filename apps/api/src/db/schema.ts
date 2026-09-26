@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  customType,
   boolean,
   geometry,
   index,
@@ -18,6 +19,14 @@ import type { Controleur, IntervalleVert, Plage } from '@voirie/schema';
 
 // Tables du projet — voir docs/ARCHITECTURE.md §4.
 // Les tables issues d'OpenStreetMap (osm_*) sont gérées par l'import, pas par Drizzle.
+
+/**
+ * LineString WGS84. Drizzle ne sait typer que les points : on déclare le type SQL exact et
+ * on lit ou écrit ces colonnes en SQL (ST_AsGeoJSON / ST_GeomFromGeoJSON).
+ */
+const ligne = customType<{ data: string; driverData: string }>({
+  dataType: () => 'geometry(LineString, 4326)',
+});
 
 const creeLe = () => timestamp('cree_le', { withTimezone: true }).notNull().defaultNow();
 
@@ -75,6 +84,10 @@ export const feu = pgTable(
   (t) => [index('feu_geom_idx').using('gist', t.geom), index('feu_carrefour_idx').on(t.carrefourId)],
 );
 
+export const sensBranche = pgEnum('sens_branche', ['entrant', 'sortant', 'double']);
+export const typeVoie = pgEnum('type_voie', ['generale', 'bus', 'velo', 'tram']);
+
+/** Rue qui arrive au carrefour — docs/CONFIGURATION.md §3. */
 export const branche = pgTable(
   'branche',
   {
@@ -85,9 +98,29 @@ export const branche = pgTable(
     code: text('code').notNull(),
     nom: text('nom'),
     osmWayId: bigint('osm_way_id', { mode: 'number' }),
+    /** Degrés, sens horaire depuis le nord, du centre du carrefour vers la branche. */
     azimutDeg: real('azimut_deg'),
+    sens: sensBranche('sens').notNull().default('double'),
+    voiesSortantes: smallint('voies_sortantes').notNull().default(1),
+    /** Du centre du carrefour vers la branche. */
+    geom: ligne('geom'),
   },
   (t) => [unique().on(t.carrefourId, t.code)],
+);
+
+/** Voie entrante d'une branche : rang 0 = la plus à gauche dans le sens d'arrivée. */
+export const voie = pgTable(
+  'voie',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    brancheId: uuid('branche_id')
+      .notNull()
+      .references(() => branche.id, { onDelete: 'cascade' }),
+    rang: smallint('rang').notNull(),
+    mouvements: text('mouvements').array().notNull(),
+    type: typeVoie('type').notNull().default('generale'),
+  },
+  (t) => [unique().on(t.brancheId, t.rang)],
 );
 
 export const ligneFeux = pgTable(

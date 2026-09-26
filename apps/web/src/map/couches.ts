@@ -1,5 +1,11 @@
 import type { ExpressionSpecification } from 'maplibre-gl'
-import type { CircleLayerSpecification } from 'react-map-gl/maplibre'
+import type {
+  CircleLayerSpecification,
+  RasterLayerSpecification,
+  RasterSourceSpecification,
+  LineLayerSpecification,
+  SymbolLayerSpecification,
+} from 'react-map-gl/maplibre'
 
 export const COULEURS = {
   selection: '#2f6fd6',
@@ -69,5 +75,58 @@ export function coucheFeux(selection: string[], carrefourEdite: string | null, e
       'circle-stroke-width': ['case', ['==', ['get', 'present_osm'], false], 2, 1],
       'circle-stroke-color': ['case', ['==', ['get', 'present_osm'], false], '#c0392b', '#ffffff'],
     },
+  }
+}
+
+/** Branches du carrefour en configuration : du centre vers chaque rue. */
+export const coucheBranches: LineLayerSpecification = {
+  id: 'branches',
+  type: 'line',
+  source: 'branches',
+  filter: ['==', ['geometry-type'], 'LineString'],
+  layout: { 'line-cap': 'round' },
+  paint: {
+    'line-color': COULEURS.selection,
+    'line-width': 5,
+    'line-opacity': 0.75,
+    'line-dasharray': ['case', ['==', ['get', 'sens'], 'sortant'], ['literal', [1, 1.5]], ['literal', [1, 0]]],
+  },
+}
+
+export const coucheCodesBranches: SymbolLayerSpecification = {
+  id: 'branches-codes',
+  type: 'symbol',
+  source: 'branches',
+  filter: ['==', ['geometry-type'], 'Point'],
+  layout: {
+    'text-field': ['get', 'code'],
+    'text-size': 15,
+    'text-font': ['Noto Sans Bold'],
+    'text-allow-overlap': true,
+  },
+  paint: { 'text-color': '#ffffff', 'text-halo-color': COULEURS.selection, 'text-halo-width': 3 },
+}
+
+/**
+ * Photographies aériennes de l'IGN (BD ORTHO, Licence Ouverte), sans clé, via la
+ * Géoplateforme. Environ 20 cm par pixel en ville ; tuiles disponibles jusqu'au zoom 19.
+ */
+export const SOURCE_PHOTO: RasterSourceSpecification = {
+  type: 'raster',
+  tiles: [
+    'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS' +
+      '&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
+  ],
+  tileSize: 256,
+  maxzoom: 19,
+  attribution: '© <a href="https://geoservices.ign.fr/bdortho" target="_blank" rel="noopener">IGN</a> BD ORTHO',
+}
+
+export function couchePhoto(visible: boolean): RasterLayerSpecification {
+  return {
+    id: 'photo-aerienne',
+    type: 'raster',
+    source: 'photo-aerienne',
+    layout: { visibility: visible ? 'visible' : 'none' },
   }
 }

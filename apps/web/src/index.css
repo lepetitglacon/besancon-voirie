@@ -195,3 +195,145 @@ kbd {
   font: inherit;
   font-size: 11px;
 }
+
+.panneau.large {
+  max-width: min(440px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+
+.panneau h3 {
+  margin: 12px 0 4px;
+  font-size: 13px;
+}
+
+.branche {
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid var(--bordure);
+  border-radius: 8px;
+}
+
+.branche-entete,
+.branche-ligne {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.branche-ligne {
+  margin-top: 6px;
+}
+
+.configuration input,
+.configuration select {
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--bordure);
+  border-radius: 6px;
+  background: var(--champ);
+  color: var(--texte);
+  font: inherit;
+  font-size: 13px;
+}
+
+.branche-entete input {
+  flex: 1;
+}
+
+.branche-entete input.code {
+  flex: 0 0 52px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.en-ligne {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--texte-doux);
+  font-size: 12px;
+}
+
+.en-ligne input {
+  width: 48px;
+}
+
+.discret {
+  color: var(--texte-doux);
+  font-size: 12px;
+}
+
+.voies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.voie {
+  display: flex;
+  gap: 1px;
+  padding: 3px;
+  border: 1px dashed var(--bordure);
+  border-radius: 6px;
+}
+
+button.fleche {
+  width: 26px;
+  padding: 2px 0;
+  border-color: transparent;
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.35;
+}
+
+button.fleche.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-texte);
+  opacity: 1;
+}
+
+.badge {
+  align-self: center;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+.badge.osm {
+  background: rgba(31, 138, 76, 0.15);
+  color: var(--ok);
+}
+
+.badge.defaut {
+  background: rgba(224, 138, 30, 0.18);
+  color: #a15f0c;
+}
+
+.a-enregistrer {
+  color: #a15f0c;
+  font-size: 12px;
+}
+
+ul.mouvements {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.bascule-fond {
+  position: absolute;
+  top: 110px;
+  right: 10px;
+  z-index: 1;
+}
+
+.bascule-fond button {
+  background: #ffffff;
+  color: #1d2330;
+  border-color: #c9ced8;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  font-size: 12px;
+}

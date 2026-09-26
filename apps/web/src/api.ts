@@ -1,5 +1,8 @@
 import type {
   Bbox,
+  BranchesCarrefour,
+  ConfigurationBranches,
+  DetectionBranches,
   CarrefourResume,
   CarrefoursGeoJson,
   CreerCarrefour,
@@ -39,4 +42,12 @@ export const api = {
   modifierCarrefour: (id: string, modification: ModifierCarrefour) =>
     requete<CarrefourResume>(`/api/carrefours/${id}`, { method: 'PATCH', body: JSON.stringify(modification) }),
   supprimerCarrefour: (id: string) => requete<void>(`/api/carrefours/${id}`, { method: 'DELETE' }),
+  branches: (carrefourId: string) => requete<BranchesCarrefour>(`/api/carrefours/${carrefourId}/branches`),
+  detecterBranches: (carrefourId: string) =>
+    requete<DetectionBranches>(`/api/carrefours/${carrefourId}/branches/detection`),
+  enregistrerBranches: (carrefourId: string, configuration: ConfigurationBranches) =>
+    requete<BranchesCarrefour>(`/api/carrefours/${carrefourId}/branches`, {
+      method: 'PUT',
+      body: JSON.stringify(configuration),
+    }),
 }

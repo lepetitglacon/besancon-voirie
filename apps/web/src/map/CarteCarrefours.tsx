@@ -1,6 +1,6 @@
-import type { Bbox, CarrefourResume, CarrefoursGeoJson, FeuResume, FeuxGeoJson } from '@voirie/schema'
+import type { Bbox, Branche, CarrefourResume, CarrefoursGeoJson, FeuResume, FeuxGeoJson } from '@voirie/schema'
 import type { Map as CarteMapLibre } from 'maplibre-gl'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Map, {
   Layer,
   NavigationControl,
@@ -8,8 +8,16 @@ import Map, {
   Source,
   type MapLayerMouseEvent,
   type MapMouseEvent,
+  type MapRef,
 } from 'react-map-gl/maplibre'
-import { coucheCarrefours, coucheFeux } from './couches'
+import {
+  coucheBranches,
+  coucheCarrefours,
+  coucheCodesBranches,
+  coucheFeux,
+  couchePhoto,
+  SOURCE_PHOTO,
+} from './couches'
 
 /** Centre de Besançon (Pont Battant). */
 const VUE_INITIALE = { longitude: 6.0241, latitude: 47.2378, zoom: 13.5 }
@@ -79,10 +87,74 @@ interface Props {
   onComposerDepuis: (feu: FeuResume) => void
   onModifier: (carrefour: CarrefourResume) => void
   onSupprimer: (carrefour: CarrefourResume) => void
+  onConfigurer: (carrefour: CarrefourResume, position: [number, number]) => void
+  /** Carrefour en cours de configuration : ses branches sont dessinées, les bulles désactivées. */
+  configuration: { position: [number, number]; branches: Branche[] } | null
 }
 
+const CLE_FOND = 'besancon-voirie:fond'
+
+/** Préférence de fond de carte, mémorisée dans le navigateur (si le stockage est disponible). */
+function useFondPhoto(): [boolean, (photo: boolean) => void] {
+  const [photo, setPhoto] = useState(() => {
+    try {
+      return localStorage.getItem(CLE_FOND) === 'photo'
+    } catch {
+      return false
+    }
+  })
+  const choisir = (valeur: boolean) => {
+    setPhoto(valeur)
+    try {
+      localStorage.setItem(CLE_FOND, valeur ? 'photo' : 'plan')
+    } catch {
+      // Stockage indisponible (navigation privée…) : le choix vaut pour la session.
+    }
+  }
+  return [photo, choisir]
+}
+
+/** Zoom utilisé pour configurer un carrefour. */
+const ZOOM_CONFIGURATION = 18.3
+
 export function CarteCarrefours(props: Props) {
-  const { carrefours, feux, edition } = props
+  const { carrefours, feux, edition, configuration } = props
+  const carte = useRef<MapRef>(null)
+  const [photo, setPhoto] = useFondPhoto()
+  /** Premier calque de texte du fond de carte : la photo passe dessous, les noms de rues restent lisibles. */
+  const [premierTexte, setPremierTexte] = useState<string>()
+
+  // Recentre la carte sur le carrefour quand on entre en configuration.
+  const [lon, lat] = configuration?.position ?? []
+  useEffect(() => {
+    if (lon !== undefined && lat !== undefined) {
+      carte.current?.flyTo({ center: [lon, lat], zoom: ZOOM_CONFIGURATION, duration: 800 })
+    }
+  }, [lon, lat])
+
+  const branchesGeoJson = useMemo(
+    () => ({
+      type: 'FeatureCollection' as const,
+      // Une ligne par branche, et un point à son extrémité pour y écrire le code.
+      features: (configuration?.branches ?? []).flatMap((b) =>
+        b.geom
+          ? [
+              {
+                type: 'Feature' as const,
+                properties: { code: b.code, sens: b.sens },
+                geometry: { type: 'LineString' as const, coordinates: b.geom },
+              },
+              {
+                type: 'Feature' as const,
+                properties: { code: b.code, sens: b.sens },
+                geometry: { type: 'Point' as const, coordinates: b.geom[b.geom.length - 1]! },
+              },
+            ]
+          : [],
+      ),
+    }),
+    [configuration?.branches],
+  )
   const [bulle, setBulle] = useState<Bulle>()
   const [survol, setSurvol] = useState(false)
   const [rectangle, setRectangle] = useState<Rectangle | null>(null)
@@ -122,7 +194,7 @@ export function CarteCarrefours(props: Props) {
   const cliquer = (evenement: MapLayerMouseEvent) => {
     const objet = evenement.features?.[0]
     const { lng: longitude, lat: latitude } = evenement.lngLat
-    if (!objet) return setBulle(undefined)
+    if (!objet || configuration) return setBulle(undefined)
 
     if (objet.layer.id === 'feux') {
       const feu = objet.properties as FeuResume
@@ -139,6 +211,7 @@ export function CarteCarrefours(props: Props) {
 
   return (
     <Map
+      ref={carte}
       initialViewState={VUE_INITIALE}
       mapStyle={STYLE_CARTE}
       style={{ width: '100%', height: '100%' }}
@@ -153,10 +226,23 @@ export function CarteCarrefours(props: Props) {
       onMouseEnter={() => setSurvol(true)}
       onMouseLeave={() => setSurvol(false)}
       onClick={cliquer}
-      onLoad={(evenement) => props.onEmprise(emprise(evenement.target))}
+      onLoad={(evenement) => {
+        setPremierTexte(evenement.target.getStyle().layers.find((calque) => calque.type === 'symbol')?.id)
+        props.onEmprise(emprise(evenement.target))
+      }}
       onMoveEnd={(evenement) => props.onEmprise(emprise(evenement.target))}
     >
       <NavigationControl position="top-right" />
+      <div className="bascule-fond">
+        <button aria-pressed={photo} onClick={() => setPhoto(!photo)}>
+          {photo ? 'Plan' : 'Photo aérienne'}
+        </button>
+      </div>
+      {premierTexte && (
+        <Source id="photo-aerienne" {...SOURCE_PHOTO}>
+          <Layer {...couchePhoto(photo)} beforeId={premierTexte} />
+        </Source>
+      )}
       {rectangle && (
         <div
           className="rectangle-selection"
@@ -173,13 +259,19 @@ export function CarteCarrefours(props: Props) {
           <Layer {...coucheCarrefours(edition !== null)} />
         </Source>
       )}
+      {configuration && (
+        <Source id="branches" type="geojson" data={branchesGeoJson}>
+          <Layer {...coucheBranches} />
+          <Layer {...coucheCodesBranches} />
+        </Source>
+      )}
       {feux && (
         <Source id="feux" type="geojson" data={feux}>
           <Layer {...coucheFeux(edition?.selection ?? [], edition?.carrefourId ?? null, edition !== null)} />
         </Source>
       )}
 
-      {bulle && !edition && (
+      {bulle && !edition && !configuration && (
         <Popup
           longitude={bulle.longitude}
           latitude={bulle.latitude}
@@ -196,7 +288,17 @@ export function CarteCarrefours(props: Props) {
               </div>
               {bulle.carrefour.pres_tram && <div>Tram à proximité (priorité probable)</div>}
               <div className="actions">
-                <button onClick={() => (setBulle(undefined), props.onModifier(bulle.carrefour))}>Modifier</button>
+                <button
+                  className="principal"
+                  onClick={() => {
+                    const objet = carrefours?.features.find((f) => f.id === bulle.carrefour.id)
+                    setBulle(undefined)
+                    if (objet) props.onConfigurer(bulle.carrefour, objet.geometry.coordinates)
+                  }}
+                >
+                  Configurer
+                </button>
+                <button onClick={() => (setBulle(undefined), props.onModifier(bulle.carrefour))}>Feux</button>
                 <button className="danger" onClick={() => (setBulle(undefined), props.onSupprimer(bulle.carrefour))}>
                   Supprimer
                 </button>

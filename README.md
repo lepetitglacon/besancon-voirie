@@ -510,6 +510,11 @@ métropole. Un simple mail au service Mobilité peut les obtenir, facultatif. Le
 - [x] Import OSM (Overpass) : 860 feux dans la table `feu` (359 véhicule, 501 piéton), sans regroupement automatique.
 - [x] Composition manuelle des carrefours sur la carte (sélection des feux, nom proposé, modification, suppression).
 - [ ] Composer les ~130 carrefours et traversées de la ville.
+- [x] Sélection des feux par rectangle (bouton, ou Maj + glisser).
+- [x] Configuration, étape 1 : branches et voies (détection OSM, flèches par voie, mouvements déduits) — voir [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+- [ ] Configuration, étape 2 : lignes de feux et matrice des conflits.
+- [ ] Configuration, étape 3 : programme par étapes, jaune et dégagement, diagramme de feux.
+- [ ] Configuration, étape 4 : graphe des étapes (feux actués, priorité tram).
 - [x] Carte MapLibre : carrefours colorés par statut, bulle avec nom, nature et tram.
 - [ ] Fiche carrefour avec diagramme de feux ; calcul des branches (`ST_Azimuth`).
 - [ ] `engine/` : phases, rouges de dégagement, capacité par ligne, contrôles de cohérence.

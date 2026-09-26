@@ -1,7 +1,9 @@
 # Architecture
 
 > Document de référence technique. Le contexte, les phases et la méthode sont dans le
-> [README](../README.md). Ce document décrit **comment** le projet est construit.
+> [README](../README.md). Ce document décrit **comment** le projet est construit. La
+> configuration d'un carrefour (branches, voies, lignes de feux, programme) est détaillée
+> dans [CONFIGURATION.md](CONFIGURATION.md).
 
 ## Sommaire
 
@@ -77,7 +79,7 @@ Principes :
 | Gestion du monorepo | pnpm workspaces | pnpm 11 |
 | Front | React + Vite | React 19, Vite 8 |
 | Carte | MapLibre GL JS via `react-map-gl/maplibre` | MapLibre **5.x** (voir note) |
-| Fond de carte | OpenFreeMap, style `liberty` (attribution OSM incluse) | — |
+| Fond de carte | OpenFreeMap, style `liberty` (attribution OSM incluse), et bouton « Photo aérienne » : IGN BD ORTHO (Géoplateforme, sans clé, zoom 19 max), glissée sous les noms de rues | — |
 | Diagrammes | SVG + `d3-scale` / `d3-axis` | — |
 | Données côté front | TanStack Query | 5.x |
 | Validation / types partagés | zod + `ZodValidationPipe` maison côté Nest | zod 4 |
@@ -416,6 +418,8 @@ Public :
 | GET | `/api/carrefours?bbox=minLon,minLat,maxLon,maxLat` | GeoJSON FeatureCollection léger (id, nom, statut, nature, pres_tram, nb_feux) |
 | GET | `/api/feux?bbox=…` | GeoJSON des feux (type, carrefour_id, present_osm) |
 | GET | `/api/carrefours/suggestion-nom?feux=…` | Nom proposé pour un groupe de feux |
+| GET | `/api/carrefours/:id/branches` | Branches, voies et mouvements calculés ([CONFIGURATION.md](CONFIGURATION.md) §3) |
+| GET | `/api/carrefours/:id/branches/detection` | Proposition de branches depuis OSM, non enregistrée |
 | GET | `/api/carrefours/:slug` | Carrefour complet : branches, lignes, plans, synthèse des relevés validés |
 | GET | `/api/corridors` | Liste + géométrie |
 | GET | `/api/corridors/:slug` | Corridor, carrefours ordonnés, distances, plans, décalages actuels |
@@ -433,6 +437,7 @@ Admin (cookie de session, un seul compte) :
 | POST | `/api/admin/releves/:id/rejeter` | Avec motif |
 | PUT | `/api/admin/carrefours/:id` | Édition (nom, branches, lignes, contrôleur) |
 | POST / PATCH / DELETE | `/api/carrefours[/:id]` | Composition manuelle des carrefours (§5.3). Pour l'instant protégée par `EDITION_LOCALE` |
+| PUT | `/api/carrefours/:id/branches` | Remplace branches et voies (`EDITION_LOCALE`) |
 | PUT | `/api/admin/corridors/:id` | Création/édition, recalcul des distances |
 | POST | `/api/admin/simulations` | Phase 2 : met un job en file |
 
