@@ -103,6 +103,10 @@ Notes de mise en place (26/09/2026) :
   (`apps/api/src/common/`) le remplace.
 - **drizzle-kit 0.31 ignore l'option `srid`** des colonnes `geometry` : la migration générée
   est corrigée à la main en `geometry(Point, 4326)`. À vérifier après chaque `db:generate`.
+- **Migrations horodatées** (27/09/2026) : `drizzle-kit migrate` n'applique que les
+  migrations plus récentes que la dernière appliquée en base. Les migrations se nomment
+  désormais par leur horodatage, et `pnpm db:verifier voirie` contrôle le journal d'une branche
+  avant son merge dans main (règle détaillée dans `CLAUDE.md`).
 
 ---
 

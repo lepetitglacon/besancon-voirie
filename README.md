@@ -34,6 +34,7 @@ pnpm dev            # packages en watch + API :3000 + web :5173
 | `pnpm typecheck` / `pnpm lint` | Vérifications TypeScript et oxlint |
 | `pnpm db:psql` | Console SQL sur la base de développement |
 | `pnpm db:migrate` | Applique les nouvelles migrations Drizzle |
+| `pnpm db:verifier [base]` | Compare le journal des migrations à une base (par défaut celle du `.env`) : à lancer avant tout merge, voir `CLAUDE.md` |
 | `pnpm db:reset` | Recrée le conteneur de zéro (supprime le volume et toutes les bases) |
 
 ### Avec le Nevven Worktree Manager

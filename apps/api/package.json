@@ -25,6 +25,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:prepare": "node scripts/prepare-db.ts && drizzle-kit migrate",
+    "db:verifier": "node scripts/verifier-migrations.ts",
     "osm:import": "node scripts/osm.ts import",
     "osm:seed": "node scripts/osm.ts seed"
   },
