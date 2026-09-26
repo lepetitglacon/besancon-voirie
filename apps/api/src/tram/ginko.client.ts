@@ -65,7 +65,9 @@ export function decoderTripUpdates(octets: Uint8Array): FluxTempsReel {
       })
       .filter((passage) => passage.arrivee > 0 && passage.arret && passage.sequence >= 0)
       .sort((a, b) => a.sequence - b.sequence);
-    courses.push({ course, vehicule: tripUpdate.vehicle?.id ?? undefined, arrets });
+    const date = tripUpdate.trip.startDate;
+    const jour = date && /^\d{8}$/.test(date) ? `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6)}` : undefined;
+    courses.push({ course, jour, vehicule: tripUpdate.vehicle?.id ?? undefined, arrets });
   }
   return { horodatage: Number(message.header.timestamp ?? 0), courses };
 }

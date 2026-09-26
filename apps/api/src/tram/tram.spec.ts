@@ -1,5 +1,12 @@
 import { construireReseauTram, lireCsv, secondesGtfs, type FichiersGtfs } from './gtfs.js';
-import { dureesObservees, positionnerTrams, type FluxTempsReel } from './temps-reel.js';
+import type { TronconObserve } from '@voirie/schema';
+import {
+  choisirTroncons,
+  dureesObservees,
+  ECHANTILLONS_MIN,
+  positionnerTrams,
+  type FluxTempsReel,
+} from './temps-reel.js';
 
 // Mini-réseau : une ligne de tram A → B → C (vers l'est, ~750 m par tronçon) et un bus.
 const GTFS: FichiersGtfs = {
@@ -126,6 +133,7 @@ describe('positionnerTrams', () => {
       arretSuivant: 'Arrêt B',
       debut: 0,
       duree: 100,
+      sourceDuree: 'flux',
       arrivee: (T0 + 100) * 1000,
     });
     expect(trams[0]!.fin).toBeCloseTo(755, -1);
@@ -139,5 +147,54 @@ describe('positionnerTrams', () => {
   it('ignore une rame dont le départ est lointain', () => {
     const { trams } = positionnerTrams(reseau, { ...flux, courses: [flux.courses[1]!] }, (T0 - 60) * 1000);
     expect(trams).toEqual([]);
+  });
+});
+
+describe('historique des tronçons', () => {
+  const reseau = construireReseauTram(GTFS);
+  const troncon = (n: number, p50: number, autre: Partial<TronconObserve> = {}): TronconObserve => ({
+    parcours: '101-0',
+    depart: 'A',
+    arrivee: 'B',
+    n,
+    p10: p50 - 10,
+    p50,
+    p90: p50 + 30,
+    reference: p50 - 15,
+    ...autre,
+  });
+  const flux: FluxTempsReel = {
+    horodatage: T0 + 60,
+    courses: [
+      {
+        course: 'C1',
+        vehicule: '7',
+        arrets: [{ sequence: 3, arret: 'B', arrivee: T0 + 100, depart: T0 + 100 }],
+      },
+    ],
+  };
+
+  it('préfère l’heure en cours, puis la journée, si assez de passages', () => {
+    const peu = choisirTroncons([troncon(ECHANTILLONS_MIN - 1, 80)], [troncon(40, 95)]);
+    expect(peu.get('101-0|A|B')?.p50).toBe(95);
+    const assez = choisirTroncons([troncon(ECHANTILLONS_MIN, 80)], [troncon(40, 95)]);
+    expect(assez.get('101-0|A|B')?.p50).toBe(80);
+    expect(choisirTroncons([], [troncon(2, 95)]).size).toBe(0);
+  });
+
+  it('prend la durée médiane observée et sa dispersion, avec la calibration', () => {
+    const historique = {
+      troncons: choisirTroncons([troncon(12, 110)], []),
+      calibration: [[30, 6], [60, 9]] as Array<[number, number]>,
+    };
+    const { trams, calibration } = positionnerTrams(reseau, flux, (T0 + 60) * 1000, historique);
+    expect(calibration).toEqual(historique.calibration);
+    expect(trams[0]).toMatchObject({
+      sourceDuree: 'historique',
+      duree: 110,
+      echantillons: 12,
+      dureeRapide: 100,
+      dureeLente: 140,
+    });
   });
 });

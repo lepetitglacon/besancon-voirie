@@ -7,6 +7,7 @@ import Map, {
   Source,
   type CircleLayerSpecification,
 } from 'react-map-gl/maplibre'
+import { FondDeCarte, type OptionsFond } from './FondDeCarte'
 
 /** Centre de Besançon (Pont Battant). */
 const VUE_INITIALE = { longitude: 6.0241, latitude: 47.2378, zoom: 13.5 }
@@ -41,12 +42,14 @@ function emprise(carte: CarteMapLibre): Bbox {
 
 interface Props {
   carrefours: CarrefoursGeoJson | undefined
+  afficherCarrefours: boolean
+  fond: OptionsFond
   onEmprise: (bbox: Bbox) => void
   /** Couches supplémentaires (trams…). */
   children?: ReactNode
 }
 
-export function CarteCarrefours({ carrefours, onEmprise, children }: Props) {
+export function CarteCarrefours({ carrefours, afficherCarrefours, fond, onEmprise, children }: Props) {
   return (
     <Map
       initialViewState={VUE_INITIALE}
@@ -55,11 +58,12 @@ export function CarteCarrefours({ carrefours, onEmprise, children }: Props) {
       onLoad={(evenement) => onEmprise(emprise(evenement.target))}
       onMoveEnd={(evenement) => onEmprise(emprise(evenement.target))}
     >
-      <NavigationControl position="top-right" />
+      <NavigationControl position="top-right" visualizePitch={fond.relief3d} />
+      <FondDeCarte {...fond} />
       {children}
       {carrefours && (
         <Source id="carrefours" type="geojson" data={carrefours}>
-          <Layer {...coucheCarrefours} />
+          <Layer {...coucheCarrefours} layout={{ visibility: afficherCarrefours ? 'visible' : 'none' }} />
         </Source>
       )}
     </Map>

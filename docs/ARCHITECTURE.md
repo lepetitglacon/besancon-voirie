@@ -273,6 +273,27 @@ CREATE TABLE simulation (
 );
 ```
 
+Historique du tram (§8.2) :
+
+```sql
+CREATE TABLE tram_passage (             -- une rame est passée à un arrêt
+  jour            date NOT NULL,        -- jour de service de la course
+  course          text NOT NULL,        -- trip_id GTFS
+  sequence        smallint NOT NULL,
+  vehicule        text,                 -- numéro SAE de la rame
+  parcours        text NOT NULL,        -- route_id-direction_id
+  arret           text NOT NULL,
+  arret_precedent text,
+  heure_prevue    timestamptz NOT NULL, -- dernière prévision avant disparition = heure de passage
+  detecte_a       timestamptz NOT NULL, -- disparition de l'arrêt dans le flux
+  heure_theorique timestamptz,          -- horaire GTFS
+  previsions      jsonb NOT NULL,       -- { "30": epoch, "60": …, "600": … } : prévision à chaque horizon
+  PRIMARY KEY (jour, course, sequence)
+);
+-- Vue tram_troncon_observe : durée de chaque tronçon (passage − passage à l'arrêt précédent
+-- de la même course), avec l'heure locale et le type de jour (semaine / samedi / dimanche).
+```
+
 Les schémas Drizzle (`apps/api/src/db/schema.ts`) reflètent ces tables. Drizzle gère
 `geometry(point)` nativement. Pour `LineString`, on passe par un `customType` qui lit et
 écrit du GeoJSON (`ST_AsGeoJSON` / `ST_GeomFromGeoJSON`).
@@ -376,7 +397,7 @@ Bande passante = mesure de l'intersection, sur le cercle [0, C), de ces interval
 | `AdminModule` | Authentification admin, modération, édition des carrefours et corridors |
 | `ExportsModule` | GeoJSON, GeoPackage Lambert 93 (`ogr2ogr` sur la base), CSV |
 | `TimeModule` | `GET /time`, pour la synchronisation d'horloge du chrono |
-| `TramModule` | Tram en temps réel : GTFS et GTFS-RT Ginko, mis en cache (voir §8.1) |
+| `TramModule` | Tram en temps réel : GTFS et GTFS-RT Ginko, mis en cache (§8.1) ; collecte des passages et historique (§8.2) |
 | `JobsModule` | pg-boss : publication des jobs (recalculs, simulations) |
 | `CommandsModule` | nest-commander : `osm:import`, `carrefours:seed`, `corridors:recalculer` |
 
@@ -394,6 +415,8 @@ Public :
 | GET | `/api/time` | `{ now: <ms epoch> }` |
 | GET | `/api/tram/reseau` | Parcours tram (tracé, arrêts et leur distance le long du tracé) |
 | GET | `/api/tram/temps-reel` | Par rame : tronçon en cours, durée prévue, arrivée prévue à l'arrêt suivant |
+| GET | `/api/tram/historique/troncons?typeJour=semaine&heure=8&jours=28` | Durées observées par tronçon (n, p10, p50, p90, référence) |
+| GET | `/api/tram/historique/etat` | Nombre de passages enregistrés, premier et dernier, collecte active ou non |
 | GET | `/api/exports/carrefours.geojson` | Export ODbL |
 | GET | `/api/exports/carrefours.gpkg?srid=2154` | Export Lambert 93 |
 
@@ -484,6 +507,54 @@ restants. Clé API dans `GINKO_API_KEY` ; GTFS statique public, licence ODbL.
   un peu, la rame attend sur place : elle ne recule jamais. Un clic sur une rame ouvre le détail
   (tronçon, arrivée prévue, vitesse moyenne, longueur de la zone).
 
+### 8.2 Historique du tram
+
+Sans mémoire, on ne connaît que les prévisions de Ginko à l'instant : ni où les rames perdent
+du temps, ni la fiabilité réelle des estimations. L'API enregistre donc chaque passage.
+
+- **Collecte** (`CollecteTramService`, activée par `TRAM_COLLECTE=true`) : le flux est lu
+  toutes les 10 s, même sans personne sur la carte. `DetecteurPassages` compare deux lectures
+  successives. Un arrêt qui disparaît de la liste d'une course est un passage, daté par sa
+  dernière heure prévue. Un arrêt retiré plus de 2 min avant son heure est écarté (arrêt
+  sauté, régulation). Le terminus est enregistré quand la course disparaît près de son heure.
+  Pour chaque passage, on garde aussi la prévision faite 30 s, 1, 2, 5 et 10 min avant. Un
+  passage pèse environ 150 octets hors index. Avec ~350 courses tram par jour de semaine,
+  ça fait ~9 000 passages par jour, soit de l'ordre du gigaoctet par an index compris. La collecte tourne dans l'API en attendant `apps/worker`, et seulement tant que l'API
+  tourne : un redémarrage perd les passages en cours de détection.
+- **Durées des tronçons** : médiane (p50) et dispersion (p10, p90) sur les 28 derniers jours,
+  pour le type de jour et l'heure en cours. Il faut au moins 5 passages, sinon on prend la
+  journée entière. En dessous, on retombe sur les prévisions du flux, puis sur les horaires
+  théoriques. `sourceDuree` indique la source retenue.
+- **Estimation** : la durée médiane donne la vitesse, et les p10 et p90 bornent la vitesse de
+  la zone probable (à la place de `ecartVitesse`). La calibration (80e centile de l'erreur des
+  prévisions Ginko par horizon, 20 passages minimum) remplace la marge fixe sur le temps
+  restant. Premières mesures du 26/09/2026 : 7 s à 30 s, 13 s à 1 min, 31 s à 2 min.
+- **Pertes de temps** : pas montrées dans la vue grand public, l'historique sert d'abord aux
+  prédictions. On les trouve dans le mode « Données brutes » (§8.3), qui colore chaque tronçon
+  par la durée médiane du créneau moins la référence, c'est-à-dire le p10 toutes heures
+  confondues (le tronçon quand ça roule bien). C'est le temps perdu habituel : feux,
+  carrefours, montées et descentes. Les tronçons à moins de 5 passages sont estompés. Prochaine étape : croiser avec les carrefours à feux traversés
+  (priorité tram).
+- Limites : pas de GPS, donc la perte est connue par tronçon, pas au mètre près. Le temps à
+  quai n'est pas séparable du roulage (Ginko ne publie pas de départ distinct). Les fériés et
+  les vacances scolaires ne sont pas distingués.
+
+
+### 8.3 Modes d'affichage et fond de carte
+
+- **Carte** : la vue grand public (carrefours, trams en temps réel).
+- **Données brutes** : toutes les couches, activables une par une (carrefours, lignes, arrêts,
+  rames, zones probables, temps perdu par tronçon avec son créneau), plus le volume de
+  l'historique. Le mode et les couches sont mémorisés dans le navigateur (`localStorage`).
+- **Fond de carte** : satellite par défaut, avec les orthophotos IGN de la Géoplateforme
+  (Licence Ouverte, sans clé, ~20 cm/pixel). On garde par-dessus les libellés du plan OpenFreeMap,
+  et on masque ses surfaces et ses routes. Le plan seul reste disponible.
+- **Carte graphique** : les bâtiments sont masqués par défaut, et la 3D (bâtiments en relief,
+  carte inclinable) est désactivée par défaut. Sans 3D, les bâtiments restent à plat et
+  l'inclinaison est bloquée. La boucle d'animation des rames n'envoie de données à MapLibre
+  (donc ne fait redessiner la carte) que si une rame a bougé d'au moins un demi-pixel à
+  l'écran, et au moins une fois par seconde. Mesure du 26/09/2026 : 3 à 4 mises à jour par
+  seconde en vue d'ensemble (zoom 12,5 à 13,5) et ~14 au zoom 16, au lieu d'une par image.
 ---
 
 ## 9. Flux principaux

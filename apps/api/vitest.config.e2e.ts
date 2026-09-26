@@ -17,8 +17,9 @@ export default defineConfig({
     root: './',
     include: ['**/*.e2e-spec.ts'],
     globalSetup: ['./test/global-setup.ts'],
-    // Prioritaire sur le .env chargé par ConfigModule : l'API testée pointe sur la base de test.
-    env: { DATABASE_URL: databaseUrlTest },
+    // Prioritaire sur le .env chargé par ConfigModule : l'API testée pointe sur la base de test,
+    // sans collecte tram (elle interrogerait Ginko en continu).
+    env: { DATABASE_URL: databaseUrlTest, TRAM_COLLECTE: 'false' },
     fileParallelism: false,
   },
 });

@@ -7,7 +7,13 @@ import {
   type Coordonnees,
   type Polyligne,
 } from '@voirie/engine'
-import type { ParcoursTram, ReseauTram, TramEnCirculation, TramsTempsReel } from '@voirie/schema'
+import type {
+  HistoriqueTroncons,
+  ParcoursTram,
+  ReseauTram,
+  TramEnCirculation,
+  TramsTempsReel,
+} from '@voirie/schema'
 
 interface Entite<G, P> {
   type: 'Feature'
@@ -41,10 +47,13 @@ export interface ProprietesRame {
   aQuai?: 'precedent' | 'suivant'
   /** Temps avant le départ d'une rame à quai à l'arrêt précédent, en s. */
   departDans?: number
+  sourceDuree: TramEnCirculation['sourceDuree']
+  /** Passages observés derrière la durée du tronçon (`historique`). */
+  echantillons?: number
 }
 
 export interface ReseauPrepare {
-  parcours: Map<string, { infos: ParcoursTram; ligne: Polyligne }>
+  parcours: Map<string, { infos: ParcoursTram; ligne: Polyligne; distances: Map<string, number> }>
   lignes: Collection<Ligne, { couleur: string }>
   arrets: Collection<Point, { nom: string; couleur: string }>
 }
@@ -52,7 +61,14 @@ export interface ReseauPrepare {
 export function preparerReseau(reseau: ReseauTram): ReseauPrepare {
   return {
     parcours: new Map(
-      reseau.parcours.map((infos) => [infos.id, { infos, ligne: preparerPolyligne(infos.coordonnees) }]),
+      reseau.parcours.map((infos) => [
+        infos.id,
+        {
+          infos,
+          ligne: preparerPolyligne(infos.coordonnees),
+          distances: new Map(infos.arrets.map((arret) => [arret.id, arret.distance])),
+        },
+      ]),
     ),
     lignes: {
       type: 'FeatureCollection',
@@ -84,7 +100,7 @@ export type SuiviRames = Map<string, { parcours: string; distance: number; insta
  */
 export function positionnerRames(
   reseau: ReseauPrepare,
-  { horodatage, trams }: TramsTempsReel,
+  { horodatage, trams, calibration }: TramsTempsReel,
   maintenant: number,
   suivi?: SuiviRames,
 ): { zones: Collection<Ligne, { couleur: string }>; rames: Collection<Point, ProprietesRame> } {
@@ -97,9 +113,15 @@ export function positionnerRames(
     if (!parcours) continue
     const restant = (tram.arrivee - maintenant) / 1000
     const position = estimerPositionTram(
-      { longueur: tram.fin - tram.debut, duree: tram.duree },
+      {
+        longueur: tram.fin - tram.debut,
+        duree: tram.duree,
+        dureeRapide: tram.dureeRapide,
+        dureeLente: tram.dureeLente,
+      },
       restant,
       age,
+      calibration,
     )
     const debutZone = tram.debut + position.distanceMin
     const finZone = tram.debut + position.distanceMax
@@ -134,6 +156,8 @@ export function positionnerRames(
         zone: Math.round(finZone - debutZone),
         ...(position.aQuai && { aQuai: position.aQuai }),
         ...(position.departDans !== undefined && { departDans: Math.ceil(position.departDans) }),
+        sourceDuree: tram.sourceDuree,
+        ...(tram.echantillons !== undefined && { echantillons: tram.echantillons }),
       },
     })
   }
@@ -142,4 +166,52 @@ export function positionnerRames(
     for (const vehicule of suivi.keys()) if (!presents.has(vehicule)) suivi.delete(vehicule)
   }
   return { zones, rames }
+}
+
+export interface ProprietesTroncon {
+  ligne: string
+  depart: string
+  arrivee: string
+  n: number
+  /** Durées observées (s) : médiane, rapide (p10), lente (p90), et quand ça roule bien. */
+  p50: number
+  p10: number
+  p90: number
+  reference: number
+  /** Temps perdu habituel : médiane moins référence, en s. */
+  perte: number
+  /** Vitesse commerciale médiane, en km/h. */
+  vitesse: number
+}
+
+/** Tronçons observés, tracés le long de la voie, avec leur temps perdu. */
+export function tronconsObserves(
+  reseau: ReseauPrepare,
+  { troncons }: HistoriqueTroncons,
+): Collection<Ligne, ProprietesTroncon> {
+  const features: Collection<Ligne, ProprietesTroncon>['features'] = []
+  for (const troncon of troncons) {
+    const parcours = reseau.parcours.get(troncon.parcours)
+    const debut = parcours?.distances.get(troncon.depart)
+    const fin = parcours?.distances.get(troncon.arrivee)
+    if (!parcours || debut === undefined || fin === undefined || fin <= debut) continue
+    const nom = (id: string) => parcours.infos.arrets.find((arret) => arret.id === id)?.nom ?? id
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: extraire(parcours.ligne, debut, fin) },
+      properties: {
+        ligne: parcours.infos.ligne,
+        depart: nom(troncon.depart),
+        arrivee: nom(troncon.arrivee),
+        n: troncon.n,
+        p50: Math.round(troncon.p50),
+        p10: Math.round(troncon.p10),
+        p90: Math.round(troncon.p90),
+        reference: Math.round(troncon.reference),
+        perte: Math.max(Math.round(troncon.p50 - troncon.reference), 0),
+        vitesse: Math.round(((fin - debut) / troncon.p50) * 3.6),
+      },
+    })
+  }
+  return { type: 'FeatureCollection', features }
 }

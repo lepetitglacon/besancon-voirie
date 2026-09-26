@@ -97,3 +97,98 @@ body,
   color: #1d2330;
   font-size: 12px;
 }
+
+.popup-rame .source {
+  color: #5b6475;
+  font-size: 11px;
+}
+
+.creneau {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 4px 22px;
+}
+
+.creneau select {
+  font: inherit;
+  font-size: 12px;
+}
+
+.legende {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 4px 0 4px 22px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.legende li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pastille {
+  display: inline-block;
+  width: 14px;
+  height: 5px;
+  border-radius: 2px;
+}
+
+.onglets {
+  display: flex;
+  gap: 2px;
+  margin: 8px 0 4px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--bordure);
+}
+
+.onglets button {
+  flex: 1;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--texte-doux);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.onglets button[aria-selected='true'] {
+  background: var(--fond);
+  color: var(--texte);
+  font-weight: 600;
+}
+
+.fond {
+  margin: 10px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--bordure);
+  border-radius: 8px;
+}
+
+.fond legend {
+  padding: 0 4px;
+  color: var(--texte-doux);
+  font-size: 12px;
+}
+
+.fond .bascule {
+  margin-top: 4px;
+}
+
+.choix-fond {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.choix-fond label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}

@@ -79,8 +79,8 @@ export function cleTroncon(parcours: string, depart: string, arrivee: string): s
 
 export interface CourseTram {
   parcours: string;
-  /** Arrêts desservis, triés par `stop_sequence`. */
-  arrets: Array<{ sequence: number; arret: string }>;
+  /** Arrêts desservis, triés par `stop_sequence`, avec l'heure théorique (s depuis minuit). */
+  arrets: Array<{ sequence: number; arret: string; theorique: number }>;
 }
 
 /** Réseau tram prêt pour le calcul des positions. */
@@ -144,7 +144,11 @@ export function construireReseauTram(fichiers: FichiersGtfs): ReseauTramInterne 
     courses.set(course, {
       parcours: parcoursDeCourse.get(course)!,
       arrets: lignes
-        .map((horaire) => ({ sequence: Number(horaire.stop_sequence), arret: horaire.stop_id! }))
+        .map((horaire) => ({
+          sequence: Number(horaire.stop_sequence),
+          arret: horaire.stop_id!,
+          theorique: secondesGtfs(horaire.arrival_time!),
+        }))
         .sort((a, b) => a.sequence - b.sequence),
     });
   }

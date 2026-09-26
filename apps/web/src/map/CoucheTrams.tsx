@@ -15,6 +15,7 @@ import {
   type LineLayerSpecification,
   type SymbolLayerSpecification,
 } from 'react-map-gl/maplibre'
+import type { Coordonnees } from '@voirie/engine'
 import {
   positionnerRames,
   preparerReseau,
@@ -26,6 +27,23 @@ const ATTRIBUTION = 'Tram : <a href="https://api.ginko.voyage/">Ginko</a> (ODbL)
 
 /** Données initiales des sources animées : la boucle d'animation les remplace à chaque image. */
 const VIDE = { type: 'FeatureCollection', features: [] } as const
+
+/**
+ * Économie de rendu : chaque envoi de données redessine toute la carte (GPU). On n'envoie que si
+ * une rame a bougé d'au moins ça à l'écran, et au moins une fois par intervalle (zones, textes).
+ */
+const DEPLACEMENT_MIN_PX = 0.5
+const ENVOI_MAX_MS = 1000
+
+/** Couches tram affichées. */
+export interface CouchesTram {
+  lignes: boolean
+  arrets: boolean
+  zones: boolean
+  rames: boolean
+}
+
+const visibilite = (visible: boolean) => (visible ? 'visible' : 'none')
 
 const coucheLignes: LineLayerSpecification = {
   id: 'tram-lignes',
@@ -91,7 +109,14 @@ const coucheRames: CircleLayerSpecification = {
 }
 
 /** Couches tram, de bas en haut, au-dessus de tout le reste : les rames en premier plan. */
-const ORDRE_COUCHES = ['tram-lignes', 'tram-zones', 'tram-arrets', 'tram-noms-arrets', 'tram-rames']
+const ORDRE_COUCHES = [
+  'tram-lignes',
+  'tram-pertes',
+  'tram-zones',
+  'tram-arrets',
+  'tram-noms-arrets',
+  'tram-rames',
+]
 
 /**
  * Remet les couches tram dans l'ordre, au-dessus des autres. react-map-gl ajoute les couches au
@@ -138,6 +163,13 @@ function DetailRame({ rame }: { rame: ProprietesRame }) {
           <span>
             Vitesse moyenne du tronçon : {rame.vitesse} km/h · zone probable : {rame.zone} m
           </span>
+          <span className="source">
+            {rame.sourceDuree === 'historique'
+              ? `Durée du tronçon : médiane de ${rame.echantillons} passages observés`
+              : rame.sourceDuree === 'flux'
+                ? 'Durée du tronçon : prévisions Ginko (historique insuffisant)'
+                : 'Durée du tronçon : horaires théoriques (historique insuffisant)'}
+          </span>
         </>
       )}
     </div>
@@ -147,6 +179,7 @@ function DetailRame({ rame }: { rame: ProprietesRame }) {
 interface Props {
   reseau: ReseauTram
   tempsReel: TramsTempsReel | undefined
+  couches: CouchesTram
 }
 
 /**
@@ -154,7 +187,7 @@ interface Props {
  * recalculées à chaque image, hors de React : les sources MapLibre et la bulle de détail
  * sont mises à jour directement, React ne rafraîchit que le texte de la bulle, chaque seconde.
  */
-export function CoucheTrams({ reseau, tempsReel }: Props) {
+export function CoucheTrams({ reseau, tempsReel, couches }: Props) {
   const { current: carte } = useMap()
   const prepare = useMemo(() => preparerReseau(reseau), [reseau])
   const [selection, setSelection] = useState<string>()
@@ -163,10 +196,14 @@ export function CoucheTrams({ reseau, tempsReel }: Props) {
   // Lus par la boucle d'animation sans la relancer.
   const donnees = useRef(tempsReel)
   const choisie = useRef(selection)
+  const couchesVisibles = useRef(couches)
   const derniereImage = useRef<ReturnType<typeof positionnerRames>>(undefined)
   useEffect(() => {
     donnees.current = tempsReel
   }, [tempsReel])
+  useEffect(() => {
+    couchesVisibles.current = couches
+  }, [couches])
   useEffect(() => {
     choisie.current = selection
   }, [selection])
@@ -177,22 +214,47 @@ export function CoucheTrams({ reseau, tempsReel }: Props) {
   const rameAffichee = (vehicule: string | undefined) =>
     derniereImage.current?.rames.features.find((rame) => rame.properties.vehicule === vehicule)
 
-  // Boucle d'animation : une estimation lissée par image.
+  // Boucle d'animation : une estimation lissée par image, envoyée à la carte seulement si elle
+  // change quelque chose à l'écran.
   useEffect(() => {
     if (!carte) return
     const carteMapLibre = carte.getMap()
     const suivi: SuiviRames = new Map()
+    const envoi = { instant: 0, donnees: undefined as unknown, couches: undefined as unknown, rames: new Map<string, Coordonnees>() }
+    const aBouge = (rames: ReturnType<typeof positionnerRames>['rames']) => {
+      if (rames.features.length !== envoi.rames.size) return true
+      return rames.features.some(({ properties, geometry }) => {
+        const avant = envoi.rames.get(properties.vehicule)
+        if (!avant) return true
+        const a = carteMapLibre.project(avant)
+        const b = carteMapLibre.project(geometry.coordinates)
+        return Math.hypot(a.x - b.x, a.y - b.y) >= DEPLACEMENT_MIN_PX
+      })
+    }
     let image = 0
     const animer = () => {
       image = requestAnimationFrame(animer)
       garderDevant(carteMapLibre)
-      if (!donnees.current) return
-      const positions = positionnerRames(prepare, donnees.current, Date.now(), suivi)
+      const visibles = couchesVisibles.current
+      if (!donnees.current || (!visibles.rames && !visibles.zones)) return
+      const maintenant = Date.now()
+      const positions = positionnerRames(prepare, donnees.current, maintenant, suivi)
       derniereImage.current = positions
-      carte.getSource<GeoJSONSource>('tram-zones')?.setData(positions.zones)
-      carte.getSource<GeoJSONSource>('tram-rames')?.setData(positions.rames)
       const rame = rameAffichee(choisie.current)
       if (rame) bulle.setLngLat(rame.geometry.coordinates)
+
+      const aJour =
+        envoi.donnees === donnees.current &&
+        envoi.couches === visibles &&
+        maintenant - envoi.instant < ENVOI_MAX_MS &&
+        !aBouge(positions.rames)
+      if (aJour) return
+      if (visibles.zones) carte.getSource<GeoJSONSource>('tram-zones')?.setData(positions.zones)
+      if (visibles.rames) carte.getSource<GeoJSONSource>('tram-rames')?.setData(positions.rames)
+      envoi.instant = maintenant
+      envoi.donnees = donnees.current
+      envoi.couches = visibles
+      envoi.rames = new Map(positions.rames.features.map((f) => [f.properties.vehicule, f.geometry.coordinates]))
     }
     image = requestAnimationFrame(animer)
     return () => cancelAnimationFrame(image)
@@ -237,17 +299,20 @@ export function CoucheTrams({ reseau, tempsReel }: Props) {
   return (
     <>
       <Source id="tram-lignes" type="geojson" data={prepare.lignes} attribution={ATTRIBUTION}>
-        <Layer {...coucheLignes} />
+        <Layer {...coucheLignes} layout={{ ...coucheLignes.layout, visibility: visibilite(couches.lignes) }} />
       </Source>
       <Source id="tram-zones" type="geojson" data={VIDE}>
-        <Layer {...coucheZones} />
+        <Layer {...coucheZones} layout={{ ...coucheZones.layout, visibility: visibilite(couches.zones) }} />
       </Source>
       <Source id="tram-arrets" type="geojson" data={prepare.arrets}>
-        <Layer {...coucheArrets} />
-        <Layer {...coucheNomsArrets} />
+        <Layer {...coucheArrets} layout={{ visibility: visibilite(couches.arrets) }} />
+        <Layer
+          {...coucheNomsArrets}
+          layout={{ ...coucheNomsArrets.layout, visibility: visibilite(couches.arrets) }}
+        />
       </Source>
       <Source id="tram-rames" type="geojson" data={VIDE}>
-        <Layer {...coucheRames} />
+        <Layer {...coucheRames} layout={{ visibility: visibilite(couches.rames) }} />
       </Source>
       {selection !== undefined && detail && createPortal(<DetailRame rame={detail} />, contenuBulle)}
     </>

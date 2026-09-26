@@ -2,12 +2,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { ReseauTram, TramsTempsReel } from '@voirie/schema';
 import { GinkoClient } from './ginko.client.js';
 import { construireReseauTram, type ReseauTramInterne } from './gtfs.js';
-import { positionnerTrams } from './temps-reel.js';
+import { creneauParis, HISTORIQUE_JOURS, HistoriqueTramService } from './historique.service.js';
+import { choisirTroncons, positionnerTrams, type FluxTempsReel, type HistoriqueCreneau } from './temps-reel.js';
 
 /** Le GTFS est republié chaque nuit. */
 const DUREE_RESEAU_MS = 24 * 3600 * 1000;
 /** Le flux temps réel bouge toutes les quelques secondes : inutile de le relire plus souvent. */
 const DUREE_TEMPS_REEL_MS = 10 * 1000;
+/** Les statistiques d'un créneau évoluent lentement. */
+const DUREE_HISTORIQUE_MS = 10 * 60 * 1000;
 
 /** Valeur mise en cache avec sa date de chargement ; une seule requête en vol à la fois. */
 class Cache<T> {
@@ -36,16 +39,38 @@ class Cache<T> {
 export class TramService {
   private readonly logger = new Logger(TramService.name);
   private readonly reseau = new Cache(DUREE_RESEAU_MS, () => this.chargerReseau());
-  private readonly tempsReel = new Cache(DUREE_TEMPS_REEL_MS, () => this.chargerTempsReel());
+  private readonly flux = new Cache(DUREE_TEMPS_REEL_MS, () => this.ginko.lireTempsReel());
+  private readonly historique = new Cache(DUREE_HISTORIQUE_MS, () => this.chargerHistorique());
 
-  constructor(private readonly ginko: GinkoClient) {}
+  constructor(
+    private readonly ginko: GinkoClient,
+    private readonly historiqueTram: HistoriqueTramService,
+  ) {}
 
   async lireReseau(): Promise<ReseauTram> {
     return (await this.reseau.lire()).public;
   }
 
-  lireTempsReel(): Promise<TramsTempsReel> {
-    return this.tempsReel.lire();
+  lireReseauInterne(): Promise<ReseauTramInterne> {
+    return this.reseau.lire();
+  }
+
+  /** Flux GTFS-RT brut, partagé entre l'affichage et la collecte des passages. */
+  lireFlux(): Promise<FluxTempsReel> {
+    return this.flux.lire();
+  }
+
+  async lireTempsReel(): Promise<TramsTempsReel> {
+    const [reseau, flux, historique] = await Promise.all([
+      this.reseau.lire(),
+      this.flux.lire(),
+      // Sans historique (base indisponible), on retombe sur les prévisions du flux.
+      this.historique.lire().catch((erreur: Error) => {
+        this.logger.warn(`Historique tram indisponible : ${erreur.message}`);
+        return undefined;
+      }),
+    ]);
+    return positionnerTrams(reseau, flux, Date.now(), historique);
   }
 
   private async chargerReseau(): Promise<ReseauTramInterne> {
@@ -58,8 +83,13 @@ export class TramService {
     return reseau;
   }
 
-  private async chargerTempsReel(): Promise<TramsTempsReel> {
-    const [reseau, flux] = await Promise.all([this.reseau.lire(), this.ginko.lireTempsReel()]);
-    return positionnerTrams(reseau, flux, Date.now());
+  private async chargerHistorique(): Promise<HistoriqueCreneau> {
+    const { typeJour, heure } = creneauParis(Date.now());
+    const [creneau, journee, calibration] = await Promise.all([
+      this.historiqueTram.troncons(typeJour, heure, HISTORIQUE_JOURS),
+      this.historiqueTram.troncons(typeJour, null, HISTORIQUE_JOURS),
+      this.historiqueTram.calibration(HISTORIQUE_JOURS),
+    ]);
+    return { troncons: choisirTroncons(creneau, journee), calibration };
   }
 }

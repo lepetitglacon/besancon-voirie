@@ -7,7 +7,13 @@ import {
   projeter,
   type Coordonnees,
 } from './polyligne.js';
-import { estimerPositionTram, LISSAGE_TRAM, lisserDistance, PARAMETRES_TRAM } from './tram.js';
+import {
+  erreurPrevision,
+  estimerPositionTram,
+  LISSAGE_TRAM,
+  lisserDistance,
+  PARAMETRES_TRAM,
+} from './tram.js';
 
 // Ligne en L autour de Besançon : ~760 m vers l'est, puis ~555 m vers le nord.
 const A: Coordonnees = [6.0, 47.24];
@@ -96,6 +102,22 @@ describe('estimerPositionTram', () => {
     expect(distanceMax).toBe(600);
   });
 
+  it('borne la zone par les durées observées quand l’historique les donne', () => {
+    const repli = estimerPositionTram(troncon, 40);
+    const regulier = estimerPositionTram({ ...troncon, dureeRapide: 88, dureeLente: 92 }, 40);
+    const irregulier = estimerPositionTram({ ...troncon, dureeRapide: 60, dureeLente: 200 }, 40);
+    expect(regulier.distance).toBe(repli.distance);
+    const largeur = (p: typeof repli) => p.distanceMax - p.distanceMin;
+    expect(largeur(regulier)).toBeLessThan(largeur(repli));
+    expect(largeur(irregulier)).toBeGreaterThan(largeur(regulier));
+  });
+
+  it('prend l’incertitude sur le temps restant dans la calibration', () => {
+    const precise = estimerPositionTram(troncon, 40, 0, [[30, 5], [60, 8]]);
+    const floue = estimerPositionTram(troncon, 40, 0, [[30, 40], [60, 60]]);
+    expect(floue.distanceMax - floue.distanceMin).toBeGreaterThan(precise.distanceMax - precise.distanceMin);
+  });
+
   it('refuse un tronçon sans durée', () => {
     expect(() => estimerPositionTram({ longueur: 600, duree: 0 }, 10)).toThrow(RangeError);
   });
@@ -122,5 +144,23 @@ describe('lisserDistance', () => {
   it('recule vers une estimation très en arrière, et replace une rame trop loin', () => {
     expect(lisserDistance(500, 500 - LISSAGE_TRAM.reculMax - 50, 0.1)).toBeLessThan(500);
     expect(lisserDistance(100, 100 + LISSAGE_TRAM.sautMax + 1, 0.016)).toBe(100 + LISSAGE_TRAM.sautMax + 1);
+  });
+});
+
+describe('erreurPrevision', () => {
+  const calibration: Array<[number, number]> = [
+    [30, 6],
+    [60, 10],
+    [300, 40],
+  ];
+
+  it('interpole entre deux horizons et prolonge aux extrémités', () => {
+    expect(erreurPrevision(calibration, 45)).toBeCloseTo(8);
+    expect(erreurPrevision(calibration, 10)).toBe(6);
+    expect(erreurPrevision(calibration, 900)).toBe(40);
+  });
+
+  it('refuse une calibration vide', () => {
+    expect(() => erreurPrevision([], 30)).toThrow(RangeError);
   });
 });

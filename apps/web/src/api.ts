@@ -1,4 +1,12 @@
-import type { Bbox, CarrefoursGeoJson, ReseauTram, TramsTempsReel } from '@voirie/schema'
+import type {
+  Bbox,
+  CarrefoursGeoJson,
+  EtatHistoriqueTram,
+  HistoriqueTroncons,
+  ReseauTram,
+  TramsTempsReel,
+  TypeJour,
+} from '@voirie/schema'
 
 export interface Sante {
   status: 'ok'
@@ -17,4 +25,9 @@ export const api = {
     lireJson<CarrefoursGeoJson>(`/api/carrefours?bbox=${bbox.map((v) => v.toFixed(5)).join(',')}`),
   reseauTram: () => lireJson<ReseauTram>('/api/tram/reseau'),
   tramsTempsReel: () => lireJson<TramsTempsReel>('/api/tram/temps-reel'),
+  historiqueTroncons: (typeJour: TypeJour, heure: number | null) =>
+    lireJson<HistoriqueTroncons>(
+      `/api/tram/historique/troncons?typeJour=${typeJour}${heure === null ? '' : `&heure=${heure}`}`,
+    ),
+  historiqueEtat: () => lireJson<EtatHistoriqueTram>('/api/tram/historique/etat'),
 }

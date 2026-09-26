@@ -1,4 +1,4 @@
-import type { TramEnCirculation, TramsTempsReel } from '@voirie/schema';
+import type { CalibrationPrevision, TramEnCirculation, TramsTempsReel, TronconObserve } from '@voirie/schema';
 import { cleTroncon, mediane, type ReseauTramInterne } from './gtfs.js';
 
 /** Prévision de passage à un arrêt restant de la course. */
@@ -14,6 +14,8 @@ export interface PrevisionArret {
 /** Une course du flux GTFS-RT `tripUpdates`, réduite à ce qui sert ici. */
 export interface CourseTempsReel {
   course: string;
+  /** Jour de service, `AAAA-MM-JJ`. */
+  jour?: string;
   vehicule?: string;
   /** Arrêts restants, triés par séquence : les arrêts déjà desservis n'y figurent plus. */
   arrets: PrevisionArret[];
@@ -23,6 +25,30 @@ export interface FluxTempsReel {
   /** Instant de production du flux, en s epoch. */
   horodatage: number;
   courses: CourseTempsReel[];
+}
+
+/** Historique utile au calcul des positions, pour le créneau en cours. */
+export interface HistoriqueCreneau {
+  /** Par clé de tronçon (`cleTroncon`), les durées observées retenues pour le créneau. */
+  troncons: Map<string, TronconObserve>;
+  calibration?: CalibrationPrevision;
+}
+
+/** Nombre de passages observés à partir duquel l'historique d'un tronçon fait foi. */
+export const ECHANTILLONS_MIN = 5;
+
+/**
+ * Durées observées retenues pour chaque tronçon : celles de l'heure en cours si elles comptent
+ * assez de passages, sinon celles de la journée entière (même type de jour).
+ */
+export function choisirTroncons(heure: TronconObserve[], journee: TronconObserve[]): Map<string, TronconObserve> {
+  const retenus = new Map<string, TronconObserve>();
+  for (const troncon of [...journee, ...heure]) {
+    if (troncon.n >= ECHANTILLONS_MIN) {
+      retenus.set(cleTroncon(troncon.parcours, troncon.depart, troncon.arrivee), troncon);
+    }
+  }
+  return retenus;
 }
 
 /** Au-delà, une rame qui attend au terminus est considérée comme hors service. */
@@ -67,6 +93,7 @@ export function positionnerTrams(
   reseau: ReseauTramInterne,
   flux: FluxTempsReel,
   maintenant_ms: number,
+  historique?: HistoriqueCreneau,
 ): TramsTempsReel {
   const maintenant = maintenant_ms / 1000;
   const durees = dureesObservees(reseau, flux);
@@ -87,6 +114,8 @@ export function positionnerTrams(
     let candidat: TramEnCirculation;
     if (precedent !== undefined && debut !== undefined) {
       const cle = cleTroncon(statique.parcours, precedent, suivant.arret);
+      const observe = historique?.troncons.get(cle);
+      const dureeFlux = durees.get(cle);
       candidat = {
         vehicule: vehicule ?? course,
         course,
@@ -96,10 +125,20 @@ export function positionnerTrams(
         arretSuivant: reseau.noms.get(suivant.arret) ?? suivant.arret,
         debut,
         fin,
-        duree:
-          durees.get(cle) ??
-          reseau.dureesTheoriques.get(cle) ??
-          Math.max((fin - debut) / VITESSE_REPLI, 1),
+        ...(observe
+          ? {
+              duree: observe.p50,
+              sourceDuree: 'historique' as const,
+              echantillons: observe.n,
+              dureeRapide: observe.p10,
+              dureeLente: observe.p90,
+            }
+          : dureeFlux !== undefined
+            ? { duree: dureeFlux, sourceDuree: 'flux' as const }
+            : {
+                duree: reseau.dureesTheoriques.get(cle) ?? Math.max((fin - debut) / VITESSE_REPLI, 1),
+                sourceDuree: 'theorique' as const,
+              }),
         arrivee: suivant.arrivee * 1000,
       };
     } else {
@@ -114,6 +153,7 @@ export function positionnerTrams(
         debut: fin,
         fin,
         duree: 1,
+        sourceDuree: 'theorique',
         arrivee: suivant.depart * 1000,
       };
     }
@@ -124,6 +164,7 @@ export function positionnerTrams(
 
   return {
     horodatage: flux.horodatage * 1000,
+    ...(historique?.calibration && { calibration: historique.calibration }),
     trams: [...retenus.values()].sort(
       (a, b) => a.parcours.localeCompare(b.parcours) || a.debut - b.debut,
     ),

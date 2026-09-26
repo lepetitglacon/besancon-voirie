@@ -16,7 +16,11 @@
  * plus) et n'a pas dépassé le suivant.
  */
 
-/** Valeurs indicatives, à recaler en comparant les prévisions successives du flux. */
+/**
+ * Valeurs de repli, utilisées tant que l'historique des passages ne fournit pas mieux :
+ * la dispersion des durées observées remplace `ecartVitesse`, la calibration des prévisions
+ * remplace les trois `incertitude*` sur le temps restant.
+ */
 export const PARAMETRES_TRAM = {
   /** Arrêt en station compris dans la durée d'un tronçon, en s (plafonné à la moitié). */
   tempsArret: 15,
@@ -28,6 +32,8 @@ export const PARAMETRES_TRAM = {
   incertitudeParSecondeDAge: 0.2,
   /** Écart relatif admis autour de la vitesse moyenne du tronçon. */
   ecartVitesse: 0.2,
+  /** Plancher de l'incertitude calibrée, en s (latence du flux). */
+  incertitudePlancher: 5,
 } as const;
 
 export interface TronconTram {
@@ -35,6 +41,25 @@ export interface TronconTram {
   longueur: number;
   /** Durée de parcours prévue de l'arrêt précédent au suivant, en s. */
   duree: number;
+  /** Durées observées quand ça roule bien et quand ça bloque (p10 et p90), en s. */
+  dureeRapide?: number;
+  dureeLente?: number;
+}
+
+/** Erreur des prévisions selon leur avance : [horizon (s), erreur (s)], horizons croissants. */
+export type CalibrationPrevision = Array<[number, number]>;
+
+/** Erreur attendue d'une prévision faite `avant` secondes à l'avance (interpolation linéaire). */
+export function erreurPrevision(calibration: CalibrationPrevision, avant: number): number {
+  const [premier] = calibration;
+  if (!premier) throw new RangeError('Calibration vide');
+  if (avant <= premier[0]) return premier[1];
+  for (let i = 1; i < calibration.length; i++) {
+    const [h0, e0] = calibration[i - 1]!;
+    const [h1, e1] = calibration[i]!;
+    if (avant <= h1) return e0 + ((e1 - e0) * (avant - h0)) / (h1 - h0);
+  }
+  return calibration[calibration.length - 1]![1];
 }
 
 export interface PositionTram {
@@ -57,35 +82,46 @@ export interface PositionTram {
 /**
  * @param restant temps avant l'arrivée prévue à l'arrêt suivant, en s (négatif si dépassée)
  * @param age âge de la prévision, en s
+ * @param calibration erreur observée des prévisions Ginko ; à défaut, marges de repli
  */
 export function estimerPositionTram(
-  { longueur, duree }: TronconTram,
+  { longueur, duree, dureeRapide, dureeLente }: TronconTram,
   restant: number,
   age = 0,
+  calibration?: CalibrationPrevision,
   parametres: typeof PARAMETRES_TRAM = PARAMETRES_TRAM,
 ): PositionTram {
   if (longueur < 0 || duree <= 0) throw new RangeError('Tronçon invalide');
-  const roulage = duree - Math.min(parametres.tempsArret, duree / 2);
-  const vitesse = longueur / roulage;
+  const roulage = (d: number) => d - Math.min(parametres.tempsArret, d / 2);
+  const vitesse = longueur / roulage(duree);
+  // Plage de vitesses : observée si l'historique la donne, sinon ± ecartVitesse.
+  const vitesseMax =
+    dureeRapide && dureeRapide > 0
+      ? Math.max(longueur / roulage(dureeRapide), vitesse)
+      : vitesse * (1 + parametres.ecartVitesse);
+  const vitesseMin =
+    dureeLente && dureeLente > 0
+      ? Math.min(longueur / roulage(dureeLente), vitesse)
+      : vitesse * (1 - parametres.ecartVitesse);
   const borner = (d: number) => Math.min(Math.max(d, 0), longueur);
   const avant = Math.max(restant, 0);
   const incertitude =
-    Math.max(parametres.incertitudeMin, parametres.incertitudeRelative * avant) +
+    (calibration?.length
+      ? Math.max(erreurPrevision(calibration, avant), parametres.incertitudePlancher)
+      : Math.max(parametres.incertitudeMin, parametres.incertitudeRelative * avant)) +
     parametres.incertitudeParSecondeDAge * Math.max(age, 0);
 
   return {
     distance: borner(longueur - avant * vitesse),
     // Au plus loin de l'arrêt suivant : arrivée plus tardive et rame plus rapide.
-    distanceMin: borner(longueur - (avant + incertitude) * vitesse * (1 + parametres.ecartVitesse)),
+    distanceMin: borner(longueur - (avant + incertitude) * vitesseMax),
     // Au plus près : arrivée plus tôt et rame plus lente.
-    distanceMax: borner(
-      longueur - Math.max(avant - incertitude, 0) * vitesse * (1 - parametres.ecartVitesse),
-    ),
+    distanceMax: borner(longueur - Math.max(avant - incertitude, 0) * vitesseMin),
     vitesse,
     ...(restant <= 0
       ? { aQuai: 'suivant' as const }
-      : avant >= roulage
-        ? { aQuai: 'precedent' as const, departDans: avant - roulage }
+      : avant >= roulage(duree)
+        ? { aQuai: 'precedent' as const, departDans: avant - roulage(duree) }
         : {}),
   };
 }

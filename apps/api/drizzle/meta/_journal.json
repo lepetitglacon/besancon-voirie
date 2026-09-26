@@ -15,6 +15,20 @@
       "when": 1790419713101,
       "tag": "0001_init",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790443798395,
+      "tag": "0002_tram_passage",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790443798881,
+      "tag": "0003_tram_troncon_observe",
+      "breakpoints": true
     }
   ]
 }
