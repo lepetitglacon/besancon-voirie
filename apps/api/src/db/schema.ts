@@ -29,6 +29,9 @@ export const statutCarrefour = pgEnum('statut_carrefour', [
   'verifie',
 ]);
 
+/** Carrefour à feux, ou traversée piétonne à feux isolée (hors carrefour). */
+export const natureCarrefour = pgEnum('nature_carrefour', ['carrefour', 'traversee_pietonne']);
+
 export const statutModeration = pgEnum('statut_moderation', ['en_attente', 'valide', 'rejete']);
 
 export const carrefour = pgTable(
@@ -39,11 +42,8 @@ export const carrefour = pgTable(
     nom: text('nom').notNull(),
     geom: geometry('geom', { type: 'point', mode: 'xy', srid: 4326 }).notNull(),
     statut: statutCarrefour('statut').notNull().default('non_releve'),
+    nature: natureCarrefour('nature').notNull().default('carrefour'),
     controleur: jsonb('controleur').$type<Partial<Controleur>>().notNull().default({}),
-    osmNodes: bigint('osm_nodes', { mode: 'number' })
-      .array()
-      .notNull()
-      .default(sql`'{}'`),
     presTram: boolean('pres_tram').notNull().default(false),
     creeLe: creeLe(),
     modifieLe: timestamp('modifie_le', { withTimezone: true })
@@ -52,6 +52,27 @@ export const carrefour = pgTable(
       .$onUpdate(() => new Date()),
   },
   (t) => [index('carrefour_geom_idx').using('gist', t.geom)],
+);
+
+export const typeFeu = pgEnum('type_feu', ['vehicule', 'pieton']);
+
+/**
+ * Un feu physique, importé d'OpenStreetMap (ou ajouté à la main, osm_id nul). Les carrefours
+ * se composent à la main en y rattachant des feux. L'import ne modifie jamais `carrefour_id`.
+ */
+export const feu = pgTable(
+  'feu',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    osmId: bigint('osm_id', { mode: 'number' }).unique(),
+    type: typeFeu('type').notNull(),
+    tags: jsonb('tags').$type<Record<string, string>>().notNull().default({}),
+    geom: geometry('geom', { type: 'point', mode: 'xy', srid: 4326 }).notNull(),
+    presentOsm: boolean('present_osm').notNull().default(true),
+    carrefourId: uuid('carrefour_id').references(() => carrefour.id, { onDelete: 'set null' }),
+    creeLe: creeLe(),
+  },
+  (t) => [index('feu_geom_idx').using('gist', t.geom), index('feu_carrefour_idx').on(t.carrefourId)],
 );
 
 export const branche = pgTable(

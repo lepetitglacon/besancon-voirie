@@ -1,0 +1,676 @@
+{
+  "id": "1628d8e5-ff5f-457a-bf0b-e0c567737ddd",
+  "prevId": "63db2d14-a48d-4232-b06b-21e05ea4e8e8",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.branche": {
+      "name": "branche",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "carrefour_id": {
+          "name": "carrefour_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nom": {
+          "name": "nom",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "osm_way_id": {
+          "name": "osm_way_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "azimut_deg": {
+          "name": "azimut_deg",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "branche_carrefour_id_carrefour_id_fk": {
+          "name": "branche_carrefour_id_carrefour_id_fk",
+          "tableFrom": "branche",
+          "tableTo": "carrefour",
+          "columnsFrom": [
+            "carrefour_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "branche_carrefour_id_code_unique": {
+          "name": "branche_carrefour_id_code_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "carrefour_id",
+            "code"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.carrefour": {
+      "name": "carrefour",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nom": {
+          "name": "nom",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "geom": {
+          "name": "geom",
+          "type": "geometry(point)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "statut": {
+          "name": "statut",
+          "type": "statut_carrefour",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'non_releve'"
+        },
+        "nature": {
+          "name": "nature",
+          "type": "nature_carrefour",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'carrefour'"
+        },
+        "controleur": {
+          "name": "controleur",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "pres_tram": {
+          "name": "pres_tram",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "cree_le": {
+          "name": "cree_le",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "modifie_le": {
+          "name": "modifie_le",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "carrefour_geom_idx": {
+          "name": "carrefour_geom_idx",
+          "columns": [
+            {
+              "expression": "geom",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gist",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "carrefour_slug_unique": {
+          "name": "carrefour_slug_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "slug"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.feu": {
+      "name": "feu",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "osm_id": {
+          "name": "osm_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "type": {
+          "name": "type",
+          "type": "type_feu",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tags": {
+          "name": "tags",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "geom": {
+          "name": "geom",
+          "type": "geometry(point)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "present_osm": {
+          "name": "present_osm",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "carrefour_id": {
+          "name": "carrefour_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cree_le": {
+          "name": "cree_le",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "feu_geom_idx": {
+          "name": "feu_geom_idx",
+          "columns": [
+            {
+              "expression": "geom",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gist",
+          "with": {}
+        },
+        "feu_carrefour_idx": {
+          "name": "feu_carrefour_idx",
+          "columns": [
+            {
+              "expression": "carrefour_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "feu_carrefour_id_carrefour_id_fk": {
+          "name": "feu_carrefour_id_carrefour_id_fk",
+          "tableFrom": "feu",
+          "tableTo": "carrefour",
+          "columnsFrom": [
+            "carrefour_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "feu_osm_id_unique": {
+          "name": "feu_osm_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "osm_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.ligne_feux": {
+      "name": "ligne_feux",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "carrefour_id": {
+          "name": "carrefour_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "signal": {
+          "name": "signal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "branche_code": {
+          "name": "branche_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mouvements": {
+          "name": "mouvements",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "voies": {
+          "name": "voies",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "traverse": {
+          "name": "traverse",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "geom": {
+          "name": "geom",
+          "type": "geometry(point)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "ligne_feux_carrefour_id_carrefour_id_fk": {
+          "name": "ligne_feux_carrefour_id_carrefour_id_fk",
+          "tableFrom": "ligne_feux",
+          "tableTo": "carrefour",
+          "columnsFrom": [
+            "carrefour_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "ligne_feux_carrefour_id_code_unique": {
+          "name": "ligne_feux_carrefour_id_code_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "carrefour_id",
+            "code"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.plan_feux": {
+      "name": "plan_feux",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "carrefour_id": {
+          "name": "carrefour_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'cycle'"
+        },
+        "plages": {
+          "name": "plages",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cycle_s": {
+          "name": "cycle_s",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "jaune_s": {
+          "name": "jaune_s",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reference": {
+          "name": "reference",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lignes": {
+          "name": "lignes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_releve": {
+          "name": "source_releve",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "plan_feux_carrefour_id_carrefour_id_fk": {
+          "name": "plan_feux_carrefour_id_carrefour_id_fk",
+          "tableFrom": "plan_feux",
+          "tableTo": "carrefour",
+          "columnsFrom": [
+            "carrefour_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "plan_feux_source_releve_releve_id_fk": {
+          "name": "plan_feux_source_releve_releve_id_fk",
+          "tableFrom": "plan_feux",
+          "tableTo": "releve",
+          "columnsFrom": [
+            "source_releve"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "plan_feux_carrefour_id_code_unique": {
+          "name": "plan_feux_carrefour_id_code_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "carrefour_id",
+            "code"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.releve": {
+      "name": "releve",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "carrefour_id": {
+          "name": "carrefour_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pseudo": {
+          "name": "pseudo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "brut": {
+          "name": "brut",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "synthese": {
+          "name": "synthese",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cycles_observes": {
+          "name": "cycles_observes",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ecart_type_cycle_s": {
+          "name": "ecart_type_cycle_s",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "observe_le": {
+          "name": "observe_le",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "statut": {
+          "name": "statut",
+          "type": "statut_moderation",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'en_attente'"
+        },
+        "motif_rejet": {
+          "name": "motif_rejet",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cree_le": {
+          "name": "cree_le",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "releve_statut_idx": {
+          "name": "releve_statut_idx",
+          "columns": [
+            {
+              "expression": "statut",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "cree_le",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "releve_carrefour_id_carrefour_id_fk": {
+          "name": "releve_carrefour_id_carrefour_id_fk",
+          "tableFrom": "releve",
+          "tableTo": "carrefour",
+          "columnsFrom": [
+            "carrefour_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.nature_carrefour": {
+      "name": "nature_carrefour",
+      "schema": "public",
+      "values": [
+        "carrefour",
+        "traversee_pietonne"
+      ]
+    },
+    "public.statut_carrefour": {
+      "name": "statut_carrefour",
+      "schema": "public",
+      "values": [
+        "a_confirmer",
+        "non_releve",
+        "estime",
+        "mesure",
+        "verifie"
+      ]
+    },
+    "public.statut_moderation": {
+      "name": "statut_moderation",
+      "schema": "public",
+      "values": [
+        "en_attente",
+        "valide",
+        "rejete"
+      ]
+    },
+    "public.type_feu": {
+      "name": "type_feu",
+      "schema": "public",
+      "values": [
+        "vehicule",
+        "pieton"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

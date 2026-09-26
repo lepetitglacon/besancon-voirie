@@ -10,7 +10,8 @@ coverage/
 *.log
 .DS_Store
 
-# Extraits OpenStreetMap (volumineux, retéléchargeables)
+# Extraits OpenStreetMap et cache Overpass (volumineux, retéléchargeables)
+/data/
 *.osm.pbf
 *.osm
 

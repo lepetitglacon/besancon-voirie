@@ -15,6 +15,20 @@
       "when": 1790419713101,
       "tag": "0001_init",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790423416217,
+      "tag": "0002_feux_manuels",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790423416978,
+      "tag": "0003_carrefour_sans_osm_nodes",
+      "breakpoints": true
     }
   ]
 }

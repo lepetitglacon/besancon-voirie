@@ -9,7 +9,7 @@
 2. [Stack](#2-stack)
 3. [Organisation du monorepo](#3-organisation-du-monorepo)
 4. [Base de données](#4-base-de-données)
-5. [Import OpenStreetMap et amorce des carrefours](#5-import-openstreetmap-et-amorce-des-carrefours)
+5. [Import OpenStreetMap et composition des carrefours](#5-import-openstreetmap-et-composition-des-carrefours)
 6. [Moteur de calcul (`packages/engine`)](#6-moteur-de-calcul-packagesengine)
 7. [API NestJS](#7-api-nestjs)
 8. [Front web](#8-front-web)
@@ -85,7 +85,7 @@ Principes :
 | ORM | Drizzle ORM (+ SQL brut pour les requêtes spatiales) | 0.45 / drizzle-kit 0.31 |
 | Base | `pgrouting/pgrouting:17-3.5-4.0.1` | PG 17.5, PostGIS 3.5.2, pgRouting 4.0.1 |
 | File de jobs | pg-boss | à ajouter (phase 2) |
-| Import OSM | osm2pgsql (style flex Lua) et/ou osm2pgrouting | à ajouter |
+| Import OSM | Overpass API + `apps/api/scripts/osm.ts` (osm2pgrouting envisagé pour la topologie) | en place |
 | Tuiles vectorielles (optionnel) | Martin (`ghcr.io/maplibre/martin`) | à ajouter si besoin |
 | Simulation (phase 2) | Eclipse SUMO (`pip install eclipse-sumo`) | 1.27+ |
 | Tests | Vitest partout ; e2e API contre la base `voirie_test` du docker compose | Vitest 4 |
@@ -182,12 +182,24 @@ CREATE TABLE carrefour (
   geom          geometry(Point, 4326) NOT NULL,
   statut        statut_carrefour NOT NULL DEFAULT 'non_releve',
   controleur    jsonb NOT NULL DEFAULT '{}',   -- mode, priorite_tc, appel_pieton, feu_recompense
-  osm_nodes     bigint[] NOT NULL DEFAULT '{}',
-  pres_tram     boolean NOT NULL DEFAULT false, -- calculé à l'import
+  nature        nature_carrefour NOT NULL DEFAULT 'carrefour', -- ou traversee_pietonne
+  pres_tram     boolean NOT NULL DEFAULT false, -- recalculé à chaque composition
   cree_le       timestamptz NOT NULL DEFAULT now(),
   modifie_le    timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX ON carrefour USING gist (geom);
+
+-- Un feu physique (importé d'OSM, ou ajouté à la main : osm_id nul). Les carrefours se
+-- composent À LA MAIN en rattachant des feux ; l'import ne modifie jamais carrefour_id.
+CREATE TABLE feu (
+  id            uuid PRIMARY KEY,
+  osm_id        bigint UNIQUE,
+  type          type_feu NOT NULL,                -- vehicule | pieton
+  tags          jsonb NOT NULL DEFAULT '{}',
+  geom          geometry(Point, 4326) NOT NULL,
+  present_osm   boolean NOT NULL DEFAULT true,   -- false : disparu d'OSM au dernier import
+  carrefour_id  uuid REFERENCES carrefour ON DELETE SET NULL
+);
 
 CREATE TABLE branche (
   id            uuid PRIMARY KEY,
@@ -281,57 +293,72 @@ Les schémas Drizzle (`apps/api/src/db/schema.ts`) reflètent ces tables. Drizzl
 
 | Table | Contenu | Usage |
 |---|---|---|
-| `osm_signal` | Nœuds `highway=traffic_signals`, `crossing=traffic_signals` + tags | Amorce, rattachement des feux aux carrefours |
+| `osm_signal` | Nœuds `highway=traffic_signals`, `crossing=traffic_signals` + tags | Synchronisation de la table `feu` |
 | `osm_way` | Voies `highway=*` : `lanes`, `maxspeed`, `oneway`, `name` | Branches, affichage, export SUMO |
 | `osm_tram` | `railway=tram` | Drapeau `pres_tram` |
 | `osm_route_edge` / `osm_route_vertex` | Réseau découpé aux intersections, topologie pgRouting | Distances de corridor |
 
 ---
 
-## 5. Import OpenStreetMap et amorce des carrefours
+## 5. Import OpenStreetMap et composition des carrefours
 
-### 5.1 Import
+Implémentation : `apps/api/scripts/osm.ts` (Node 24, sans binaire externe). Tests :
+`scripts/osm.spec.ts` (unitaires) et `test/osm.e2e-spec.ts` (jeu OSM synthétique sur la base de test).
 
-1. Télécharger un extrait couvrant Besançon (Geofabrik, région, ou un extrait BBBike ciblé).
-2. `osm2pgsql --output=flex --style tools/osm/besancon.lua`, qui alimente `osm_signal`,
-   `osm_way` et `osm_tram`.
-3. Topologie routable. Deux options, à trancher lors de l'implémentation :
-   - **A. `osm2pgrouting`** : clé en main, produit directement arêtes et sommets (entrée `.osm`
-     XML : convertir le `.pbf` avec `osmium cat`). À utiliser pour démarrer.
-   - **B.** Garder dans `osm_way` la liste des nœuds de chaque voie (style flex), découper
-     en SQL aux nœuds partagés, puis `pgr_extractVertices`. Un seul outil d'import, mais plus de SQL.
-4. Commande Nest : `pnpm api cmd osm:import` enchaîne le tout et journalise les volumes.
-
-### 5.2 Amorce des carrefours
-
-Regroupement des feux proches (DBSCAN, 50 m) en Lambert 93 pour travailler en mètres :
-
-```sql
-WITH clusters AS (
-  SELECT osm_id, geom,
-         ST_ClusterDBSCAN(ST_Transform(geom, 2154), eps := 50, minpoints := 1) OVER () AS cid
-  FROM osm_signal
-  WHERE tags->>'highway' = 'traffic_signals'
-)
-SELECT cid,
-       array_agg(osm_id)              AS osm_nodes,
-       ST_Centroid(ST_Collect(geom))  AS geom
-FROM clusters
-GROUP BY cid;
+```bash
+pnpm osm:import            # relit le cache data/osm/besancon.json, ou télécharge s'il manque
+pnpm osm:import --refresh  # retélécharge depuis Overpass
 ```
 
-Puis, pour chaque groupe :
-- **Nom** : noms distincts des voies `osm_way` à moins de 15 m du centroïde, joints par « × ».
-- **Branches** : voies qui touchent les nœuds du groupe, avec `ST_Azimuth` pour l'orientation
-  et un code N/S/E/O proposé.
-- **`pres_tram`** : `EXISTS (SELECT 1 FROM osm_tram t WHERE ST_DWithin(c.geom::geography, t.geom::geography, 25))`.
+### 5.1 Import (Overpass)
 
-**Réimport sans écraser le travail validé** : un nœud OSM déjà présent dans un
-`carrefour.osm_nodes` n'est jamais réaffecté. Les nouveaux nœuds forment des carrefours au
-statut `a_confirmer`, que l'admin valide ou fusionne. Les nœuds disparus d'OSM sont signalés
-et jamais supprimés automatiquement.
+Une seule requête Overpass sur l'emprise de Besançon récupère :
+- la relation de la commune (`ref:INSEE=25056`), reconstituée en polygone par `ST_Polygonize` ;
+- les nœuds `highway=traffic_signals` et `crossing=traffic_signals` ;
+- les voies `highway=*`, de `motorway` à `service` (avec leurs `_link`), et les voies `railway=tram`.
 
-Volume attendu (Overpass, 26/09/2026) : 387 feux, ~130–180 carrefours.
+Plusieurs serveurs Overpass sont essayés dans l'ordre (overpass-api.de, private.coffee,
+mail.ru), et la réponse est mise en cache dans `data/osm/` (non versionné). Les tables
+`osm_meta`, `osm_commune`, `osm_signal`, `osm_way` (avec la liste de ses nœuds) et `osm_tram`
+sont **supprimées puis recréées** à chaque import, dans une transaction.
+
+On a choisi Overpass plutôt qu'osm2pgsql : aucun binaire à installer, et un volume ciblé
+(~900 feux, ~13 700 voies). La **topologie routable** nécessaire aux corridors (phase 1 bis)
+reste à construire. Deux pistes : découper `osm_way` en SQL aux nœuds partagés puis
+`pgr_extractVertices`, ou passer à `osm2pgrouting` si le SQL devient trop lourd.
+
+### 5.2 Synchronisation de la table `feu`
+
+Chaque feu OSM **situé dans la commune** devient une ligne de `feu` : type `vehicule` si
+`highway=traffic_signals`, sinon `pieton` (`crossing=traffic_signals`, avec ou sans
+`highway`). La synchronisation se fait dans la transaction de l'import (`ON CONFLICT (osm_id)`) :
+- feu nouveau → ajouté, libre (`carrefour_id` nul) ;
+- feu existant → position, type et balises mis à jour, **rattachement conservé** ;
+- feu disparu d'OSM → `present_osm = false`, jamais supprimé.
+
+### 5.3 Composition manuelle des carrefours
+
+**Pas de regroupement automatique.** Un critère de distance ne sait pas quels feux partagent
+un même contrôleur, donc une même programmation. Les carrefours se composent donc à la main,
+sur la carte :
+
+| Méthode | Route | Effet |
+|---|---|---|
+| GET | `/api/feux?bbox=` | Feux de l'emprise (type, carrefour, présence OSM) |
+| GET | `/api/carrefours/suggestion-nom?feux=<uuid>,…&nature=` | Nom proposé d'après les rues proches |
+| POST | `/api/carrefours` `{ feux, nature?, nom? }` | Crée un carrefour à partir de feux **libres** (409 sinon) |
+| PATCH | `/api/carrefours/:id` `{ feux?, nature?, nom? }` | Recompose (les feux retirés redeviennent libres), renomme ; le slug ne change pas |
+| DELETE | `/api/carrefours/:id` | Libère les feux ; 409 si le carrefour a des relevés ou des plans de feux |
+
+Les routes d'écriture passent par `EditionGuard`, qui n'autorise l'écriture que si
+`EDITION_LOCALE=true` (développement local), en attendant l'authentification admin (§12).
+À chaque composition, la position du carrefour (centre de ses feux) et `pres_tram` (voie
+de tram à moins de 25 m) sont recalculés. Le nom proposé (`proposerNom`, `@voirie/engine`)
+reprend les voies nommées à moins de 20 m des feux, par importance puis distance : trois
+noms au plus, joints par « × », en ignorant les variantes d'articles.
+
+Import du 26/09/2026 (données OSM de 11h34) : **860 feux** dans la commune (359 véhicule,
+501 piéton), aucun carrefour composé.
 
 ---
 
@@ -377,7 +404,8 @@ Bande passante = mesure de l'intersection, sur le cercle [0, C), de ces interval
 | `ExportsModule` | GeoJSON, GeoPackage Lambert 93 (`ogr2ogr` sur la base), CSV |
 | `TimeModule` | `GET /time`, pour la synchronisation d'horloge du chrono |
 | `JobsModule` | pg-boss : publication des jobs (recalculs, simulations) |
-| `CommandsModule` | nest-commander : `osm:import`, `carrefours:seed`, `corridors:recalculer` |
+| `FeuxModule` | Feux de l'emprise de la carte |
+| Scripts (`apps/api/scripts`) | `prepare-db.ts`, `osm.ts import` (Node 24, sans Nest) |
 
 ### 7.2 Endpoints
 
@@ -385,7 +413,9 @@ Public :
 
 | Méthode | Route | Réponse |
 |---|---|---|
-| GET | `/api/carrefours?bbox=minLon,minLat,maxLon,maxLat` | GeoJSON FeatureCollection léger (id, nom, statut, pres_tram) |
+| GET | `/api/carrefours?bbox=minLon,minLat,maxLon,maxLat` | GeoJSON FeatureCollection léger (id, nom, statut, nature, pres_tram, nb_feux) |
+| GET | `/api/feux?bbox=…` | GeoJSON des feux (type, carrefour_id, present_osm) |
+| GET | `/api/carrefours/suggestion-nom?feux=…` | Nom proposé pour un groupe de feux |
 | GET | `/api/carrefours/:slug` | Carrefour complet : branches, lignes, plans, synthèse des relevés validés |
 | GET | `/api/corridors` | Liste + géométrie |
 | GET | `/api/corridors/:slug` | Corridor, carrefours ordonnés, distances, plans, décalages actuels |
@@ -402,7 +432,7 @@ Admin (cookie de session, un seul compte) :
 | POST | `/api/admin/releves/:id/valider` | Crée ou met à jour `plan_feux`, recalcule le statut du carrefour |
 | POST | `/api/admin/releves/:id/rejeter` | Avec motif |
 | PUT | `/api/admin/carrefours/:id` | Édition (nom, branches, lignes, contrôleur) |
-| POST | `/api/admin/carrefours/:id/fusionner` | Fusion de deux groupes OSM |
+| POST / PATCH / DELETE | `/api/carrefours[/:id]` | Composition manuelle des carrefours (§5.3). Pour l'instant protégée par `EDITION_LOCALE` |
 | PUT | `/api/admin/corridors/:id` | Création/édition, recalcul des distances |
 | POST | `/api/admin/simulations` | Phase 2 : met un job en file |
 
@@ -453,11 +483,12 @@ JOIN osm_route_edge e ON e.id = r.edge;
 
 ## 9. Flux principaux
 
-### 9.1 Amorce (une fois, puis à chaque réimport)
+### 9.1 Import et composition
 
 ```text
-tools/osm (extrait .pbf) ─▶ osm2pgsql / osm2pgrouting ─▶ tables osm_*
-                         ─▶ cmd carrefours:seed (DBSCAN, noms, branches, tram) ─▶ carrefour / branche
+Overpass (cache data/osm/) ─▶ pnpm osm:import ─▶ tables osm_* + synchronisation de `feu`
+Carte, mode « Composer » : clic sur les feux d'une même programmation ─▶ POST /api/carrefours
+                                                                      ─▶ nom proposé, position, pres_tram
 ```
 
 ### 9.2 Relevé → plan validé
@@ -558,7 +589,7 @@ POST /api/admin/simulations ─▶ pg-boss « simulation » ─▶ apps/worker
 |---|---|---|
 | `packages/engine` | Vitest, cas construits à la main + tests de propriétés (fast-check) : bande passante ∈ [0, min(verts)], invariance par rotation du cycle | **Haute** : c'est le cœur métier |
 | `packages/schema` | Vitest : exemples valides/invalides | Moyenne |
-| `apps/api` | Vitest + supertest contre la vraie base PostGIS + pgRouting (`voirie_test`, migrations appliquées par `test/global-setup.ts`) : amorce DBSCAN, distances de corridor, modération | Haute |
+| `apps/api` | Vitest + supertest contre la vraie base PostGIS + pgRouting (`voirie_test`, migrations appliquées par `test/global-setup.ts`) : import OSM et synchronisation des feux, composition des carrefours, puis distances de corridor et modération | Haute |
 | `apps/web` | Vitest + Testing Library sur le chrono et les diagrammes | Moyenne |
 | Bout en bout | Playwright : relevé → modération → fiche mise à jour | Plus tard |
 
@@ -568,7 +599,7 @@ POST /api/admin/simulations ─▶ pg-boss « simulation » ─▶ apps/worker
 
 | # | Décision | Alternatives écartées | Raison |
 |---|---|---|---|
-| 001 | **PostgreSQL + PostGIS + pgRouting** | MongoDB | Regroupement (`ST_ClusterDBSCAN`), distances le long du réseau (`pgr_dijkstra`), orientation des branches (`ST_Azimuth`), jointures de proximité (tram), import `osm2pgsql`, reprojection Lambert 93, tuiles `ST_AsMVT` / Martin : tout est natif. Mongo n'offre que des requêtes de proximité en WGS84, le reste serait à recoder en application. La souplesse documentaire est conservée avec `jsonb`. |
+| 001 | **PostgreSQL + PostGIS + pgRouting** | MongoDB | Requêtes par emprise et proximité (feux, tram, nommage), distances le long du réseau (`pgr_dijkstra`), orientation des branches (`ST_Azimuth`), jointures de proximité (tram), import `osm2pgsql`, reprojection Lambert 93, tuiles `ST_AsMVT` / Martin : tout est natif. Mongo n'offre que des requêtes de proximité en WGS84, le reste serait à recoder en application. La souplesse documentaire est conservée avec `jsonb`. |
 | 002 | Programmation stockée **par ligne de feux** (intervalles de vert), en `jsonb` | Stockage par phases ; tables relationnelles `intervalle` | Correspond à l'observation terrain et au diagramme papier. Les phases se déduisent (`engine.plan`), et le format se lit et se valide facilement. |
 | 003 | **Calcul métier dans un package TS partagé** | Calcul uniquement côté serveur | L'onde verte doit réagir instantanément aux curseurs. Le même code valide côté API. |
 | 004 | **Contributions anonymes + modération** | Comptes utilisateurs ; contributions par PR GitHub | Pas de données personnelles à gérer, et contribuer ne demande pas de compte GitHub. |
@@ -576,6 +607,7 @@ POST /api/admin/simulations ─▶ pg-boss « simulation » ─▶ apps/worker
 | 006 | **Drizzle** + SQL brut pour le spatial | Prisma (PostGIS mal géré), TypeORM | Proche du SQL, typé, géométrie point native. Le spatial s'écrit de toute façon en SQL. Limite connue : SRID à corriger dans les migrations. |
 | 007 | Géométries en **4326**, calculs en `geography` ou 2154 | Tout stocker en 2154 | MapLibre et GeoJSON sont en WGS84. Lambert 93 seulement pour les calculs métriques et l'export. |
 | 008 | **Horloge corrigée par `GET /time`** dans le chrono | Faire confiance à l'horloge du téléphone | Les décalages entre carrefours reposent sur des `t0` comparables à mieux que ~0,5 s. |
+| 009 | **Carrefours composés à la main** à partir des feux (`feu.carrefour_id`) | Regroupement automatique par distance (`ST_ClusterDBSCAN`, essayé puis abandonné) | Un carrefour = un contrôleur = une programmation, ce qu'une distance ne peut pas deviner. L'import ne fait que proposer des feux, jamais des regroupements. |
 
 ---
 
@@ -583,7 +615,7 @@ POST /api/admin/simulations ─▶ pg-boss « simulation » ─▶ apps/worker
 
 | Phase | Composants livrés |
 |---|---|
-| **1 — Inventaire des feux** | Import OSM, amorce, `carrefour` / `branche` / `ligne_feux` / `plan_feux` / `releve`, carte, fiche + diagramme de feux, chrono PWA, modération, `engine.plan` / `coherence` / `capacite` / `releve` |
+| **1 — Inventaire des feux** | Import OSM, table `feu`, composition manuelle des carrefours, `carrefour` / `branche` / `ligne_feux` / `plan_feux` / `releve`, carte, fiche + diagramme de feux, chrono PWA, modération, `engine.plan` / `coherence` / `capacite` / `releve` |
 | **1 bis — Onde verte** | Topologie pgRouting, `corridor` / `corridor_carrefour`, `engine.decalage` / `ondeVerte` / `optimisation`, écran corridor (espace-temps) |
 | **2 — SUMO** | `apps/worker`, pg-boss, `engine.sumo`, table de correspondance lignes ↔ liens, `simulation`, affichage des résultats |
 | Transverse | Exports (GeoJSON, GPKG 2154), sauvegardes, publication open data, Martin si besoin |

@@ -23,6 +23,7 @@ cp .env.example .env
 pnpm install
 pnpm db:up          # PostgreSQL 17 + PostGIS 3.5 + pgRouting 4.0 (port 5433)
 pnpm db:prepare     # bases voirie + voirie_test, extensions, migrations
+pnpm osm:import     # feux, voies et tram depuis OpenStreetMap (Overpass, mis en cache)
 pnpm dev            # packages en watch + API :3000 + web :5173
 ```
 
@@ -81,7 +82,7 @@ Organisation : `apps/web` (React + MapLibre), `apps/api` (NestJS + Drizzle),
 ## 1. TL;DR
 
 - **Point de départ gratuit** : OpenStreetMap recense déjà ~**390 feux** (`highway=traffic_signals`)
-  dans la zone de Besançon, soit **~130 à 180 carrefours à feux** une fois regroupés, plus ~500
+  dans la zone de Besançon (~130 à 180 carrefours à feux selon le regroupement), plus ~500
   passages piétons à feux et ~65 traversées de tram (requête du 26/09/2026, voir §3.1).
   → la carte peut être pré-remplie : il « suffit » de relever la programmation de chacun.
 - **Relevé sans matériel** : une page web mobile « chrono de feux ». On tape un bouton quand
@@ -119,7 +120,7 @@ Organisation : `apps/web` (React + MapLibre), `apps/api` (NestJS + Drizzle),
 
 ## 3. Phase 1 — Inventaire des feux
 
-### 3.1 Amorce automatique depuis OpenStreetMap
+### 3.1 Feux importés d'OpenStreetMap, carrefours composés à la main
 
 Requête Overpass (zone ≈ Besançon, bbox) :
 
@@ -142,13 +143,22 @@ Résultat au 26/09/2026 (bbox, donc déborde un peu sur les communes voisines) :
 | `railway=tram_crossing` (traversées de tram) | ~65 |
 | Carrefours obtenus en regroupant les feux à < 30 m / < 50 m / < 80 m | 180 / 136 / 125 |
 
-Pipeline d'amorce :
-1. Requête Overpass → regroupement des nœuds proches (≈ 50 m, puis correction manuelle)
-   → un dossier `carrefours/<id>/` par groupe, avec le statut `non_releve`.
-2. Nom automatique à partir des rues qui se croisent (ways OSM connectés).
-3. Branches pré-calculées (ways entrants, sens uniques, nombre de voies si `lanes=*`).
-4. Signaler les carrefours traversés par le tram (`railway=tram` à proximité).
-   Ils ont probablement une priorité tram.
+**Aucun regroupement automatique.** Une distance ne dit pas quels feux partagent un même
+contrôleur, donc une même programmation. Deux carrefours proches peuvent être pilotés
+ensemble, et deux feux à 30 m l'un de l'autre peuvent être indépendants. Donc :
+
+1. `pnpm osm:import` charge chaque feu OSM de la commune dans la table `feu` (type véhicule ou
+   piéton, position, balises), sans créer aucun carrefour.
+2. Sur la carte, en mode « Composer un carrefour », on clique les feux qui partagent la
+   **même programmation**. Un nom est proposé d'après les rues proches et reste modifiable.
+   La nature (carrefour ou traversée piétonne) se choisit au même moment.
+3. Un carrefour se modifie ensuite (ajout ou retrait de feux, nom, nature) ou se supprime,
+   ce qui libère ses feux. La suppression est refusée s'il a des relevés ou des plans de feux.
+4. Un réimport ne touche jamais aux regroupements. Les feux déplacés sont mis à jour, les
+   nouveaux apparaissent libres (en orange), et ceux qui ont disparu d'OSM sont marqués
+   (contour rouge) sans être supprimés.
+5. Proximité du tram : le carrefour est signalé si une voie de tram passe à moins de 25 m
+   (priorité tram probable, donc cycle non fixe).
 
 ### 3.2 Modèle de données d'un carrefour
 
@@ -164,7 +174,7 @@ Représentation logique ci-dessous en YAML, pour la lisibilité. En base, ce son
 id: vesoul-blum
 nom: "Rue de Vesoul × Boulevard Léon Blum"
 position: { lat: 47.2551, lon: 6.0252 }
-osm_nodes: [111, 222, 333]                 # feux OSM regroupés
+feux: [feu-1, feu-2, feu-3]                # feux rattachés à la main (table feu)
 statut: mesure                              # non_releve | estime | mesure | verifie (≥ 2 relevés concordants)
 
 controleur:
@@ -359,7 +369,7 @@ Le détail est dans **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**. En résum�
 | Import OSM | osm2pgsql / osm2pgrouting |
 | Déploiement | Docker Compose sur un VPS (~5–10 €/mois), Caddy |
 
-Pourquoi Postgres plutôt que Mongo : regroupement des feux (`ST_ClusterDBSCAN`), distances le
+Pourquoi Postgres plutôt que Mongo : feux et carrefours dans l'emprise de la carte, distances le
 long du réseau pour l'onde verte (`pgr_dijkstra`), orientation des branches, proximité du
 tram, import OSM, export Lambert 93. Tout est natif dans PostGIS et serait à recoder avec Mongo
 (voir la décision 001 dans ARCHITECTURE.md).
@@ -497,8 +507,11 @@ métropole. Un simple mail au service Mobilité peut les obtenir, facultatif. Le
 
 ### Phase 1 — Inventaire des feux
 - [ ] Initialiser le monorepo (pnpm, React + MapLibre, NestJS + Drizzle, PostGIS en Docker, schémas zod, licences).
-- [ ] Import OSM (osm2pgsql) + amorce `ST_ClusterDBSCAN` : ~150 carrefours en `non_releve`.
-- [ ] Carte MapLibre : carrefours colorés par statut, fiche avec diagramme de feux.
+- [x] Import OSM (Overpass) : 860 feux dans la table `feu` (359 véhicule, 501 piéton), sans regroupement automatique.
+- [x] Composition manuelle des carrefours sur la carte (sélection des feux, nom proposé, modification, suppression).
+- [ ] Composer les ~130 carrefours et traversées de la ville.
+- [x] Carte MapLibre : carrefours colorés par statut, bulle avec nom, nature et tram.
+- [ ] Fiche carrefour avec diagramme de feux ; calcul des branches (`ST_Azimuth`).
 - [ ] `engine/` : phases, rouges de dégagement, capacité par ligne, contrôles de cohérence.
 - [ ] Chrono de feux (PWA hors-ligne) → `POST /api/releves` → modération.
 - [ ] **Pilote** : relever entièrement **un axe de 4 à 6 carrefours consécutifs**, pour préparer la phase 1 bis.

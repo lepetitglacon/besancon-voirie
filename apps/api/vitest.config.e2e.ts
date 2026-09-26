@@ -18,7 +18,7 @@ export default defineConfig({
     include: ['**/*.e2e-spec.ts'],
     globalSetup: ['./test/global-setup.ts'],
     // Prioritaire sur le .env chargé par ConfigModule : l'API testée pointe sur la base de test.
-    env: { DATABASE_URL: databaseUrlTest },
+    env: { DATABASE_URL: databaseUrlTest, EDITION_LOCALE: 'true' },
     fileParallelism: false,
   },
 });

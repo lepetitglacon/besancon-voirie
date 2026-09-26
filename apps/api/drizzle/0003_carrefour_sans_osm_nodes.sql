@@ -1,0 +1,1 @@
+ALTER TABLE "carrefour" DROP COLUMN "osm_nodes";

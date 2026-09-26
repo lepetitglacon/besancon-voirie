@@ -81,3 +81,95 @@ body,
   margin-top: 8px !important;
   font-size: 12px !important;
 }
+
+.maplibregl-popup-content {
+  color: #1d2330;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+:root {
+  --accent: #2f6fd6;
+  --accent-texte: #ffffff;
+  --champ: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --champ: #1b212c;
+  }
+}
+
+.panneau h2 {
+  margin: 10px 0 4px;
+  font-size: 15px;
+}
+
+.edition label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+  color: var(--texte-doux);
+  font-size: 12px;
+}
+
+.edition input,
+.edition select {
+  padding: 6px 8px;
+  border: 1px solid var(--bordure);
+  border-radius: 6px;
+  background: var(--champ);
+  color: var(--texte);
+  font: inherit;
+  font-size: 14px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+button {
+  padding: 5px 10px;
+  border: 1px solid var(--bordure);
+  border-radius: 6px;
+  background: var(--champ);
+  color: var(--texte);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.principal {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-texte);
+}
+
+button.danger {
+  color: var(--erreur);
+}
+
+button.lien {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.maplibregl-popup-content button {
+  background: #ffffff;
+  color: #1d2330;
+  border-color: #dde1e8;
+}

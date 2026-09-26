@@ -19,7 +19,9 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "test:e2e": "pnpm --filter api test:e2e",
-    "db:prepare": "pnpm --filter api db:prepare"
+    "db:prepare": "pnpm --filter api db:prepare",
+    "osm:import": "pnpm --filter api osm:import",
+    "osm:seed": "pnpm --filter api osm:seed"
   },
   "devDependencies": {
     "@types/node": "^24.13.6",

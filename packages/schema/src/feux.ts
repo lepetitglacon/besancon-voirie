@@ -10,6 +10,10 @@ export type Mouvement = z.infer<typeof Mouvement>;
 export const StatutCarrefour = z.enum(['a_confirmer', 'non_releve', 'estime', 'mesure', 'verifie']);
 export type StatutCarrefour = z.infer<typeof StatutCarrefour>;
 
+/** Carrefour à feux, ou traversée piétonne à feux isolée (hors carrefour). */
+export const NatureCarrefour = z.enum(['carrefour', 'traversee_pietonne']);
+export type NatureCarrefour = z.infer<typeof NatureCarrefour>;
+
 export const Controleur = z.object({
   mode: z.enum(['fixe', 'semi_actue', 'actue', 'inconnu']).default('inconnu'),
   priorite_tc: z.enum(['aucune', 'tram', 'bus', 'inconnue']).default('inconnue'),
