@@ -173,3 +173,25 @@ button.lien {
   color: #1d2330;
   border-color: #dde1e8;
 }
+
+.rectangle-selection {
+  position: absolute;
+  z-index: 2;
+  border: 2px dashed var(--accent);
+  background: rgba(47, 111, 214, 0.12);
+  pointer-events: none;
+}
+
+button.actif {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+kbd {
+  padding: 0 4px;
+  border: 1px solid var(--bordure);
+  border-radius: 3px;
+  font: inherit;
+  font-size: 11px;
+}

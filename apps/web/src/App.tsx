@@ -63,12 +63,22 @@ function App() {
     setEdition({ ...edition, selection })
   }
 
+  /** Ajoute les feux d'un rectangle : seulement ceux qui sont libres ou déjà à ce carrefour. */
+  const ajouterFeux = (couverts: FeuResume[]) => {
+    if (!edition) return
+    const eligibles = couverts
+      .filter((feu) => !feu.carrefour_id || feu.carrefour_id === edition.carrefourId)
+      .map((feu) => feu.id)
+    setEdition({ ...edition, selection: [...new Set([...edition.selection, ...eligibles])] })
+  }
+
   const modifier = (carrefour: CarrefourResume) =>
     demarrer({
       carrefourId: carrefour.id,
       selection: (feux.data?.features ?? []).filter((f) => f.properties.carrefour_id === carrefour.id).map((f) => f.id),
       nature: carrefour.nature,
       nomSaisi: carrefour.nom,
+      modeRectangle: false,
     })
 
   const feuxLibres = feux.data?.features.filter((f) => f.properties.carrefour_id === null).length
@@ -78,15 +88,23 @@ function App() {
       <CarteCarrefours
         carrefours={carrefours.data}
         feux={feux.data}
-        edition={edition && { selection: edition.selection, carrefourId: edition.carrefourId }}
+        edition={
+          edition && {
+            selection: edition.selection,
+            carrefourId: edition.carrefourId,
+            modeRectangle: edition.modeRectangle,
+          }
+        }
         onEmprise={setBbox}
         onBasculerFeu={basculerFeu}
+        onAjouterFeux={ajouterFeux}
         onComposerDepuis={(feu) =>
           demarrer({
             carrefourId: null,
             selection: [feu.id],
             nature: feu.type === 'pieton' ? 'traversee_pietonne' : 'carrefour',
             nomSaisi: null,
+            modeRectangle: false,
           })
         }
         onModifier={modifier}
@@ -121,7 +139,9 @@ function App() {
             <div className="actions">
               <button
                 className="principal"
-                onClick={() => demarrer({ carrefourId: null, selection: [], nature: 'carrefour', nomSaisi: null })}
+                onClick={() =>
+                  demarrer({ carrefourId: null, selection: [], nature: 'carrefour', nomSaisi: null, modeRectangle: true })
+                }
               >
                 Composer un carrefour
               </button>

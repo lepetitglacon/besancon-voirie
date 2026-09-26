@@ -9,6 +9,8 @@ export interface Edition {
   nature: NatureCarrefour
   /** Nom saisi à la main ; tant qu'il est null, on affiche la suggestion. */
   nomSaisi: string | null
+  /** Glisser trace un rectangle de sélection au lieu de déplacer la carte. */
+  modeRectangle: boolean
 }
 
 interface Props {
@@ -33,9 +35,21 @@ export function PanneauEdition({ edition, enregistrement, onChanger, onEnregistr
     <div className="edition">
       <h2>{edition.carrefourId ? 'Modifier le carrefour' : 'Composer un carrefour'}</h2>
       <p>
-        Cliquez sur les feux qui partagent <strong>la même programmation</strong> (même contrôleur). Cliquez
-        à nouveau pour retirer un feu.
+        Sélectionnez les feux qui partagent <strong>la même programmation</strong> (même contrôleur) : un clic
+        ajoute ou retire un feu, un rectangle ajoute tous les feux qu'il couvre (<kbd>Maj</kbd> + glisser).
       </p>
+      <div className="actions">
+        <button
+          className={edition.modeRectangle ? 'actif' : undefined}
+          aria-pressed={edition.modeRectangle}
+          onClick={() => onChanger({ ...edition, modeRectangle: !edition.modeRectangle })}
+        >
+          ▭ Rectangle
+        </button>
+        <button disabled={edition.selection.length === 0} onClick={() => onChanger({ ...edition, selection: [] })}>
+          Vider
+        </button>
+      </div>
       <p>
         <strong>{edition.selection.length}</strong> feu(x) sélectionné(s)
       </p>

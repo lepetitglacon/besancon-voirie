@@ -1,7 +1,14 @@
 import type { Bbox, CarrefourResume, CarrefoursGeoJson, FeuResume, FeuxGeoJson } from '@voirie/schema'
 import type { Map as CarteMapLibre } from 'maplibre-gl'
-import { useState } from 'react'
-import Map, { Layer, NavigationControl, Popup, Source, type MapLayerMouseEvent } from 'react-map-gl/maplibre'
+import { useEffect, useRef, useState } from 'react'
+import Map, {
+  Layer,
+  NavigationControl,
+  Popup,
+  Source,
+  type MapLayerMouseEvent,
+  type MapMouseEvent,
+} from 'react-map-gl/maplibre'
 import { coucheCarrefours, coucheFeux } from './couches'
 
 /** Centre de Besançon (Pont Battant). */
@@ -28,6 +35,34 @@ function emprise(carte: CarteMapLibre): Bbox {
   return [limites.getWest(), limites.getSouth(), limites.getEast(), limites.getNorth()]
 }
 
+interface Rectangle {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
+
+/** En dessous de cette taille (px), un glisser est traité comme un simple clic. */
+const TAILLE_MIN_RECTANGLE = 4
+
+/** Suit l'état de la touche Maj, pour la sélection par Maj + glisser. */
+function useMajEnfoncee(): boolean {
+  const [enfoncee, setEnfoncee] = useState(false)
+  useEffect(() => {
+    const suivre = (e: KeyboardEvent) => setEnfoncee(e.shiftKey)
+    const relacher = () => setEnfoncee(false)
+    window.addEventListener('keydown', suivre)
+    window.addEventListener('keyup', suivre)
+    window.addEventListener('blur', relacher)
+    return () => {
+      window.removeEventListener('keydown', suivre)
+      window.removeEventListener('keyup', suivre)
+      window.removeEventListener('blur', relacher)
+    }
+  }, [])
+  return enfoncee
+}
+
 type Bulle =
   | { type: 'carrefour'; longitude: number; latitude: number; carrefour: CarrefourResume }
   | { type: 'feu'; longitude: number; latitude: number; feu: FeuResume }
@@ -36,9 +71,11 @@ interface Props {
   carrefours: CarrefoursGeoJson | undefined
   feux: FeuxGeoJson | undefined
   /** null hors édition ; en édition, les feux sélectionnés et le carrefour modifié (null si nouveau). */
-  edition: { selection: string[]; carrefourId: string | null } | null
+  edition: { selection: string[]; carrefourId: string | null; modeRectangle: boolean } | null
   onEmprise: (bbox: Bbox) => void
   onBasculerFeu: (feu: FeuResume) => void
+  /** Feux couverts par un rectangle tracé en mode composition. */
+  onAjouterFeux: (feux: FeuResume[]) => void
   onComposerDepuis: (feu: FeuResume) => void
   onModifier: (carrefour: CarrefourResume) => void
   onSupprimer: (carrefour: CarrefourResume) => void
@@ -48,6 +85,39 @@ export function CarteCarrefours(props: Props) {
   const { carrefours, feux, edition } = props
   const [bulle, setBulle] = useState<Bulle>()
   const [survol, setSurvol] = useState(false)
+  const [rectangle, setRectangle] = useState<Rectangle | null>(null)
+  const depart = useRef<{ x: number; y: number } | null>(null)
+  const majEnfoncee = useMajEnfoncee()
+  const traceActif = edition !== null && (edition.modeRectangle || majEnfoncee)
+
+  const commencerTrace = (evenement: MapMouseEvent) => {
+    if (!traceActif) return
+    depart.current = evenement.point
+    setRectangle({ x0: evenement.point.x, y0: evenement.point.y, x1: evenement.point.x, y1: evenement.point.y })
+  }
+
+  const suivreTrace = (evenement: MapMouseEvent) => {
+    if (!depart.current) return
+    setRectangle({ x0: depart.current.x, y0: depart.current.y, x1: evenement.point.x, y1: evenement.point.y })
+  }
+
+  const terminerTrace = (evenement: MapMouseEvent) => {
+    const debut = depart.current
+    depart.current = null
+    setRectangle(null)
+    if (!debut) return
+    const { x, y } = evenement.point
+    if (Math.abs(x - debut.x) < TAILLE_MIN_RECTANGLE && Math.abs(y - debut.y) < TAILLE_MIN_RECTANGLE) return
+    const couverts = evenement.target.queryRenderedFeatures(
+      [
+        [Math.min(debut.x, x), Math.min(debut.y, y)],
+        [Math.max(debut.x, x), Math.max(debut.y, y)],
+      ],
+      { layers: ['feux'] },
+    )
+    const parId = new globalThis.Map(couverts.map((f) => [f.properties.id as string, f.properties as FeuResume]))
+    props.onAjouterFeux([...parId.values()])
+  }
 
   const cliquer = (evenement: MapLayerMouseEvent) => {
     const objet = evenement.features?.[0]
@@ -74,7 +144,12 @@ export function CarteCarrefours(props: Props) {
       style={{ width: '100%', height: '100%' }}
       hash
       interactiveLayerIds={['feux', 'carrefours']}
-      cursor={survol ? 'pointer' : 'grab'}
+      cursor={traceActif ? 'crosshair' : survol ? 'pointer' : 'grab'}
+      dragPan={!traceActif}
+      boxZoom={edition === null}
+      onMouseDown={commencerTrace}
+      onMouseMove={suivreTrace}
+      onMouseUp={terminerTrace}
       onMouseEnter={() => setSurvol(true)}
       onMouseLeave={() => setSurvol(false)}
       onClick={cliquer}
@@ -82,6 +157,17 @@ export function CarteCarrefours(props: Props) {
       onMoveEnd={(evenement) => props.onEmprise(emprise(evenement.target))}
     >
       <NavigationControl position="top-right" />
+      {rectangle && (
+        <div
+          className="rectangle-selection"
+          style={{
+            left: Math.min(rectangle.x0, rectangle.x1),
+            top: Math.min(rectangle.y0, rectangle.y1),
+            width: Math.abs(rectangle.x1 - rectangle.x0),
+            height: Math.abs(rectangle.y1 - rectangle.y0),
+          }}
+        />
+      )}
       {carrefours && (
         <Source id="carrefours" type="geojson" data={carrefours}>
           <Layer {...coucheCarrefours(edition !== null)} />
