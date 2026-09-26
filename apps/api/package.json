@@ -36,6 +36,8 @@
     "@voirie/engine": "workspace:*",
     "@voirie/schema": "workspace:*",
     "drizzle-orm": "^0.45.3",
+    "fflate": "^0.8.3",
+    "gtfs-realtime-bindings": "^2.2.0",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",

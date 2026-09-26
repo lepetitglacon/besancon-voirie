@@ -9,3 +9,5 @@ export * from './conflits.js';
 export * from './degagement.js';
 export * from './programme.js';
 export * from './graphe.js';
+export * from './polyligne.js';
+export * from './tram.js';

@@ -1,6 +1,6 @@
 {
-  "id": "1628d8e5-ff5f-457a-bf0b-e0c567737ddd",
-  "prevId": "63db2d14-a48d-4232-b06b-21e05ea4e8e8",
+  "id": "0070cbb0-a3ac-4fe0-9db7-9272edc407a8",
+  "prevId": "4b04e1ee-4151-4e7b-96a3-f10dd24fab72",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -51,26 +51,26 @@
         "branche_carrefour_id_carrefour_id_fk": {
           "name": "branche_carrefour_id_carrefour_id_fk",
           "tableFrom": "branche",
-          "tableTo": "carrefour",
           "columnsFrom": [
             "carrefour_id"
           ],
+          "tableTo": "carrefour",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "branche_carrefour_id_code_unique": {
           "name": "branche_carrefour_id_code_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "carrefour_id",
             "code"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -114,20 +114,19 @@
           "notNull": true,
           "default": "'non_releve'"
         },
-        "nature": {
-          "name": "nature",
-          "type": "nature_carrefour",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'carrefour'"
-        },
         "controleur": {
           "name": "controleur",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'::jsonb"
+        },
+        "osm_nodes": {
+          "name": "osm_nodes",
+          "type": "bigint[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
         },
         "pres_tram": {
           "name": "pres_tram",
@@ -163,9 +162,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "gist",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -173,129 +172,10 @@
       "uniqueConstraints": {
         "carrefour_slug_unique": {
           "name": "carrefour_slug_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "slug"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.feu": {
-      "name": "feu",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "osm_id": {
-          "name": "osm_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "type": {
-          "name": "type",
-          "type": "type_feu",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "tags": {
-          "name": "tags",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "geom": {
-          "name": "geom",
-          "type": "geometry(point)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "present_osm": {
-          "name": "present_osm",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "carrefour_id": {
-          "name": "carrefour_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cree_le": {
-          "name": "cree_le",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "feu_geom_idx": {
-          "name": "feu_geom_idx",
-          "columns": [
-            {
-              "expression": "geom",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
           ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "gist",
-          "with": {}
-        },
-        "feu_carrefour_idx": {
-          "name": "feu_carrefour_idx",
-          "columns": [
-            {
-              "expression": "carrefour_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "feu_carrefour_id_carrefour_id_fk": {
-          "name": "feu_carrefour_id_carrefour_id_fk",
-          "tableFrom": "feu",
-          "tableTo": "carrefour",
-          "columnsFrom": [
-            "carrefour_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "feu_osm_id_unique": {
-          "name": "feu_osm_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "osm_id"
-          ]
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -368,26 +248,26 @@
         "ligne_feux_carrefour_id_carrefour_id_fk": {
           "name": "ligne_feux_carrefour_id_carrefour_id_fk",
           "tableFrom": "ligne_feux",
-          "tableTo": "carrefour",
           "columnsFrom": [
             "carrefour_id"
           ],
+          "tableTo": "carrefour",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "ligne_feux_carrefour_id_code_unique": {
           "name": "ligne_feux_carrefour_id_code_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "carrefour_id",
             "code"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -466,39 +346,39 @@
         "plan_feux_carrefour_id_carrefour_id_fk": {
           "name": "plan_feux_carrefour_id_carrefour_id_fk",
           "tableFrom": "plan_feux",
-          "tableTo": "carrefour",
           "columnsFrom": [
             "carrefour_id"
           ],
+          "tableTo": "carrefour",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "plan_feux_source_releve_releve_id_fk": {
           "name": "plan_feux_source_releve_releve_id_fk",
           "tableFrom": "plan_feux",
-          "tableTo": "releve",
           "columnsFrom": [
             "source_releve"
           ],
+          "tableTo": "releve",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "plan_feux_carrefour_id_code_unique": {
           "name": "plan_feux_carrefour_id_code_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "carrefour_id",
             "code"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -598,24 +478,24 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "releve_carrefour_id_carrefour_id_fk": {
           "name": "releve_carrefour_id_carrefour_id_fk",
           "tableFrom": "releve",
-          "tableTo": "carrefour",
           "columnsFrom": [
             "carrefour_id"
           ],
+          "tableTo": "carrefour",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -623,17 +503,141 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
+    },
+    "public.tram_passage": {
+      "name": "tram_passage",
+      "schema": "",
+      "columns": {
+        "jour": {
+          "name": "jour",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course": {
+          "name": "course",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vehicule": {
+          "name": "vehicule",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parcours": {
+          "name": "parcours",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "arret": {
+          "name": "arret",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "arret_precedent": {
+          "name": "arret_precedent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "heure_prevue": {
+          "name": "heure_prevue",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "detecte_a": {
+          "name": "detecte_a",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "heure_theorique": {
+          "name": "heure_theorique",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "previsions": {
+          "name": "previsions",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        }
+      },
+      "indexes": {
+        "tram_passage_course_arret_idx": {
+          "name": "tram_passage_course_arret_idx",
+          "columns": [
+            {
+              "expression": "jour",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "course",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "arret",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "tram_passage_heure_idx": {
+          "name": "tram_passage_heure_idx",
+          "columns": [
+            {
+              "expression": "heure_prevue",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "tram_passage_jour_course_sequence_pk": {
+          "name": "tram_passage_jour_course_sequence_pk",
+          "columns": [
+            "jour",
+            "course",
+            "sequence"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
     }
   },
   "enums": {
-    "public.nature_carrefour": {
-      "name": "nature_carrefour",
-      "schema": "public",
-      "values": [
-        "carrefour",
-        "traversee_pietonne"
-      ]
-    },
     "public.statut_carrefour": {
       "name": "statut_carrefour",
       "schema": "public",
@@ -653,21 +657,82 @@
         "valide",
         "rejete"
       ]
-    },
-    "public.type_feu": {
-      "name": "type_feu",
-      "schema": "public",
-      "values": [
-        "vehicule",
-        "pieton"
-      ]
     }
   },
   "schemas": {},
+  "views": {
+    "public.tram_troncon_observe": {
+      "name": "tram_troncon_observe",
+      "schema": "public",
+      "columns": {
+        "parcours": {
+          "name": "parcours",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "depart": {
+          "name": "depart",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "arrivee": {
+          "name": "arrivee",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "jour": {
+          "name": "jour",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course": {
+          "name": "course",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vehicule": {
+          "name": "vehicule",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "arrivee_a": {
+          "name": "arrivee_a",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duree_s": {
+          "name": "duree_s",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "heure": {
+          "name": "heure",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type_jour": {
+          "name": "type_jour",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "materialized": false,
+      "isExisting": true
+    }
+  },
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

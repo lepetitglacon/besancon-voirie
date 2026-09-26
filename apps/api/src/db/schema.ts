@@ -3,17 +3,20 @@ import {
   bigint,
   customType,
   boolean,
+  date,
   geometry,
   index,
   jsonb,
   pgEnum,
   pgTable,
+  pgView,
   primaryKey,
   real,
   smallint,
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 import type { ArcGraphe, Controleur, Etape, IntervalleVert, Plage } from '@voirie/schema';
@@ -231,3 +234,50 @@ export const planFeux = pgTable(
   },
   (t) => [unique().on(t.carrefourId, t.code)],
 );
+
+/**
+ * Passage d'une rame à un arrêt, déduit du flux GTFS-RT Ginko : l'arrêt disparaît de la liste
+ * des arrêts restants de la course. Voir docs/ARCHITECTURE.md §8.2.
+ */
+export const tramPassage = pgTable(
+  'tram_passage',
+  {
+    /** Jour de service de la course (une course après minuit appartient à la veille). */
+    jour: date('jour', { mode: 'string' }).notNull(),
+    course: text('course').notNull(),
+    sequence: smallint('sequence').notNull(),
+    vehicule: text('vehicule'),
+    parcours: text('parcours').notNull(),
+    arret: text('arret').notNull(),
+    arretPrecedent: text('arret_precedent'),
+    /** Dernière heure prévue avant la disparition de l'arrêt : l'heure de passage retenue. */
+    heurePrevue: timestamp('heure_prevue', { withTimezone: true }).notNull(),
+    /** Instant (horodatage du flux) où l'arrêt a disparu. */
+    detecteA: timestamp('detecte_a', { withTimezone: true }).notNull(),
+    heureTheorique: timestamp('heure_theorique', { withTimezone: true }),
+    /** Heure prévue à différents horizons avant le passage : horizon (s) → s epoch. */
+    previsions: jsonb('previsions').$type<Record<string, number>>().notNull().default({}),
+  },
+  (t) => [
+    primaryKey({ columns: [t.jour, t.course, t.sequence] }),
+    uniqueIndex('tram_passage_course_arret_idx').on(t.jour, t.course, t.arret),
+    index('tram_passage_heure_idx').on(t.heurePrevue),
+  ],
+);
+
+/**
+ * Durée observée de chaque tronçon : deux passages consécutifs d'une même course.
+ * Créée par une migration manuelle (0003), déclarée ici pour le typage.
+ */
+export const tramTronconObserve = pgView('tram_troncon_observe', {
+  parcours: text('parcours').notNull(),
+  depart: text('depart').notNull(),
+  arrivee: text('arrivee').notNull(),
+  jour: date('jour', { mode: 'string' }).notNull(),
+  course: text('course').notNull(),
+  vehicule: text('vehicule'),
+  arriveeA: timestamp('arrivee_a', { withTimezone: true }).notNull(),
+  dureeS: real('duree_s').notNull(),
+  heure: smallint('heure').notNull(),
+  typeJour: text('type_jour').notNull(),
+}).existing();

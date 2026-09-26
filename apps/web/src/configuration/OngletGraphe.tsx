@@ -88,7 +88,7 @@ export function OngletGraphe(props: Props) {
         courante={etapeLue}
         arcCourant={derniereTransition ? { de: derniereTransition.de, vers: derniereTransition.vers } : null}
       />
-      <p className="discret legende">
+      <p className="discret note-legende">
         — suite du cycle · <span className="legende-saut">- - saut d'une étape sur appel</span> ·{' '}
         <span className="legende-demande">— arc sur demande (priorité)</span> · durée de la transition sur chaque arc
       </p>

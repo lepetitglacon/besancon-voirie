@@ -7,6 +7,7 @@ import { FeuxModule } from './feux/feux.module.js';
 import { HealthController } from './health/health.controller.js';
 import { LignesModule } from './lignes/lignes.module.js';
 import { ProgrammeModule } from './programme/programme.module.js';
+import { TramModule } from './tram/tram.module.js';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ProgrammeModule } from './programme/programme.module.js';
     LignesModule,
     ProgrammeModule,
     FeuxModule,
+    TramModule,
   ],
   controllers: [HealthController],
 })

@@ -121,7 +121,7 @@ Le calque suit la carte à chaque déplacement (projection lon/lat → pixels re
 par image). Son fond laisse passer les gestes vers la carte. La vue d'ensemble de la ville
 (feux, carrefours) reste en couches MapLibre, plus efficaces pour des centaines d'éléments.
 
-Sur la **photo aérienne** (bouton « Photo aérienne »), l'éditeur dessine :
+Sur la **photo aérienne** (fond de carte « Satellite »), l'éditeur dessine :
 - les voies à leur largeur réelle, en couleur pour les entrantes (une couleur par voie,
   comme TM:PE) et en gris pour les sortantes ;
 - les passages piétons en violet ;
