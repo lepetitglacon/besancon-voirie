@@ -78,6 +78,53 @@ body {
   opacity: 0.6;
 }
 
+/* Giratoire : chaussée annulaire et îlot, sous les voies et les trajectoires. */
+.calque-anneau .chaussee {
+  fill: rgba(56, 189, 248, 0.12);
+  stroke: #38bdf8;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+.calque-anneau .ilot {
+  fill: rgba(31, 138, 76, 0.18);
+  stroke: none;
+}
+
+/* Feu d'anneau : barre en travers de l'anneau, code côté îlot. */
+.calque-feu-anneau .barre {
+  fill: none;
+  stroke: #9ca3af;
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+
+.calque-feu-anneau text {
+  font-size: 11px;
+  font-weight: 700;
+  fill: #ffffff;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.7);
+  stroke-width: 3px;
+}
+
+.calque-feu-anneau.surligne .barre {
+  stroke: var(--chakra-colors-brand-solid);
+  stroke-width: 7;
+}
+
+.calque-feu-anneau.feu-vert .barre {
+  stroke: var(--chakra-colors-feu-vert);
+}
+
+.calque-feu-anneau.feu-jaune .barre {
+  stroke: var(--chakra-colors-feu-orange);
+}
+
+.calque-feu-anneau.feu-rouge .barre {
+  stroke: var(--chakra-colors-feu-rouge);
+}
+
 .calque-courbe .trace {
   fill: none;
   stroke-width: 3;

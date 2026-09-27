@@ -85,6 +85,8 @@ function App() {
   const [affichageConfiguration, setAffichageConfiguration] = useState<AffichageConfiguration>({
     branches: [],
     connexions: [],
+    anneau: null,
+    feuxAnneau: [],
     mode: null,
     feuxSurlignes: [],
     connexionsSurlignees: [],

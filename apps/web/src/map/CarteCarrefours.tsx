@@ -25,6 +25,7 @@ const STYLE_CARTE = 'https://tiles.openfreemap.org/styles/liberty'
 
 const NATURES: Record<CarrefourResume['nature'], string> = {
   carrefour: 'Carrefour à feux',
+  giratoire: 'Giratoire à feux',
   traversee_pietonne: 'Traversée piétonne à feux',
 }
 
@@ -286,6 +287,8 @@ export function CarteCarrefours(props: Props) {
         <CalqueCarrefour
           branches={configuration.branches}
           connexions={configuration.connexions}
+          anneau={configuration.anneau}
+          feuxAnneau={configuration.feuxAnneau}
           mode={configuration.mode}
           surlignees={new Set(configuration.connexionsSurlignees)}
           feux={configuration.feux}

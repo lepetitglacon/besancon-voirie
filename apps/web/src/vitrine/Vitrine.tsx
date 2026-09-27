@@ -248,6 +248,7 @@ function ComposantsChakra() {
           </Case>
           <Selecteur valeur={nature} onChange={setNature} aria-label="Nature">
             <option value="carrefour">Carrefour à feux</option>
+            <option value="giratoire">Giratoire à feux</option>
             <option value="traversee_pietonne">Traversée piétonne à feux</option>
           </Selecteur>
           <Input placeholder="Nom de la rue" />

@@ -24,8 +24,10 @@ interface Props {
 
 const cle = (m: { origine: string; destination: string }) => `${m.origine}>${m.destination}`
 
-function codeLibre(signal: Signal, lignes: LigneFeux[]): string {
-  const prefixe = SIGNAUX[signal].prefixe
+/** Préfixe des codes de feux d'anneau (A1, A2…). */
+const PREFIXE_ANNEAU = 'A'
+
+function codeLibre(prefixe: string, lignes: LigneFeux[]): string {
   const pris = new Set(lignes.map((l) => l.code))
   let n = 1
   while (pris.has(`${prefixe}${n}`)) n++
@@ -40,7 +42,11 @@ export function OngletLignes({ configuration, brouillon, onChanger, ligneActive,
   const avecTraversee = branches.filter((b) => b.traversee)
   const pourConflits = lignes.map((l) => ({ ...l, type: typeLigne(l.signal) }))
   const conflits = matriceConflits(pourConflits, geometrie, conflits_admis)
-  const nonCommandes = mouvementsNonCommandes(mouvements, pourConflits)
+  // Giratoire : une entrée sans feux cède le passage ; seules comptent les entrées dont un mouvement a des feux.
+  const entreesAFeux = new Set(lignes.flatMap((l) => l.mouvements.map((c) => c.split('>')[0])))
+  const nonCommandes = mouvementsNonCommandes(mouvements, pourConflits).filter(
+    (c) => !configuration.anneau || entreesAFeux.has(c.split('>')[0]),
+  )
   const directionDe = new Map(mouvements.map((m) => [cle(m), m.direction]))
   const commandePar = new Map(lignes.flatMap((l) => l.mouvements.map((c) => [c, l.code] as const)))
 
@@ -52,13 +58,24 @@ export function OngletLignes({ configuration, brouillon, onChanger, ligneActive,
     changerLignes([
       ...lignes,
       {
-        code: codeLibre(signal, lignes),
+        code: codeLibre(SIGNAUX[signal].prefixe, lignes),
         signal,
         mouvements: [],
         traverse: signal === 'R12' ? (avecTraversee[0]?.code ?? null) : null,
+        anneau: null,
         feux: [],
       },
     ])
+
+  /** Feu sur l'anneau, en amont de la première branche qui n'en a pas encore. */
+  const ajouterFeuAnneau = () => {
+    const pris = new Set(lignes.map((l) => l.anneau))
+    const branche = branches.find((b) => !pris.has(b.code)) ?? branches[0]
+    changerLignes([
+      ...lignes,
+      { code: codeLibre(PREFIXE_ANNEAU, lignes), signal: 'R11v', mouvements: [], traverse: null, anneau: branche?.code ?? null, feux: [] },
+    ])
+  }
 
   const basculerAdmis = (a: string, b: string) => {
     const deja = conflits_admis.some(([x, y]) => (x === a && y === b) || (x === b && y === a))
@@ -82,12 +99,17 @@ export function OngletLignes({ configuration, brouillon, onChanger, ligneActive,
           <Button size="xs" onClick={() => ajouter('R12')}>+ Piétons</Button>
           <Button size="xs" onClick={() => ajouter('R13c')}>+ Vélos</Button>
           <Button size="xs" onClick={() => ajouter('R17')}>+ Tram/bus</Button>
+          {configuration.anneau && (
+            <Button size="xs" onClick={ajouterFeuAnneau} title="Feu qui arrête la circulation de l’anneau, juste avant une branche">
+              + Feu d’anneau
+            </Button>
+          )}
           {lignes.length === 0 && (
             <Button
               size="xs"
               onClick={() =>
                 changerLignes(
-                  proposerLignes(mouvements).map((l) => ({ ...l, signal: 'R11v' as const, traverse: null, feux: [] })),
+                  proposerLignes(mouvements).map((l) => ({ ...l, signal: 'R11v' as const, traverse: null, anneau: null, feux: [] })),
                 )
               }
             >
@@ -138,6 +160,7 @@ export function OngletLignes({ configuration, brouillon, onChanger, ligneActive,
                         signal,
                         mouvements: devientPieton ? [] : ligne.mouvements,
                         traverse: devientPieton ? (ligne.traverse ?? avecTraversee[0]?.code ?? null) : null,
+                        anneau: devientPieton ? null : ligne.anneau,
                       })
                     }}
                   >
@@ -177,6 +200,27 @@ export function OngletLignes({ configuration, brouillon, onChanger, ligneActive,
                       ))}
                     </Selecteur>
                   </HStack>
+                ) : ligne.anneau !== null ? (
+                  <Stack gap="1">
+                    <HStack gap="1.5">
+                      <Text textStyle="xs" color="fg.muted">
+                        sur l’anneau, juste avant la branche
+                      </Text>
+                      <Selecteur
+                        size="xs"
+                        aria-label="Branche en aval du feu d’anneau"
+                        valeur={ligne.anneau}
+                        onChange={(valeur) => changerLigne(index, { ...ligne, anneau: valeur })}
+                      >
+                        {branches.map((b) => (
+                          <option key={b.code} value={b.code}>
+                            {b.code} · {b.nom ?? 'sans nom'}
+                          </option>
+                        ))}
+                      </Selecteur>
+                    </HStack>
+                    <Aide>Arrête la circulation de l’anneau avant l’entrée (ou la traversée du tram) de cette branche.</Aide>
+                  </Stack>
                 ) : (
                   <Grid templateColumns="1fr 1fr" rowGap="1" columnGap="2">
                     {mouvements.map((m) => {

@@ -6,15 +6,27 @@
  * les clics vers la carte (pointer-events: none). La molette et l'appui de la souris, eux, sont
  * relayés au canvas : la carte zoome et se déplace aussi depuis une voie ou une liaison.
  */
-import { cleVoie, flechesParVoie, repereLocal, type LonLat, type XY } from '@voirie/engine'
-import type { Branche, Connexion, EmpriseIa, TypeFeu } from '@voirie/schema'
+import {
+  cleVoie,
+  contourAnneau,
+  courbeGiratoire,
+  flechesParVoie,
+  LARGEUR_VOIE_M as LARGEUR_VOIE_REELLE_M,
+  repereLocal,
+  traverseIlot,
+  type LonLat,
+  type XY,
+} from '@voirie/engine'
+import type { Anneau, Branche, Connexion, EmpriseIa, TypeFeu } from '@voirie/schema'
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
 import { useMap } from 'react-map-gl/maplibre'
 import { FLECHES } from '../libelles'
 import { couleursVoies, deplacerPoignee, voiesDe, type Poignee as PoigneeModele } from '../modele'
 import {
+  AnneauGiratoire,
   CadrePhoto,
   Courbe,
+  FeuAnneau,
   EcartOsm,
   Elastique,
   Etiquette,
@@ -50,6 +62,16 @@ export interface FeuPlacable {
   placeALaMain: boolean
 }
 
+/** Feu d'anneau d'un giratoire : sa ligne, sa position sur l'anneau, son état pendant la lecture. */
+export interface FeuAnneauAffiche {
+  code: string
+  /** Azimut (°) depuis le centre de l'îlot. */
+  azimut: number
+  etat: EtatFeu | null
+  /** Ligne active dans l'onglet des lignes. */
+  surligne: boolean
+}
+
 /** Feu en cours de déplacement : la carte le dessine à cette position. */
 export interface ApercuFeu {
   id: string
@@ -59,6 +81,10 @@ export interface ApercuFeu {
 interface Props {
   branches: Branche[]
   connexions: Connexion[]
+  /** Anneau d'un giratoire ; null pour un carrefour ordinaire. */
+  anneau: Anneau | null
+  /** Feux d'anneau des lignes de feux, dessinés en travers de l'anneau. */
+  feuxAnneau?: readonly FeuAnneauAffiche[]
   /** null : dessin seul, sans poignées ni clics. */
   mode: ModeEdition | null
   /** Connexions à mettre en avant (« de>vers »), par exemple celles de la ligne de feux active. */
@@ -89,6 +115,7 @@ const TOLERANCE_CIBLE_PX = 14
 /** Au-delà (px) entre l'appui et le relâché, c'est un déplacement de la carte, pas un clic. */
 const TOLERANCE_CLIC_PX = 3
 const GRIS_SORTANTE = '#e5e7eb'
+const COULEUR_ANNEAU = '#38bdf8'
 const VIOLET_PASSAGE = '#7d3cb4'
 
 type Survol = { type: 'voie'; cle: string } | { type: 'connexion'; cle: string } | null
@@ -110,6 +137,8 @@ export function CalqueCarrefour(props: Props) {
   const {
     branches,
     connexions,
+    anneau,
+    feuxAnneau = [],
     mode,
     surlignees,
     feux,
@@ -173,9 +202,9 @@ export function CalqueCarrefour(props: Props) {
   const apercu = useMemo(
     () =>
       glisse?.type === 'poignee'
-        ? deplacerPoignee({ branches, connexions }, glisse.poignee, glisse.position)
-        : { branches, connexions },
-    [branches, connexions, glisse],
+        ? deplacerPoignee({ branches, connexions, anneau }, glisse.poignee, glisse.position)
+        : { branches, connexions, anneau },
+    [branches, connexions, anneau, glisse],
   )
   const couleurs = useMemo(() => couleursVoies(apercu.branches), [apercu.branches])
   const fleches = useMemo(() => flechesParVoie(apercu.branches, apercu.connexions), [apercu])
@@ -325,6 +354,34 @@ export function CalqueCarrefour(props: Props) {
         })
       }
     }
+    if (mode === 'ajuster' && apercu.anneau) {
+      const { centre, rayon_m } = apercu.anneau
+      const bord = repereLocal(centre).versLonLat([rayon_m * Math.SQRT1_2, rayon_m * Math.SQRT1_2]) // au nord-est
+      const enCours = (point: 'centre' | 'bord') =>
+        glisse?.type === 'poignee' && glisse.poignee.role === 'anneau' && glisse.poignee.point === point
+      poignees.push(
+        {
+          cle: 'anneau-centre',
+          centre: px(centre),
+          rayon: 7,
+          couleur: COULEUR_ANNEAU,
+          vide: false,
+          etat: enCours('centre') ? 'active' : 'normale',
+          titre: 'Centre de l’îlot : glisser pour caler l’anneau sur la photo',
+          gestes: gestes({ role: 'anneau', point: 'centre' }, centre),
+        },
+        {
+          cle: 'anneau-bord',
+          centre: px(bord),
+          rayon: 6,
+          couleur: COULEUR_ANNEAU,
+          vide: false,
+          etat: enCours('bord') ? 'active' : 'normale',
+          titre: `Bord extérieur de l’anneau (${rayon_m} m) : glisser pour régler le rayon`,
+          gestes: gestes({ role: 'anneau', point: 'bord' }, bord),
+        },
+      )
+    }
     if (mode === 'ajuster') {
       for (const b of apercu.branches) {
         if (!b.traversee) continue
@@ -375,12 +432,22 @@ export function CalqueCarrefour(props: Props) {
     return [px([ouest, nord]), px([est, nord]), px([est, sud]), px([ouest, sud])] as [XY, XY, XY, XY]
   })()
 
+  // Giratoire : chaussée annulaire, et feux d'anneau en travers de la chaussée, code côté îlot.
+  const contour = apercu.anneau ? contourAnneau(apercu.anneau) : null
+  const surAnneau = (azimut: number, rayon: number): XY => {
+    const a = (azimut * Math.PI) / 180
+    return px(repereLocal(apercu.anneau!.centre).versLonLat([rayon * Math.sin(a), rayon * Math.cos(a)]))
+  }
+  const rayonIlot = apercu.anneau ? Math.max(apercu.anneau.rayon_m - apercu.anneau.voies * LARGEUR_VOIE_REELLE_M, 0.5) : 0
+
   const depart = glisse?.type === 'connexion' ? voies.get(glisse.de) : undefined
   const cible = cibleEnCours ? voies.get(cibleEnCours) : undefined
 
   return (
     <svg ref={refSvg} className={`calque-carrefour ${mode ?? 'lecture'}`} aria-label="Configuration du carrefour">
       {coinsCadre && cadrePhoto && <CadrePhoto coins={coinsCadre} libelle={cadrePhoto.libelle} />}
+
+      {contour && <AnneauGiratoire exterieur={contour.exterieur.map(px)} ilot={contour.ilot.map(px)} />}
 
       {apercu.branches.map(
         (b) => b.traversee && (
@@ -413,11 +480,13 @@ export function CalqueCarrefour(props: Props) {
         const sortie = voies.get(c.vers)
         if (!entree || !sortie) return null
         const cle = cleConnexion(c)
+        const parAnneau = apercu.anneau && !traverseIlot(entree.type, sortie.type)
         return (
           <Courbe
             key={cle}
             entree={segmentPx(entree.geom)}
             sortie={segmentPx(sortie.geom)}
+            points={parAnneau ? courbeGiratoire(entree.geom, sortie.geom, apercu.anneau!).map(px) : undefined}
             couleur={couleurs.get(c.de) ?? '#ffffff'}
             etat={etatCourbe(cle)}
             feu={feux ? (feux.connexions.get(cle) ?? 'libre') : undefined}
@@ -433,6 +502,19 @@ export function CalqueCarrefour(props: Props) {
           />
         )
       })}
+
+      {apercu.anneau &&
+        feuxAnneau.map((f) => (
+          <FeuAnneau
+            key={`anneau-${f.code}`}
+            de={surAnneau(f.azimut, rayonIlot)}
+            a={surAnneau(f.azimut, apercu.anneau!.rayon_m)}
+            etiquette={surAnneau(f.azimut, Math.max(rayonIlot - 3, rayonIlot / 2))}
+            code={f.code}
+            feu={f.etat ?? undefined}
+            surligne={f.surligne}
+          />
+        ))}
 
       {glisse?.type === 'connexion' && depart && (
         <Elastique depart={px(depart.geom[0])} arrivee={cible ? px(cible.geom[0]) : px(glisse.position)} valide={cible !== undefined} />

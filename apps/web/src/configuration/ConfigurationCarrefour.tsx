@@ -6,6 +6,7 @@ import {
   contexteProgramme,
   degagementsRetenus,
   etatLigne,
+  feuxAnneau as positionsFeuxAnneau,
   repereLocal,
   simulerGraphe,
   validerGraphe,
@@ -16,6 +17,7 @@ import {
   COTE_PHOTO_IA_MIN_M,
   ConfigurationBranches,
   type AnalyseIa,
+  type Anneau,
   type Branche,
   type BranchesCarrefour,
   type CarrefourResume,
@@ -33,7 +35,7 @@ import { api } from '../api'
 import { Aide, BandeauMode, BarreOutils, CarteEnTete, Indice, Message, notifications, PanneauBas, Valeur, type EtatLampe } from '../ds'
 import { demanderNotificationsSysteme, enFile, useAnalysesIa } from './analysesIa'
 import { Chrono } from './FileIa'
-import type { ClicCalque, ModeEdition } from './calque/CalqueCarrefour'
+import type { ClicCalque, FeuAnneauAffiche, ModeEdition } from './calque/CalqueCarrefour'
 import type { EtatFeu } from './calque/elements'
 import { basculerConnexion, basculerTraversee, deplacerPoignee, voiesDe, type Brouillon, type Poignee } from './modele'
 import { OngletGraphe, type Scenario } from './OngletGraphe'
@@ -48,6 +50,7 @@ const AUCUNE_BRANCHE: Branche[] = []
 const AUCUNE_CONNEXION: Connexion[] = []
 const AUCUN_FEU: string[] = []
 const AUCUNE_LIGNE: never[] = []
+const AUCUN_FEU_ANNEAU: FeuAnneauAffiche[] = []
 
 /** Ce qui s'enregistre : sans les champs déduits (sens des branches). */
 const pourEnregistrer = (brouillon: Brouillon) => ({
@@ -56,12 +59,17 @@ const pourEnregistrer = (brouillon: Brouillon) => ({
     return branche
   }),
   connexions: brouillon.connexions,
+  anneau: brouillon.anneau,
 })
 
 /** Ce que la carte doit dessiner pendant la configuration. */
 export interface AffichageConfiguration {
   branches: Branche[]
   connexions: Connexion[]
+  /** Anneau d'un giratoire ; null pour un carrefour ordinaire. */
+  anneau: Anneau | null
+  /** Feux d'anneau des lignes de feux, avec leur couleur pendant la lecture. */
+  feuxAnneau: FeuAnneauAffiche[]
   /** Outil actif sur le calque ; null : dessin seul. */
   mode: ModeEdition | null
   feuxSurlignes: string[]
@@ -173,16 +181,21 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
   const champImport = useRef<HTMLInputElement>(null)
   const enregistre: BranchesCarrefour | undefined = branchesEnregistrees.data
   const configuration: Brouillon = useMemo(
-    () => brouillonBranches ?? { branches: enregistre?.branches ?? AUCUNE_BRANCHE, connexions: enregistre?.connexions ?? AUCUNE_CONNEXION },
+    () =>
+      brouillonBranches ?? {
+        branches: enregistre?.branches ?? AUCUNE_BRANCHE,
+        connexions: enregistre?.connexions ?? AUCUNE_CONNEXION,
+        anneau: enregistre?.anneau ?? null,
+      },
     [brouillonBranches, enregistre],
   )
   const branches = configuration.branches
-  const centre: LonLat = enregistre?.centre ?? [0, 0]
+  const centre: LonLat = useMemo(() => enregistre?.centre ?? [0, 0], [enregistre])
 
   const detection = useMutation({
     mutationFn: () => api.detecterBranches(carrefour.id),
     onSuccess: (proposition) => {
-      setBrouillonBranches({ branches: proposition.branches, connexions: proposition.connexions })
+      setBrouillonBranches({ branches: proposition.branches, connexions: proposition.connexions, anneau: proposition.anneau })
       setSources(proposition.sources)
       setAnalyseIa(null)
     },
@@ -237,7 +250,7 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
       return analyse.resultat
     },
     onSuccess: async (proposition) => {
-      setBrouillonBranches({ branches: proposition.branches, connexions: proposition.connexions })
+      setBrouillonBranches({ branches: proposition.branches, connexions: proposition.connexions, anneau: proposition.anneau })
       setSources(proposition.sources)
       setAnalyseIa(proposition.ia)
       await queryClient.invalidateQueries({ queryKey: ['analyses-ia'] })
@@ -428,12 +441,31 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     return feuxDesLignes(new Map(lignesFeux.map((l, i) => [l.code, etats[i]!])), lignesFeux, connexionsEnregistrees)
   }, [etatsLignes, lignesFeux, connexionsEnregistrees])
 
+  // Feux d'anneau : placés sur l'anneau du brouillon, à la couleur de leur ligne pendant la lecture.
+  const lignesAnneau = lignes.lignes.flatMap((l) => (l.anneau ? [`${l.code}:${l.anneau}`] : [])).join(',')
+  const feuxAnneauAffiches = useMemo(() => {
+    if (!configuration.anneau || !lignesAnneau) return AUCUN_FEU_ANNEAU
+    const paires = lignesAnneau.split(',').map((p) => p.split(':') as [string, string])
+    const positions = positionsFeuxAnneau(
+      geometrieEnregistree({ centre, ...configuration }),
+      paires.map(([, branche]) => branche),
+    )
+    const etats = etatsLignes ? (etatsLignes.split(',') as EtatFeu[]) : []
+    const etatDe = new Map(lignesFeux.map((l, i) => [l.code, etats[i] ?? null]))
+    return paires.flatMap(([code, branche]): FeuAnneauAffiche[] => {
+      const azimut = positions.get(branche)
+      return azimut === undefined ? [] : [{ code, azimut, etat: etatDe.get(code) ?? null, surligne: onglet === 'lignes' && ligneActive === code }]
+    })
+  }, [configuration, centre, lignesAnneau, etatsLignes, lignesFeux, onglet, ligneActive])
+
   const libelleZoneIa = dimensionsIa && `Photo IA · ${Math.round(dimensionsIa.largeur_m)} × ${Math.round(dimensionsIa.hauteur_m)} m`
   useEffect(
     () =>
       onAffichage({
         branches,
         connexions: configuration.connexions,
+        anneau: configuration.anneau,
+        feuxAnneau: feuxAnneauAffiches,
         mode: cadrage ? null : outil,
         feuxSurlignes,
         connexionsSurlignees,
@@ -445,6 +477,8 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     [
       branches,
       configuration.connexions,
+      configuration.anneau,
+      feuxAnneauAffiches,
       outil,
       cadrage,
       feuxSurlignes,
@@ -637,7 +671,11 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     ) : popup?.type === 'carrefour' ? (
       <PopupCarrefour
         nom={carrefour.nom}
+        giratoire={carrefour.nature === 'giratoire'}
         brouillon={configuration}
+        centre={centre}
+        onChanger={setBrouillonBranches}
+        onOutil={choisirOutil}
         cycle={resultat?.cycle_s ?? null}
         detectionEnCours={detection.isPending}
         onDetecter={detecter}
@@ -667,7 +705,9 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     ? { titre: 'Zone de la photo IA', aides: ['Glisser sur la carte pour dessiner la zone : l’IA ne voit rien en dehors', 'Entrée : lancer'] }
     : onglet === 'lignes' && ligneActive
       ? { titre: `Feux de ${ligneActive}`, aides: ['Clic sur un feu du carrefour : l’ajouter ou le retirer'] }
-      : CONSIGNES[outil]
+      : outil === 'ajuster' && configuration.anneau
+        ? { titre: 'Caler les voies et l’anneau', aides: [...CONSIGNES.ajuster!.aides, 'Points bleus : centre de l’îlot et bord de l’anneau (rayon)'] }
+        : CONSIGNES[outil]
 
   return (
     <>
@@ -687,6 +727,11 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
             {modifications > 0 && (
               <Badge colorPalette="orange">
                 {modifications} modification{modifications > 1 ? 's' : ''} à enregistrer
+              </Badge>
+            )}
+            {carrefour.nature === 'giratoire' && !configuration.anneau && branchesEnregistrees.isSuccess && (
+              <Badge colorPalette="orange" title="Clic sur le centre du carrefour, ou détection OSM (O)">
+                Anneau à dessiner
               </Badge>
             )}
             {sansLiaison > 0 && (

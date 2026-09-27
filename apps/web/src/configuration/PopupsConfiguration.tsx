@@ -11,7 +11,15 @@ import {
   mouvementsDepuisConnexions,
   type LonLat,
 } from '@voirie/engine'
-import { typeLigne, type BranchesCarrefour, type ConfianceIa, type FeuResume, type SourceBranche, type TypeVoie } from '@voirie/schema'
+import {
+  typeLigne,
+  type BranchesCarrefour,
+  type ConfianceIa,
+  type FeuResume,
+  type PrioriteEntree,
+  type SourceBranche,
+  type TypeVoie,
+} from '@voirie/schema'
 import {
   Aide,
   BarreOutils,
@@ -32,10 +40,14 @@ import {
   ajouterVoie,
   basculerConnexion,
   basculerTraversee,
+  changerPrioriteEntree,
   changerTypeVoie,
+  changerVoiesAnneau,
   couleursVoies,
+  creerAnneau,
   regenererVoies,
   renommerBranche,
+  retirerAnneau,
   retirerVoie,
   supprimerBranche,
   voiesDe,
@@ -52,8 +64,16 @@ const TYPES: Array<{ valeur: TypeVoie; libelle: string }> = [
   { valeur: 'tram', libelle: 'Tram' },
 ]
 
+/** Régimes d'une entrée de giratoire hors feux (panneaux AB3a, AB4, ou aucun). */
+const PRIORITES: Array<{ valeur: PrioriteEntree; libelle: string }> = [
+  { valeur: 'cedez_le_passage', libelle: 'Cédez' },
+  { valeur: 'stop', libelle: 'Stop' },
+  { valeur: 'priorite_a_droite', libelle: 'Priorité à droite' },
+]
+
 const NATURES_CONFLIT = {
   croisement: { titre: 'trajectoires qui se croisent', couleur: 'conflit.croisement' },
+  insertion: { titre: 'insertion sur l’anneau', couleur: 'conflit.insertion' },
   convergence: { titre: 'même sortie', couleur: 'conflit.convergence' },
   pieton: { titre: 'traversée piétonne', couleur: 'conflit.pieton' },
 } as const
@@ -404,6 +424,21 @@ export function PopupBranche({ code, brouillon, centre, source, ia, onChanger, o
           </HStack>
         ))}
       </Section>
+      {brouillon.anneau && (
+        <Section libelle="Entrée sur l’anneau (hors feux)">
+          <Segments
+            fitted
+            aria-label="Régime de l’entrée"
+            valeur={branche.priorite_entree ?? 'cedez_le_passage'}
+            onChange={(priorite) => onChanger(changerPrioriteEntree(brouillon, code, priorite))}
+            options={PRIORITES}
+          />
+          <Aide>
+            Cédez-le-passage à l’anneau par défaut ; priorité à droite si l’anneau n’est pas prioritaire. Une entrée à
+            feux garde ce régime quand ses feux sont éteints ou au jaune clignotant.
+          </Aide>
+        </Section>
+      )}
       <HStack justify="space-between" pt="2.5" borderTopWidth="1px" borderColor="border.muted">
         <Text>Passage piéton</Text>
         <Bascule coche={branche.traversee !== null} onChange={() => onChanger(basculerTraversee(brouillon, code, centre))} />
@@ -435,7 +470,12 @@ const CONFIANCES: Record<ConfianceIa, string> = { haute: 'green', moyenne: 'oran
 
 interface PropsCarrefour {
   nom: string
+  /** Déclaré giratoire à la composition : l'anneau se dessine ici. */
+  giratoire: boolean
   brouillon: Brouillon
+  centre: LonLat
+  onChanger: (brouillon: Brouillon) => void
+  onOutil: (outil: OutilCarte) => void
   /** Durée du cycle du plan actif, null sans programme calculé. */
   cycle: number | null
   detectionEnCours: boolean
@@ -447,11 +487,13 @@ interface PropsCarrefour {
   onFermer: () => void
 }
 
-export function PopupCarrefour({ nom, brouillon, cycle, detectionEnCours, onDetecter, iaEnFile, onGenererIa, onPlan, onFermer }: PropsCarrefour) {
+export function PopupCarrefour(props: PropsCarrefour) {
+  const { nom, giratoire, brouillon, centre, onChanger, onOutil, cycle, detectionEnCours, onDetecter, iaEnFile, onGenererIa, onPlan, onFermer } = props
+  const { anneau } = brouillon
   return (
     <PopupCarte
       titre={nom}
-      soustitre="Carrefour à feux"
+      soustitre={giratoire ? 'Giratoire à feux' : 'Carrefour à feux'}
       onFermer={onFermer}
       pied={
         <>
@@ -467,6 +509,38 @@ export function PopupCarrefour({ nom, brouillon, cycle, detectionEnCours, onDete
         <Chiffre valeur={brouillon.connexions.length} libelle="liaisons" />
         <Chiffre valeur={cycle === null ? '—' : `${Math.round(cycle)} s`} libelle="cycle" />
       </HStack>
+      {(giratoire || anneau) && (
+        <Section libelle="Anneau">
+          {anneau ? (
+            <>
+              <HStack justify="space-between">
+                <Text>Voies sur l’anneau</Text>
+                <Compteur
+                  taille="xs"
+                  aria-label="Voies sur l’anneau"
+                  min={1}
+                  max={4}
+                  valeur={anneau.voies}
+                  onChange={(n) => onChanger(changerVoiesAnneau(brouillon, n ?? 1))}
+                />
+              </HStack>
+              <HStack justify="space-between">
+                <Aide>Rayon extérieur : {anneau.rayon_m} m</Aide>
+                <HStack gap="1">
+                  <Button variant="lien" size="xs" onClick={() => onOutil('ajuster')}>
+                    Caler (L)
+                  </Button>
+                  <Button variant="lien" size="xs" colorPalette="red" onClick={() => onChanger(retirerAnneau(brouillon))}>
+                    Retirer
+                  </Button>
+                </HStack>
+              </HStack>
+            </>
+          ) : (
+            <Button onClick={() => onChanger(creerAnneau(brouillon, centre))}>Dessiner l’anneau</Button>
+          )}
+        </Section>
+      )}
       <Button loading={detectionEnCours} loadingText="Détection…" onClick={onDetecter}>
         Détecter les branches depuis OSM (O)
       </Button>

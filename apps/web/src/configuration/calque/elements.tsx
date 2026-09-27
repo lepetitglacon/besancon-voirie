@@ -59,6 +59,8 @@ interface PropsCourbe {
   /** Bout de la voie entrante, point amont (pour la tangente), bout de la voie sortante, point aval. */
   entree: [XY, XY]
   sortie: [XY, XY]
+  /** Tracé imposé (giratoire : la trajectoire contourne l'îlot) ; sinon, courbe entre les deux voies. */
+  points?: readonly XY[]
   couleur: string
   etat: EtatCourbe
   feu?: EtatFeu
@@ -67,8 +69,8 @@ interface PropsCourbe {
   onClic?: (e: MouseEvent<SVGElement>) => void
 }
 
-export function Courbe({ entree, sortie, couleur, etat, feu, titre, onSurvol, onClic }: PropsCourbe) {
-  const chemin = cheminConnexion(entree, sortie)
+export function Courbe({ entree, sortie, points, couleur, etat, feu, titre, onSurvol, onClic }: PropsCourbe) {
+  const chemin = points ? d(points) : cheminConnexion(entree, sortie)
   const interactive = onSurvol !== undefined
   return (
     <g className={classes('calque-courbe', etat, feu && `feu-${feu}`)}>
@@ -85,6 +87,31 @@ export function Courbe({ entree, sortie, couleur, etat, feu, titre, onSurvol, on
         </path>
       )}
       <path className="trace" d={chemin} stroke={couleur} />
+    </g>
+  )
+}
+
+/** Chaussée annulaire d'un giratoire : entre le bord extérieur et l'îlot. */
+export function AnneauGiratoire({ exterieur, ilot }: { exterieur: readonly XY[]; ilot: readonly XY[] }) {
+  return (
+    <g className="calque-anneau">
+      <path className="chaussee" d={`${d(exterieur)} Z ${d(ilot)} Z`} fillRule="evenodd" />
+      <path className="ilot" d={`${d(ilot)} Z`} />
+    </g>
+  )
+}
+
+/**
+ * Feu d'anneau : barre en travers de la chaussée annulaire, à la couleur du feu pendant la
+ * lecture d'un programme, avec le code de sa ligne côté îlot.
+ */
+export function FeuAnneau({ de, a, etiquette, code, feu, surligne }: { de: XY; a: XY; etiquette: XY; code: string; feu?: EtatFeu; surligne: boolean }) {
+  return (
+    <g className={classes('calque-feu-anneau', feu && `feu-${feu}`, surligne && 'surligne')}>
+      <path className="barre" d={d([de, a])} />
+      <text x={etiquette[0]} y={etiquette[1]} textAnchor="middle" dominantBaseline="middle">
+        {code}
+      </text>
     </g>
   )
 }

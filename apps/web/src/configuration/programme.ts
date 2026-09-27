@@ -8,11 +8,13 @@ import {
   type ContexteProgramme,
   type GeometrieCarrefour,
   type LigneConflits,
+  type LonLat,
 } from '@voirie/engine'
 import {
   PLAGE_TOUTE_LA_JOURNEE,
   typeLigne,
-  type BranchesCarrefour,
+  type Anneau,
+  type Branche,
   type Connexion,
   type Jour,
   type LigneFeux,
@@ -34,20 +36,26 @@ export const JOURS: Array<{ jour: Jour; lettre: string; nom: string }> = [
   { jour: 'dim', lettre: 'D', nom: 'dimanche' },
 ]
 
-/** Géométrie enregistrée du carrefour, telle que le moteur l'attend. */
-export function geometrieEnregistree(configuration: BranchesCarrefour): GeometrieCarrefour {
+/** Géométrie du carrefour (enregistrée ou brouillon), telle que le moteur l'attend. */
+export function geometrieEnregistree(configuration: {
+  centre: LonLat
+  branches: readonly Branche[]
+  connexions: readonly Connexion[]
+  anneau: Anneau | null
+}): GeometrieCarrefour {
+  const voies = configuration.branches.flatMap((b) => b.voies.map((v) => ({ cle: cleVoie(b.code, v.sens, v.rang), ...v })))
   return {
     centre: configuration.centre,
     connexions: configuration.connexions,
-    voies: new Map(
-      configuration.branches.flatMap((b) => b.voies.map((v) => [cleVoie(b.code, v.sens, v.rang), v.geom] as const)),
-    ),
+    voies: new Map(voies.map((v) => [v.cle, v.geom] as const)),
+    typesVoies: new Map(voies.map((v) => [v.cle, v.type] as const)),
     traversees: new Map(configuration.branches.flatMap((b) => (b.traversee ? [[b.code, b.traversee] as const] : []))),
+    anneau: configuration.anneau,
   }
 }
 
 export const lignesPourMoteur = (lignes: readonly LigneFeux[]): LigneConflits[] =>
-  lignes.map((l) => ({ code: l.code, type: typeLigne(l.signal), mouvements: l.mouvements, traverse: l.traverse }))
+  lignes.map((l) => ({ code: l.code, type: typeLigne(l.signal), mouvements: l.mouvements, traverse: l.traverse, anneau: l.anneau }))
 
 /** Plans tels qu'ils se saisissent et s'enregistrent : sans les champs calculés par l'API. */
 export const plansSaisis = (plans: readonly (PlanSaisi | PlanProgramme)[]): PlanSaisi[] =>
