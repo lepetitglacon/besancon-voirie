@@ -1,5 +1,7 @@
+import { Badge, Button, Heading, HStack, IconButton, Input, List, Stack, Text } from '@chakra-ui/react'
 import { cleVoie, flechesParVoie, mouvementsDepuisConnexions, type LonLat } from '@voirie/engine'
 import type { SensVoie, TypeVoie } from '@voirie/schema'
+import { Aide, Case, Message, Pastille, Segments, Selecteur } from '../ds'
 import type { ModeEdition } from './calque/CalqueCarrefour'
 import { DIRECTIONS, FLECHES } from './libelles'
 import {
@@ -41,32 +43,37 @@ export function OngletBranches({ brouillon, centre, sources, mode, onMode, onCha
   )
 
   if (branches.length === 0) {
-    return <p>Aucune branche. Lancez la détection depuis OpenStreetMap, puis calez les voies sur la photo.</p>
+    return <Aide>Aucune branche. Lancez la détection depuis OpenStreetMap, puis calez les voies sur la photo.</Aide>
   }
 
   return (
     <>
-      <div className="modes" role="radiogroup" aria-label="Mode d'édition sur la carte">
-        <button role="radio" aria-checked={mode === 'ajuster'} className={mode === 'ajuster' ? 'actif' : undefined} onClick={() => onMode('ajuster')}>
-          ✥ Ajuster les voies
-        </button>
-        <button role="radio" aria-checked={mode === 'connecter'} className={mode === 'connecter' ? 'actif' : undefined} onClick={() => onMode('connecter')}>
-          ⤳ Connecter
-        </button>
-      </div>
+      <Segments
+        fitted
+        aria-label="Mode d'édition sur la carte"
+        valeur={mode === 'feux' ? null : mode}
+        onChange={onMode}
+        options={[
+          { valeur: 'ajuster', libelle: '✥ Ajuster les voies' },
+          { valeur: 'connecter', libelle: '⤳ Connecter' },
+        ]}
+      />
       {mode !== 'feux' && (
-        <p className="discret">
+        <Aide>
           {mode === 'ajuster'
             ? 'Faites glisser les extrémités des voies et des passages piétons pour les caler sur le marquage de la photo (fond de carte « Satellite »).'
             : 'Glissez du point coloré d’une voie entrante vers le point blanc d’une voie sortante. Refaire le même geste retire la connexion.'}
-        </p>
+        </Aide>
       )}
 
       {branches.map((branche, index) => (
-        <section key={index} className="branche">
-          <div className="branche-entete">
-            <input
-              className="code"
+        <Stack as="section" key={index} gap="2" p="2.5" borderWidth="1px" borderColor="border.subtle" borderRadius="l2">
+          <HStack gap="1.5">
+            <Input
+              size="xs"
+              flex="0 0 52px"
+              fontWeight="bold"
+              textAlign="center"
               value={branche.code}
               aria-label="Code de la branche"
               onChange={(e) => {
@@ -74,7 +81,9 @@ export function OngletBranches({ brouillon, centre, sources, mode, onMode, onCha
                 if (code && !branches.some((b) => b.code === code)) onChanger(renommerBranche(brouillon, branche.code, code))
               }}
             />
-            <input
+            <Input
+              size="xs"
+              flex="1"
               value={branche.nom ?? ''}
               placeholder="Nom de la rue"
               aria-label="Nom de la rue"
@@ -85,93 +94,106 @@ export function OngletBranches({ brouillon, centre, sources, mode, onMode, onCha
                 })
               }
             />
-            <button className="danger" title="Supprimer la branche" onClick={() => onChanger(supprimerBranche(brouillon, branche.code))}>
+            <IconButton
+              variant="ghost"
+              colorPalette="red"
+              size="xs"
+              aria-label="Supprimer la branche"
+              title="Supprimer la branche"
+              onClick={() => onChanger(supprimerBranche(brouillon, branche.code))}
+            >
               ✕
-            </button>
-          </div>
+            </IconButton>
+          </HStack>
 
           {(['entrante', 'sortante'] as SensVoie[]).map((sens) => (
-            <div key={sens} className="branche-ligne">
-              <span className="discret libelle-sens">{sens === 'entrante' ? 'Entrantes' : 'Sortantes'}</span>
-              <button onClick={() => onChanger(retirerVoie(brouillon, branche.code, sens))} disabled={voiesDe(branche, sens).length === 0}>
+            <HStack key={sens} gap="1.5" align="center">
+              <Text textStyle="xs" color="fg.muted" minW="62px">
+                {sens === 'entrante' ? 'Entrantes' : 'Sortantes'}
+              </Text>
+              <Button size="2xs" aria-label="Retirer une voie" onClick={() => onChanger(retirerVoie(brouillon, branche.code, sens))} disabled={voiesDe(branche, sens).length === 0}>
                 −
-              </button>
-              <button onClick={() => onChanger(ajouterVoie(brouillon, branche.code, sens, centre))} disabled={voiesDe(branche, sens).length >= 8}>
+              </Button>
+              <Button size="2xs" aria-label="Ajouter une voie" onClick={() => onChanger(ajouterVoie(brouillon, branche.code, sens, centre))} disabled={voiesDe(branche, sens).length >= 8}>
                 +
-              </button>
-              <div className="voies">
+              </Button>
+              <HStack gap="1.5" wrap="wrap">
                 {voiesDe(branche, sens).map((voie) => {
                   const cle = cleVoie(branche.code, sens, voie.rang)
                   return (
-                    <label key={cle} className="voie" style={{ borderColor: couleurs.get(cle) }} title={`Voie ${voie.rang + 1}`}>
+                    <HStack key={cle} gap="1" p="2px" borderWidth="2px" borderRadius="l1" style={{ borderColor: couleurs.get(cle) }} title={`Voie ${voie.rang + 1}`}>
                       {sens === 'entrante' && (
-                        <strong className="fleches-deduites">
+                        <Text as="strong" minW="4" textAlign="center" textStyle="md">
                           {(fleches[cle] ?? []).map((d) => symbole.get(d)).join('') || '∅'}
-                        </strong>
+                        </Text>
                       )}
-                      <select
-                        value={voie.type}
+                      <Selecteur
+                        size="xs"
+                        variant="plain"
+                        valeur={voie.type}
                         aria-label={`Type de la voie ${voie.rang + 1}`}
-                        onChange={(e) => onChanger(changerTypeVoie(brouillon, branche.code, sens, voie.rang, e.target.value as TypeVoie))}
+                        onChange={(valeur) => onChanger(changerTypeVoie(brouillon, branche.code, sens, voie.rang, valeur as TypeVoie))}
                       >
                         {(Object.keys(TYPES) as TypeVoie[]).map((t) => (
                           <option key={t} value={t}>
                             {TYPES[t]}
                           </option>
                         ))}
-                      </select>
-                    </label>
+                      </Selecteur>
+                    </HStack>
                   )
                 })}
-              </div>
-            </div>
+              </HStack>
+            </HStack>
           ))}
 
-          <div className="actions">
-            <label className="en-ligne">
-              <input
-                type="checkbox"
-                checked={branche.traversee !== null}
-                onChange={() => onChanger(basculerTraversee(brouillon, branche.code, centre))}
-              />
+          <HStack gap="2" wrap="wrap">
+            <Case coche={branche.traversee !== null} onChange={() => onChanger(basculerTraversee(brouillon, branche.code, centre))}>
               passage piéton
-            </label>
-            <button onClick={() => onChanger(regenererVoies(brouillon, branche.code, centre))} title="Remettre les voies à leur position proposée">
+            </Case>
+            <Button size="xs" onClick={() => onChanger(regenererVoies(brouillon, branche.code, centre))} title="Remettre les voies à leur position proposée">
               Replacer
-            </button>
+            </Button>
             {sources[branche.code] && (
-              <span className={sources[branche.code] === 'osm' ? 'badge osm' : 'badge defaut'}>
+              <Badge colorPalette={sources[branche.code] === 'osm' ? 'green' : 'orange'}>
                 {sources[branche.code] === 'osm' ? 'connexions d’après OSM' : 'connexions par défaut, à vérifier'}
-              </span>
+              </Badge>
             )}
-          </div>
-        </section>
+          </HStack>
+        </Stack>
       ))}
 
-      <h3>Connexions ({connexions.length})</h3>
-      <ul className="mouvements">
+      <Heading as="h3" textStyle="sm" fontWeight="semibold">
+        Connexions ({connexions.length})
+      </Heading>
+      <List.Root gap="0.5" ps="4" textStyle="xs">
         {connexions.map((c) => (
-          <li key={`${c.de}>${c.vers}`}>
-            <span className="pastille-voie" style={{ background: couleurs.get(c.de) }} /> {c.de} → {c.vers}{' '}
-            <button className="lien" onClick={() => onChanger(basculerConnexion(brouillon, c.de, c.vers))}>
-              retirer
-            </button>
-          </li>
+          <List.Item key={`${c.de}>${c.vers}`}>
+            <HStack gap="1.5">
+              <Pastille couleur={couleurs.get(c.de) ?? 'fg.muted'} />
+              {c.de} → {c.vers}
+              <Button variant="lien" size="xs" onClick={() => onChanger(basculerConnexion(brouillon, c.de, c.vers))}>
+                retirer
+              </Button>
+            </HStack>
+          </List.Item>
         ))}
-      </ul>
+      </List.Root>
 
-      <h3>Mouvements déduits ({mouvements.length})</h3>
-      <ul className="mouvements">
+      <Heading as="h3" textStyle="sm" fontWeight="semibold">
+        Mouvements déduits ({mouvements.length})
+      </Heading>
+      <List.Root gap="0.5" ps="4" textStyle="xs">
         {mouvements.map((m) => (
-          <li key={`${m.origine}>${m.destination}`}>
+          <List.Item key={`${m.origine}>${m.destination}`}>
             <strong>
               {m.origine} → {m.destination}
             </strong>{' '}
             {DIRECTIONS[m.direction]} · voie{m.voies.length > 1 ? 's' : ''} {m.voies.map((v) => v + 1).join(', ')}
-          </li>
+          </List.Item>
         ))}
-      </ul>
-      {sansConnexion.length > 0 && <p className="a-enregistrer">Voies entrantes sans connexion : {sansConnexion.join(' ; ')}</p>}
+      </List.Root>
+      {sansConnexion.length > 0 && <Message ton="avertissement">Voies entrantes sans connexion : {sansConnexion.join(' ; ')}</Message>}
     </>
   )
 }

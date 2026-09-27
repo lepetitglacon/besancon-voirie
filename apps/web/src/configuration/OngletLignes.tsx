@@ -1,6 +1,8 @@
+import { Button, Grid, Heading, HStack, IconButton, Input, Stack, Text } from '@chakra-ui/react'
 import { cleVoie, matriceConflits, mouvementsNonCommandes, proposerLignes, type GeometrieCarrefour } from '@voirie/engine'
 import { typeLigne, type BranchesCarrefour, type LigneFeux, type Signal } from '@voirie/schema'
 import { useMemo } from 'react'
+import { Aide, Case, Message, Selecteur } from '../ds'
 import { DIRECTIONS, SIGNAUX } from './libelles'
 import { MatriceConflits } from './MatriceConflits'
 
@@ -76,18 +78,19 @@ export function OngletLignes({ configuration, brouillon, onChanger, ligneActive,
   }
 
   if (branches.length === 0) {
-    return <p>Enregistrez d'abord les branches du carrefour (onglet 1) : les lignes commandent leurs mouvements.</p>
+    return <Aide>Enregistrez d'abord les branches du carrefour (onglet 1) : les lignes commandent leurs mouvements.</Aide>
   }
 
   return (
     <>
-      <div className="actions">
-        <button onClick={() => ajouter('R11v')}>+ Véhicules</button>
-        <button onClick={() => ajouter('R12')}>+ Piétons</button>
-        <button onClick={() => ajouter('R13c')}>+ Vélos</button>
-        <button onClick={() => ajouter('R17')}>+ Tram/bus</button>
+      <HStack gap="1.5" wrap="wrap">
+        <Button size="xs" onClick={() => ajouter('R11v')}>+ Véhicules</Button>
+        <Button size="xs" onClick={() => ajouter('R12')}>+ Piétons</Button>
+        <Button size="xs" onClick={() => ajouter('R13c')}>+ Vélos</Button>
+        <Button size="xs" onClick={() => ajouter('R17')}>+ Tram/bus</Button>
         {lignes.length === 0 && (
-          <button
+          <Button
+            size="xs"
             onClick={() =>
               changerLignes(
                 proposerLignes(mouvements).map((l) => ({ ...l, signal: 'R11v' as const, traverse: null, feux: [] })),
@@ -95,18 +98,30 @@ export function OngletLignes({ configuration, brouillon, onChanger, ligneActive,
             }
           >
             Proposer une ligne par branche entrante
-          </button>
+          </Button>
         )}
-      </div>
+      </HStack>
 
       {lignes.map((ligne, index) => {
         const pieton = ligne.signal === 'R12'
         const active = ligneActive === ligne.code
         return (
-          <section key={index} className={active ? 'ligne active' : 'ligne'}>
-            <div className="branche-entete">
-              <input
-                className="code"
+          <Stack
+            as="section"
+            key={index}
+            gap="2"
+            p="2.5"
+            borderWidth="1px"
+            borderRadius="l2"
+            borderColor={active ? 'brand.solid' : 'border.subtle'}
+            boxShadow={active ? '0 0 0 1px var(--chakra-colors-brand-solid)' : undefined}
+          >
+            <HStack gap="1.5">
+              <Input
+                size="xs"
+                flex="0 0 52px"
+                fontWeight="bold"
+                textAlign="center"
                 value={ligne.code}
                 aria-label="Code de la ligne"
                 onChange={(e) => {
@@ -115,10 +130,13 @@ export function OngletLignes({ configuration, brouillon, onChanger, ligneActive,
                   changerLigne(index, { ...ligne, code })
                 }}
               />
-              <select
-                value={ligne.signal}
-                onChange={(e) => {
-                  const signal = e.target.value as Signal
+              <Selecteur
+                size="xs"
+                flex="1"
+                aria-label="Signal"
+                valeur={ligne.signal}
+                onChange={(valeur) => {
+                  const signal = valeur as Signal
                   const devientPieton = signal === 'R12'
                   changerLigne(index, {
                     ...ligne,
@@ -133,75 +151,88 @@ export function OngletLignes({ configuration, brouillon, onChanger, ligneActive,
                     {SIGNAUX[signal].libelle}
                   </option>
                 ))}
-              </select>
-              <button className="danger" title="Supprimer la ligne" onClick={() => changerLignes(lignes.filter((_, i) => i !== index))}>
+              </Selecteur>
+              <IconButton
+                variant="ghost"
+                colorPalette="red"
+                size="xs"
+                aria-label="Supprimer la ligne"
+                title="Supprimer la ligne"
+                onClick={() => changerLignes(lignes.filter((_, i) => i !== index))}
+              >
                 ✕
-              </button>
-            </div>
+              </IconButton>
+            </HStack>
 
             {pieton ? (
-              <label className="en-ligne">
-                passage piéton de la branche
-                <select
-                  value={ligne.traverse ?? ''}
-                  onChange={(e) => changerLigne(index, { ...ligne, traverse: e.target.value })}
+              <HStack gap="1.5">
+                <Text textStyle="xs" color="fg.muted">
+                  passage piéton de la branche
+                </Text>
+                <Selecteur
+                  size="xs"
+                  aria-label="Passage piéton de la branche"
+                  valeur={ligne.traverse ?? ''}
+                  onChange={(valeur) => changerLigne(index, { ...ligne, traverse: valeur })}
                 >
                   {avecTraversee.map((b) => (
                     <option key={b.code} value={b.code}>
                       {b.code} · {b.nom ?? 'sans nom'}
                     </option>
                   ))}
-                </select>
-              </label>
+                </Selecteur>
+              </HStack>
             ) : (
-              <div className="choix-mouvements">
+              <Grid templateColumns="1fr 1fr" rowGap="1" columnGap="2">
                 {mouvements.map((m) => {
                   const c = cle(m)
                   const autre = commandePar.get(c)
                   const pris = autre !== undefined && autre !== ligne.code
                   return (
-                    <label key={c} className={pris ? 'pris' : undefined}>
-                      <input
-                        type="checkbox"
-                        checked={ligne.mouvements.includes(c)}
-                        disabled={pris}
-                        onChange={(e) =>
-                          changerLigne(index, {
-                            ...ligne,
-                            mouvements: e.target.checked
-                              ? [...ligne.mouvements, c]
-                              : ligne.mouvements.filter((x) => x !== c),
-                          })
-                        }
-                      />
-                      {m.origine}→{m.destination} <span className="discret">{DIRECTIONS[m.direction]}</span>
-                      {pris && <span className="discret"> ({autre})</span>}
-                    </label>
+                    <Case
+                      key={c}
+                      coche={ligne.mouvements.includes(c)}
+                      disabled={pris}
+                      onChange={(coche) =>
+                        changerLigne(index, {
+                          ...ligne,
+                          mouvements: coche ? [...ligne.mouvements, c] : ligne.mouvements.filter((x) => x !== c),
+                        })
+                      }
+                    >
+                      {m.origine}→{m.destination}{' '}
+                      <Text as="span" color="fg.muted">
+                        {DIRECTIONS[m.direction]}
+                        {pris && ` (${autre})`}
+                      </Text>
+                    </Case>
                   )
                 })}
-              </div>
+              </Grid>
             )}
 
-            <div className="actions">
-              <button className={active ? 'actif' : undefined} onClick={() => onActiver(active ? null : ligne.code)}>
+            <HStack gap="2">
+              <Button size="xs" variant={active ? 'subtle' : 'outline'} aria-pressed={active} onClick={() => onActiver(active ? null : ligne.code)}>
                 {active ? 'Terminer le choix des feux' : 'Choisir les feux sur la carte'}
-              </button>
-              <span className="discret">{ligne.feux.length} feu(x) physique(s)</span>
-            </div>
-            {active && <p className="discret">Cliquez sur les feux du carrefour qui affichent {ligne.code}.</p>}
-          </section>
+              </Button>
+              <Aide>{ligne.feux.length} feu(x) physique(s)</Aide>
+            </HStack>
+            {active && <Aide>Cliquez sur les feux du carrefour qui affichent {ligne.code}.</Aide>}
+          </Stack>
         )
       })}
 
       {nonCommandes.length > 0 && lignes.length > 0 && (
-        <p className="a-enregistrer">
+        <Message ton="avertissement">
           Mouvements sans ligne de feux : {nonCommandes.map((c) => `${c} (${DIRECTIONS[directionDe.get(c)!]})`).join(', ')}
-        </p>
+        </Message>
       )}
 
       {lignes.length > 1 && (
         <>
-          <h3>Conflits entre lignes</h3>
+          <Heading as="h3" textStyle="sm" fontWeight="semibold">
+            Conflits entre lignes
+          </Heading>
           <MatriceConflits codes={lignes.map((l) => l.code)} conflits={conflits} onBasculerAdmis={basculerAdmis} />
         </>
       )}

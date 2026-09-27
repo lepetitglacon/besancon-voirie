@@ -1,18 +1,13 @@
 import type { ExpressionSpecification } from 'maplibre-gl'
 import type { CircleLayerSpecification } from 'react-map-gl/maplibre'
+import { STATUT } from '../theme/couleurs'
 
 export const COULEURS = {
   selection: '#2f6fd6',
   feuLibre: '#e0561e',
   feuRattache: '#4b5563',
   feuAutreCarrefour: '#c3c8d1',
-  statut: {
-    a_confirmer: '#9aa1ad',
-    non_releve: '#6b7280',
-    estime: '#e08a1e',
-    mesure: '#2f6fd6',
-    verifie: '#1f8a4c',
-  },
+  statut: STATUT,
 } as const
 
 const estTraversee: ExpressionSpecification = ['==', ['get', 'nature'], 'traversee_pietonne']

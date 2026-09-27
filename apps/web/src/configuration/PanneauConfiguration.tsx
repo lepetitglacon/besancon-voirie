@@ -1,3 +1,4 @@
+import { Button, Heading, HStack, Stack, Tabs } from '@chakra-ui/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   calculerProgramme,
@@ -19,6 +20,7 @@ import type {
 } from '@voirie/schema'
 import { useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react'
 import { api } from '../api'
+import { Aide, Message } from '../ds'
 import type { ModeEdition } from './calque/CalqueCarrefour'
 import type { EtatFeu } from './calque/elements'
 import { basculerConnexion, deplacerPoignee, type Brouillon, type Poignee } from './modele'
@@ -281,86 +283,74 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
   const modifie = brouillonBranches !== null || brouillonLignes !== null || brouillonProgramme !== null
   const erreur = [detection, enregistrementBranches, enregistrementLignes, enregistrementProgramme].find((m) => m.error)?.error
 
+  const changerOnglet = (suivant: Onglet) => {
+    setOnglet(suivant)
+    if (suivant === 'lignes') setLigneActive(null)
+    if (suivant === 'graphe') setInstant(0)
+  }
+
   return (
-    <div className="configuration">
-      <h2>Configuration · {carrefour.nom}</h2>
-      <div className="onglets" role="tablist">
-        <button role="tab" aria-selected={onglet === 'branches'} onClick={() => setOnglet('branches')}>
-          1. Branches
-        </button>
-        <button
-          role="tab"
-          aria-selected={onglet === 'lignes'}
-          onClick={() => {
-            setOnglet('lignes')
-            setLigneActive(null)
-          }}
-        >
-          2. Lignes
-        </button>
-        <button role="tab" aria-selected={onglet === 'programme'} onClick={() => setOnglet('programme')}>
-          3. Programme
-        </button>
-        <button
-          role="tab"
-          aria-selected={onglet === 'graphe'}
-          onClick={() => {
-            setOnglet('graphe')
-            setInstant(0)
-          }}
-        >
-          4. Graphe
-        </button>
-      </div>
+    <Stack gap="3">
+      <Heading as="h2" textStyle="lg" fontWeight="semibold">
+        Configuration · {carrefour.nom}
+      </Heading>
+      <Tabs.Root value={onglet} onValueChange={(e) => changerOnglet(e.value as Onglet)}>
+        <Tabs.List>
+          <Tabs.Trigger value="branches">1. Branches</Tabs.Trigger>
+          <Tabs.Trigger value="lignes">2. Lignes</Tabs.Trigger>
+          <Tabs.Trigger value="programme">3. Programme</Tabs.Trigger>
+          <Tabs.Trigger value="graphe">4. Graphe</Tabs.Trigger>
+        </Tabs.List>
+      </Tabs.Root>
 
       {onglet === 'branches' ? (
         <>
-          <p>
-            Calez les voies de chaque rue sur la photo aérienne, puis reliez les voies entrantes aux voies sortantes.
-          </p>
-          <div className="actions">
-            <button
+          <Aide>Calez les voies de chaque rue sur la photo aérienne, puis reliez les voies entrantes aux voies sortantes.</Aide>
+          <HStack gap="1.5" wrap="wrap">
+            <Button
               onClick={() => {
                 if (branches.length === 0 || window.confirm('Remplacer les branches actuelles par la proposition OSM ?')) {
                   detection.mutate()
                 }
               }}
-              disabled={detection.isPending}
+              loading={detection.isPending}
+              loadingText="Détection…"
             >
-              {detection.isPending ? 'Détection…' : 'Détecter depuis OSM'}
-            </button>
-            <button
-              className="principal"
+              Détecter depuis OSM
+            </Button>
+            <Button
+              variant="solid"
               onClick={() => enregistrementBranches.mutate()}
-              disabled={brouillonBranches === null || enregistrementBranches.isPending}
+              disabled={brouillonBranches === null}
+              loading={enregistrementBranches.isPending}
             >
               Enregistrer les branches
-            </button>
-          </div>
-          {brouillonBranches && <p className="a-enregistrer">Branches non enregistrées</p>}
-          <div className="placement-feux">
-            <button
+            </Button>
+          </HStack>
+          {brouillonBranches && <Message ton="avertissement">Branches non enregistrées</Message>}
+          <HStack gap="2.5" wrap="wrap">
+            <Button
+              variant={mode === 'feux' ? 'subtle' : 'outline'}
               aria-pressed={mode === 'feux'}
-              className={mode === 'feux' ? 'actif' : undefined}
               onClick={() => setMode(mode === 'feux' ? 'ajuster' : 'feux')}
             >
               ⚑ Placer les feux
-            </button>
-            <span className="discret">
+            </Button>
+            <Aide>
               {feuxPlaces === 0
                 ? 'Feux à leur position OSM'
                 : `${feuxPlaces} feu${feuxPlaces > 1 ? 'x' : ''} sur ${feuxCarrefour?.length ?? 0} posé${feuxPlaces > 1 ? 's' : ''} sur leur mât`}
-            </span>
-          </div>
+            </Aide>
+          </HStack>
           {mode === 'feux' && (
-            <p className="discret">
+            <Aide>
               OSM place les feux au milieu de la chaussée : faites glisser chacun jusqu’à son mât sur la photo
               (enregistré dès que vous lâchez). La position OSM reste conservée : le point creux relié par des
               pointillés, sur lequel un clic remet le feu.
-            </p>
+            </Aide>
           )}
           {branchesEnregistrees.isPending ? (
-            <p>Chargement…</p>
+            <Aide>Chargement…</Aide>
           ) : (
             <OngletBranches
               brouillon={configuration}
@@ -374,79 +364,79 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
         </>
       ) : onglet === 'lignes' ? (
         <>
-          <p>
+          <Aide>
             Regroupez les mouvements par <strong>ligne de feux</strong> (les feux qui changent toujours ensemble) et
             indiquez les feux physiques qui les affichent.
-          </p>
+          </Aide>
           {brouillonBranches && (
-            <p className="a-enregistrer">Les branches ont des modifications non enregistrées : les lignes utilisent la version enregistrée.</p>
+            <Message ton="avertissement">Les branches ont des modifications non enregistrées : les lignes utilisent la version enregistrée.</Message>
           )}
-          <div className="actions">
-            <button
-              className="principal"
-              onClick={() => enregistrementLignes.mutate()}
-              disabled={brouillonLignes === null || enregistrementLignes.isPending}
-            >
-              Enregistrer les lignes
-            </button>
-          </div>
-          {brouillonLignes && <p className="a-enregistrer">Lignes non enregistrées</p>}
+          <Button
+            variant="solid"
+            alignSelf="start"
+            onClick={() => enregistrementLignes.mutate()}
+            disabled={brouillonLignes === null}
+            loading={enregistrementLignes.isPending}
+          >
+            Enregistrer les lignes
+          </Button>
+          {brouillonLignes && <Message ton="avertissement">Lignes non enregistrées</Message>}
           {lignesEnregistrees.data?.alertes.map((alerte) => (
-            <p key={alerte} className="etat-erreur">
+            <Message key={alerte} ton="erreur">
               {alerte}
-            </p>
+            </Message>
           ))}
           {lignesEnregistrees.isPending ? (
-            <p>Chargement…</p>
+            <Aide>Chargement…</Aide>
           ) : (
             enregistre && (
-            <OngletLignes
-              configuration={enregistre}
-              brouillon={lignes}
-              onChanger={setBrouillonLignes}
-              ligneActive={ligneActive}
-              onActiver={setLigneActive}
-            />
+              <OngletLignes
+                configuration={enregistre}
+                brouillon={lignes}
+                onChanger={setBrouillonLignes}
+                ligneActive={ligneActive}
+                onActiver={setLigneActive}
+              />
             )
           )}
         </>
       ) : (
         <>
           {onglet === 'programme' ? (
-            <p>
+            <Aide>
               Découpez le cycle en <strong>étapes</strong> : les lignes au vert ensemble, et pendant combien de temps. Le
               jaune et les rouges de dégagement s'ajoutent entre les étapes.
-            </p>
+            </Aide>
           ) : (
-            <p>
+            <Aide>
               Le <strong>graphe des étapes</strong> décrit les feux à la demande : étapes servies sur appel (bouton
               piéton, boucle), étapes prioritaires hors cycle (tram). La simulation le déroule sur un scénario.
-            </p>
+            </Aide>
           )}
           {brouillonLignes && (
-            <p className="a-enregistrer">Les lignes ont des modifications non enregistrées : le programme utilise la version enregistrée.</p>
+            <Message ton="avertissement">Les lignes ont des modifications non enregistrées : le programme utilise la version enregistrée.</Message>
           )}
-          <div className="actions">
-            <button
-              className="principal"
-              onClick={() => enregistrementProgramme.mutate()}
-              disabled={brouillonProgramme === null || erreurProgramme || enregistrementProgramme.isPending}
-            >
-              Enregistrer le programme
-            </button>
-          </div>
-          {brouillonProgramme && <p className="a-enregistrer">Programme non enregistré</p>}
+          <Button
+            variant="solid"
+            alignSelf="start"
+            onClick={() => enregistrementProgramme.mutate()}
+            disabled={brouillonProgramme === null || erreurProgramme}
+            loading={enregistrementProgramme.isPending}
+          >
+            Enregistrer le programme
+          </Button>
+          {brouillonProgramme && <Message ton="avertissement">Programme non enregistré</Message>}
           {!brouillonProgramme && programmeData?.plans[planActif]?.etapes_deduites && (
-            <p className="discret">Étapes reconstruites à partir du diagramme de feux enregistré.</p>
+            <Aide>Étapes reconstruites à partir du diagramme de feux enregistré.</Aide>
           )}
           {!brouillonProgramme &&
             programmeData?.alertes.map((alerte) => (
-              <p key={alerte} className="etat-erreur">
+              <Message key={alerte} ton="erreur">
                 {alerte}
-              </p>
+              </Message>
             ))}
           {programmeEnregistre.isPending || !contexte ? (
-            <p>Chargement…</p>
+            <Aide>Chargement…</Aide>
           ) : onglet === 'graphe' ? (
             <OngletGraphe
               contexte={contexte}
@@ -485,17 +475,16 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
         </>
       )}
 
-      {erreur && <p className="etat-erreur">{erreur.message}</p>}
+      {erreur && <Message ton="erreur">{erreur.message}</Message>}
 
-      <div className="actions">
-        <button
-          onClick={() => {
-            if (!modifie || window.confirm('Abandonner les modifications non enregistrées ?')) onFermer()
-          }}
-        >
-          Fermer
-        </button>
-      </div>
-    </div>
+      <Button
+        alignSelf="start"
+        onClick={() => {
+          if (!modifie || window.confirm('Abandonner les modifications non enregistrées ?')) onFermer()
+        }}
+      >
+        Fermer
+      </Button>
+    </Stack>
   )
 }

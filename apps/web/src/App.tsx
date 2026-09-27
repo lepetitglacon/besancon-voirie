@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { LonLat } from '@voirie/engine'
 import type { Bbox, CarrefourResume, FeuResume, TypeJour } from '@voirie/schema'
-import { useCallback, useRef, useState, type ReactNode } from 'react'
+import { Badge, Button, Heading, HStack, Stack, Tabs, Text } from '@chakra-ui/react'
+import { useCallback, useRef, useState } from 'react'
 import { api } from './api'
 import {
   PanneauConfiguration,
@@ -9,6 +10,7 @@ import {
   type PanneauConfigurationHandle,
 } from './configuration/PanneauConfiguration'
 import { PanneauEdition, type Edition } from './edition/PanneauEdition'
+import { Aide, Bascule, Message, ModeCouleur, Pastille, Section, Segments, Selecteur } from './ds'
 import { CarteCarrefours } from './map/CarteCarrefours'
 import { CouchePertes } from './map/CouchePertes'
 import { CoucheTrams, type CouchesTram } from './map/CoucheTrams'
@@ -42,15 +44,6 @@ const COUCHES_BRUTES_DEFAUT: CouchesBrutes = {
 function typeJour(date: Date): TypeJour {
   const jour = date.getDay()
   return jour === 6 ? 'samedi' : jour === 0 ? 'dimanche' : 'semaine'
-}
-
-function Case({ coche, onChange, children }: { coche: boolean; onChange: (coche: boolean) => void; children: ReactNode }) {
-  return (
-    <label className="bascule">
-      <input type="checkbox" checked={coche} onChange={(e) => onChange(e.target.checked)} />
-      {children}
-    </label>
-  )
 }
 
 function App() {
@@ -266,15 +259,37 @@ function App() {
           <CoucheTrams reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
         )}
       </CarteCarrefours>
-      <aside className={configuration ? 'panneau large' : 'panneau'}>
-        <h1>Besançon Voirie</h1>
-        <p>Inventaire citoyen des feux tricolores.</p>
-        {sante.isSuccess && (
-          <p className="etat-ok">
-            API connectée · PostGIS {sante.data.db.postgis} · pgRouting {sante.data.db.pgrouting}
-          </p>
-        )}
-        {sante.isError && <p className="etat-erreur">API injoignable</p>}
+      <Stack
+        as="aside"
+        position="absolute"
+        top="3"
+        left="3"
+        zIndex="1"
+        gap="3"
+        w={configuration ? 'min(440px, calc(100vw - 24px))' : 'min(360px, calc(100vw - 24px))'}
+        maxH="calc(100vh - 24px)"
+        overflowY="auto"
+        px="14px"
+        py="3"
+        bg="bg.panel"
+        borderRadius="l3"
+        boxShadow="carte"
+      >
+        <HStack align="start" gap="2">
+          <Stack gap="0.5" flex="1">
+            <Heading as="h1" textStyle="xl" fontWeight="semibold">
+              Besançon Voirie
+            </Heading>
+            <Aide>Inventaire citoyen des feux tricolores.</Aide>
+            {sante.isSuccess && (
+              <Message ton="ok">
+                API connectée · PostGIS {sante.data.db.postgis} · pgRouting {sante.data.db.pgrouting}
+              </Message>
+            )}
+            {sante.isError && <Message ton="erreur">API injoignable</Message>}
+          </Stack>
+          <ModeCouleur />
+        </HStack>
 
         {configuration ? (
           <PanneauConfiguration
@@ -294,75 +309,75 @@ function App() {
             onAnnuler={() => setEdition(null)}
           />
         ) : (
-          <>
-            <div className="onglets" role="tablist">
-              <button role="tab" aria-selected={mode === 'carte'} onClick={() => setMode('carte')}>
-                Carte
-              </button>
-              <button role="tab" aria-selected={mode === 'brut'} onClick={() => setMode('brut')}>
-                Données brutes
-              </button>
-            </div>
+          <Stack gap="3">
+            <Tabs.Root value={mode} onValueChange={(e) => setMode(e.value as Mode)}>
+              <Tabs.List>
+                <Tabs.Trigger value="carte">Carte</Tabs.Trigger>
+                <Tabs.Trigger value="brut">Données brutes</Tabs.Trigger>
+              </Tabs.List>
+            </Tabs.Root>
 
             {mode === 'carte' ? (
-              <>
-                {carrefours.data && <p>{carrefours.data.features.length} carrefour(s) dans la vue</p>}
-                {feuxLibres !== undefined && <p>{feuxLibres} feu(x) à regrouper dans la vue (zoomer pour les voir)</p>}
-                <div className="actions">
-                  <button
-                    className="principal"
-                    onClick={() =>
-                      demarrer({ carrefourId: null, selection: [], nature: 'carrefour', nomSaisi: null, modeRectangle: true })
-                    }
-                  >
-                    Composer un carrefour
-                  </button>
-                </div>
-                <Case coche={trams} onChange={setTrams}>
+              <Stack gap="2.5">
+                <HStack gap="1.5" wrap="wrap">
+                  {carrefours.data && <Badge colorPalette="gray">{carrefours.data.features.length} carrefour(s) dans la vue</Badge>}
+                  {feuxLibres !== undefined && <Badge colorPalette="orange">{feuxLibres} feu(x) à regrouper</Badge>}
+                </HStack>
+                {feuxLibres !== undefined && <Aide>Zoomer pour voir les feux à regrouper.</Aide>}
+                <Button
+                  variant="solid"
+                  alignSelf="start"
+                  onClick={() =>
+                    demarrer({ carrefourId: null, selection: [], nature: 'carrefour', nomSaisi: null, modeRectangle: true })
+                  }
+                >
+                  Composer un carrefour
+                </Button>
+                <Bascule coche={trams} onChange={setTrams}>
                   Trams en temps réel
-                </Case>
+                </Bascule>
                 {trams && enLigne !== undefined && (
-                  <p>{enLigne} rame(s) en ligne · position estimée d'après les temps d'attente Ginko</p>
+                  <Aide>{enLigne} rame(s) en ligne · position estimée d'après les temps d'attente Ginko</Aide>
                 )}
-              </>
+              </Stack>
             ) : (
-              <>
-                <Case coche={brut.carrefours} onChange={basculer('carrefours')}>
+              <Stack gap="2">
+                <Bascule coche={brut.carrefours} onChange={basculer('carrefours')}>
                   Carrefours à feux{carrefours.data && ` (${carrefours.data.features.length} dans la vue)`}
-                </Case>
-                <Case coche={brut.lignes} onChange={basculer('lignes')}>
+                </Bascule>
+                <Bascule coche={brut.lignes} onChange={basculer('lignes')}>
                   Tram : lignes (GTFS)
-                </Case>
-                <Case coche={brut.arrets} onChange={basculer('arrets')}>
+                </Bascule>
+                <Bascule coche={brut.arrets} onChange={basculer('arrets')}>
                   Tram : arrêts
-                </Case>
-                <Case coche={brut.rames} onChange={basculer('rames')}>
+                </Bascule>
+                <Bascule coche={brut.rames} onChange={basculer('rames')}>
                   Tram : rames, position estimée{enLigne !== undefined && ` (${enLigne} en ligne)`}
-                </Case>
-                <Case coche={brut.zones} onChange={basculer('zones')}>
+                </Bascule>
+                <Bascule coche={brut.zones} onChange={basculer('zones')}>
                   Tram : zones probables
-                </Case>
-                <Case coche={brut.pertes} onChange={basculer('pertes')}>
+                </Bascule>
+                <Bascule coche={brut.pertes} onChange={basculer('pertes')}>
                   Tram : temps perdu par tronçon
-                </Case>
+                </Bascule>
                 {brut.pertes && (
-                  <>
-                    <div className="creneau">
-                      <select
+                  <Stack gap="2" ps="11">
+                    <HStack gap="1.5">
+                      <Selecteur
+                        size="xs"
                         aria-label="Type de jour"
-                        value={creneau.typeJour}
-                        onChange={(e) => setCreneau((c) => ({ ...c, typeJour: e.target.value as TypeJour }))}
+                        valeur={creneau.typeJour}
+                        onChange={(valeur) => setCreneau((c) => ({ ...c, typeJour: valeur as TypeJour }))}
                       >
                         <option value="semaine">Semaine</option>
                         <option value="samedi">Samedi</option>
                         <option value="dimanche">Dimanche</option>
-                      </select>
-                      <select
+                      </Selecteur>
+                      <Selecteur
+                        size="xs"
                         aria-label="Heure"
-                        value={creneau.heure ?? ''}
-                        onChange={(e) =>
-                          setCreneau((c) => ({ ...c, heure: e.target.value === '' ? null : Number(e.target.value) }))
-                        }
+                        valeur={creneau.heure ?? ''}
+                        onChange={(valeur) => setCreneau((c) => ({ ...c, heure: valeur === '' ? null : Number(valeur) }))}
                       >
                         <option value="">Toute la journée</option>
                         {Array.from({ length: 24 }, (_, h) => (
@@ -370,76 +385,64 @@ function App() {
                             {h} h – {h + 1} h
                           </option>
                         ))}
-                      </select>
-                    </div>
-                    <ul className="legende">
+                      </Selecteur>
+                    </HStack>
+                    <HStack as="ul" rowGap="1" columnGap="2.5" wrap="wrap" listStyleType="none" textStyle="xs">
                       {PALIERS_PERTE.map((palier) => (
-                        <li key={palier.libelle}>
-                          <span className="pastille" style={{ background: palier.couleur }} />
+                        <HStack as="li" key={palier.libelle} gap="1">
+                          <Pastille forme="trait" couleur={palier.couleur} />
                           {palier.libelle}
-                        </li>
+                        </HStack>
                       ))}
-                    </ul>
-                    <p>
+                    </HStack>
+                    <Aide>
                       Durée habituelle moins durée quand ça roule bien.
                       {historique.data && ` ${historique.data.troncons.length} tronçon(s) observé(s).`}
-                    </p>
-                  </>
+                    </Aide>
+                  </Stack>
                 )}
                 {etatHistorique.data && (
-                  <p>
+                  <Aide>
                     Historique : {etatHistorique.data.passages.toLocaleString('fr-FR')} passage(s)
                     {etatHistorique.data.premier &&
                       ` depuis le ${new Date(etatHistorique.data.premier).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`}
                     {!etatHistorique.data.collecteActive && ' · collecte arrêtée (TRAM_COLLECTE)'}
-                  </p>
+                  </Aide>
                 )}
-              </>
+              </Stack>
             )}
 
             {(reseauTram.isError || tramsTempsReel.isError) && (
-              <p className="etat-erreur">
+              <Message ton="erreur">
                 Trams indisponibles : {(reseauTram.error ?? tramsTempsReel.error)?.message}
-              </p>
+              </Message>
             )}
-
-          </>
+          </Stack>
         )}
 
-        <fieldset className="fond">
-          <legend>Fond de carte</legend>
-          <div className="choix-fond">
-            <label>
-              <input
-                type="radio"
-                name="fond"
-                checked={fond.fond === 'satellite'}
-                onChange={() => setFond((options) => ({ ...options, fond: 'satellite' }))}
-              />
-              Satellite
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="fond"
-                checked={fond.fond === 'plan'}
-                onChange={() => setFond((options) => ({ ...options, fond: 'plan' }))}
-              />
-              Plan
-            </label>
-          </div>
-          <Case coche={fond.batiments} onChange={(batiments) => setFond((options) => ({ ...options, batiments }))}>
+        <Section libelle="Fond de carte" pt="2.5" borderTopWidth="1px" borderColor="border.muted">
+          <Segments
+            fitted
+            aria-label="Fond de carte"
+            valeur={fond.fond}
+            onChange={(choix) => setFond((options) => ({ ...options, fond: choix }))}
+            options={[
+              { valeur: 'satellite', libelle: 'Satellite' },
+              { valeur: 'plan', libelle: 'Plan' },
+            ]}
+          />
+          <Bascule coche={fond.batiments} onChange={(batiments) => setFond((options) => ({ ...options, batiments }))}>
             Bâtiments
-          </Case>
-          <Case coche={fond.relief3d} onChange={(relief3d) => setFond((options) => ({ ...options, relief3d }))}>
+          </Bascule>
+          <Bascule coche={fond.relief3d} onChange={(relief3d) => setFond((options) => ({ ...options, relief3d }))}>
             3D (plus gourmand)
-          </Case>
-        </fieldset>
+          </Bascule>
+        </Section>
 
-        <p className="avertissement">
+        <Text textStyle="2xs" color="fg.muted">
           Outil citoyen indépendant, sans lien avec la Ville ou la Métropole. Données indicatives.
-        </p>
-      </aside>
+        </Text>
+      </Stack>
     </>
   )
 }

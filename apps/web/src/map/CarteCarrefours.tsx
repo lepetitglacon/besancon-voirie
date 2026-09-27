@@ -1,11 +1,10 @@
+import { Badge, Box, Button, Text } from '@chakra-ui/react'
 import type { LonLat } from '@voirie/engine'
 import type { Bbox, CarrefourResume, CarrefoursGeoJson, FeuResume, FeuxGeoJson } from '@voirie/schema'
 import type { Map as CarteMapLibre } from 'maplibre-gl'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Map, {
   Layer,
-  NavigationControl,
-  Popup,
   Source,
   type MapLayerMouseEvent,
   type MapMouseEvent,
@@ -14,6 +13,7 @@ import Map, {
 import { CalqueCarrefour, type ApercuFeu, type FeuPlacable } from '../configuration/calque/CalqueCarrefour'
 import type { Poignee } from '../configuration/modele'
 import type { AffichageConfiguration } from '../configuration/PanneauConfiguration'
+import { Aide, BarreOutils, ControleZoom, Pastille, PopupCarte, PopupSurCarte } from '../ds'
 import { coucheCarrefours, coucheFeux } from './couches'
 import { FondDeCarte, type OptionsFond } from './FondDeCarte'
 
@@ -222,12 +222,18 @@ export function CarteCarrefours(props: Props) {
       onLoad={(evenement) => props.onEmprise(emprise(evenement.target))}
       onMoveEnd={(evenement) => props.onEmprise(emprise(evenement.target))}
     >
-      <NavigationControl position="top-right" visualizePitch={fond.relief3d} />
+      <ControleZoom position="absolute" top="4" right="4" zIndex="1" />
       <FondDeCarte {...fond} />
       {children}
       {rectangle && (
-        <div
-          className="rectangle-selection"
+        <Box
+          position="absolute"
+          zIndex="2"
+          borderWidth="2px"
+          borderStyle="dashed"
+          borderColor="brand.solid"
+          bg="color-mix(in srgb, var(--chakra-colors-brand-solid) 12%, transparent)"
+          pointerEvents="none"
           style={{
             left: Math.min(rectangle.x0, rectangle.x1),
             top: Math.min(rectangle.y0, rectangle.y1),
@@ -266,52 +272,61 @@ export function CarteCarrefours(props: Props) {
       )}
 
       {bulle && !edition && !configuration && (
-        <Popup
-          longitude={bulle.longitude}
-          latitude={bulle.latitude}
-          offset={10}
-          closeOnClick={false}
-          onClose={() => setBulle(undefined)}
-        >
+        <PopupSurCarte longitude={bulle.longitude} latitude={bulle.latitude} closeOnClick={false} onClose={() => setBulle(undefined)}>
           {bulle.type === 'carrefour' ? (
-            <>
-              <strong>{bulle.carrefour.nom}</strong>
-              <div>{NATURES[bulle.carrefour.nature]}</div>
-              <div>
+            <PopupCarte
+              titre={bulle.carrefour.nom}
+              soustitre={NATURES[bulle.carrefour.nature]}
+              onFermer={() => setBulle(undefined)}
+              pied={
+                <>
+                  <Button variant="plain" colorPalette="red" px="2" onClick={() => (setBulle(undefined), props.onSupprimer(bulle.carrefour))}>
+                    Supprimer
+                  </Button>
+                  <BarreOutils.Espace />
+                  <Button onClick={() => (setBulle(undefined), props.onModifier(bulle.carrefour))}>Feux</Button>
+                  <Button
+                    variant="solid"
+                    onClick={() => {
+                      const objet = carrefours?.features.find((f) => f.id === bulle.carrefour.id)
+                      setBulle(undefined)
+                      if (objet) props.onConfigurer(bulle.carrefour, objet.geometry.coordinates)
+                    }}
+                  >
+                    Configurer
+                  </Button>
+                </>
+              }
+            >
+              <Text display="flex" alignItems="center" gap="2">
+                <Pastille couleur={`statut.${bulle.carrefour.statut}`} />
                 {bulle.carrefour.nb_feux} feu(x) · programmation {STATUTS[bulle.carrefour.statut]}
-              </div>
-              {bulle.carrefour.pres_tram && <div>Tram à proximité (priorité probable)</div>}
-              <div className="actions">
-                <button
-                  className="principal"
-                  onClick={() => {
-                    const objet = carrefours?.features.find((f) => f.id === bulle.carrefour.id)
-                    setBulle(undefined)
-                    if (objet) props.onConfigurer(bulle.carrefour, objet.geometry.coordinates)
-                  }}
-                >
-                  Configurer
-                </button>
-                <button onClick={() => (setBulle(undefined), props.onModifier(bulle.carrefour))}>Feux</button>
-                <button className="danger" onClick={() => (setBulle(undefined), props.onSupprimer(bulle.carrefour))}>
-                  Supprimer
-                </button>
-              </div>
-            </>
+              </Text>
+              {bulle.carrefour.pres_tram && (
+                <Badge colorPalette="orange" alignSelf="start">
+                  Tram à proximité (priorité probable)
+                </Badge>
+              )}
+            </PopupCarte>
           ) : (
-            <>
-              <strong>Feu {bulle.feu.type === 'pieton' ? 'piéton' : 'véhicule'} libre</strong>
-              {bulle.feu.osm_id && <div>Nœud OSM {bulle.feu.osm_id}</div>}
-              {!bulle.feu.present_osm && <div>Disparu d'OpenStreetMap</div>}
-              {bulle.feu.position_manuelle && <div>Placé sur son mât (position OSM conservée)</div>}
-              <div className="actions">
-                <button onClick={() => (setBulle(undefined), props.onComposerDepuis(bulle.feu))}>
-                  Composer un carrefour
-                </button>
-              </div>
-            </>
+            <PopupCarte
+              titre={`Feu ${bulle.feu.type === 'pieton' ? 'piéton' : 'véhicule'} libre`}
+              soustitre={bulle.feu.osm_id ? `Nœud OSM ${bulle.feu.osm_id}` : undefined}
+              onFermer={() => setBulle(undefined)}
+              pied={
+                <>
+                  <BarreOutils.Espace />
+                  <Button variant="solid" onClick={() => (setBulle(undefined), props.onComposerDepuis(bulle.feu))}>
+                    Composer un carrefour
+                  </Button>
+                </>
+              }
+            >
+              {!bulle.feu.present_osm && <Badge colorPalette="red" alignSelf="start">Disparu d'OpenStreetMap</Badge>}
+              {bulle.feu.position_manuelle && <Aide>Placé sur son mât (position OSM conservée)</Aide>}
+            </PopupCarte>
           )}
-        </Popup>
+        </PopupSurCarte>
       )}
     </Map>
   )

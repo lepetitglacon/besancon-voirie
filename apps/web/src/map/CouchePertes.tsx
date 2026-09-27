@@ -1,7 +1,9 @@
 import type { HistoriqueTroncons, ReseauTram } from '@voirie/schema'
 import type { MapLayerMouseEvent } from 'maplibre-gl'
 import { useEffect, useMemo, useState } from 'react'
-import { Layer, Popup, Source, useMap, type LineLayerSpecification } from 'react-map-gl/maplibre'
+import { Text } from '@chakra-ui/react'
+import { Layer, Source, useMap, type LineLayerSpecification } from 'react-map-gl/maplibre'
+import { Aide, PopupCarte, PopupSurCarte } from '../ds'
 import { PALIERS_PERTE } from '../tram/pertes'
 import { preparerReseau, tronconsObserves, type ProprietesTroncon } from '../tram/positionsTrams'
 
@@ -61,26 +63,21 @@ export function CouchePertes({ reseau, historique }: Props) {
         <Layer {...couchePertes} />
       </Source>
       {choisi && (
-        <Popup
-          longitude={choisi.lngLat[0]}
-          latitude={choisi.lngLat[1]}
-          closeOnClick={false}
-          onClose={() => setChoisi(undefined)}
-        >
-          <div className="popup-rame">
-            <strong>
-              {choisi.troncon.ligne} · {choisi.troncon.depart} → {choisi.troncon.arrivee}
-            </strong>
-            <span>
-              Durée habituelle {choisi.troncon.p50} s ({choisi.troncon.vitesse} km/h), temps perdu{' '}
-              {choisi.troncon.perte} s
-            </span>
-            <span>
+        <PopupSurCarte longitude={choisi.lngLat[0]} latitude={choisi.lngLat[1]} closeOnClick={false} onClose={() => setChoisi(undefined)}>
+          <PopupCarte
+            taille="compacte"
+            titre={`${choisi.troncon.ligne} · ${choisi.troncon.depart} → ${choisi.troncon.arrivee}`}
+            onFermer={() => setChoisi(undefined)}
+          >
+            <Text>
+              Durée habituelle {choisi.troncon.p50} s ({choisi.troncon.vitesse} km/h), temps perdu {choisi.troncon.perte} s
+            </Text>
+            <Text>
               Rapide {choisi.troncon.p10} s · lent {choisi.troncon.p90} s · fluide {choisi.troncon.reference} s
-            </span>
-            <span className="source">{choisi.troncon.n} passages observés</span>
-          </div>
-        </Popup>
+            </Text>
+            <Aide textStyle="2xs">{choisi.troncon.n} passages observés</Aide>
+          </PopupCarte>
+        </PopupSurCarte>
       )}
     </>
   )

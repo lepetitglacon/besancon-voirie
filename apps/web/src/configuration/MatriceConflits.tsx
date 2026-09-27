@@ -1,10 +1,17 @@
+import { chakra, Table } from '@chakra-ui/react'
 import type { ConflitLignes } from '@voirie/engine'
+import { Aide } from '../ds'
 
-const SYMBOLES: Record<ConflitLignes['nature'], { symbole: string; titre: string }> = {
-  croisement: { symbole: '✕', titre: 'Trajectoires qui se croisent' },
-  convergence: { symbole: '⋎', titre: 'Même sortie' },
-  pieton: { symbole: 'P', titre: 'Traversée piétonne' },
+const SYMBOLES: Record<ConflitLignes['nature'] | 'admis', { symbole: string; titre: string; couleur: string }> = {
+  croisement: { symbole: '✕', titre: 'Trajectoires qui se croisent', couleur: 'conflit.croisement' },
+  convergence: { symbole: '⋎', titre: 'Même sortie', couleur: 'conflit.convergence' },
+  pieton: { symbole: 'P', titre: 'Traversée piétonne', couleur: 'conflit.pieton' },
+  admis: { symbole: '✓', titre: 'Conflit admis', couleur: 'conflit.admis' },
 }
+
+const Case = chakra('button', {
+  base: { w: 'full', h: 'full', fontWeight: 'bold', cursor: 'pointer', _hover: { filter: 'brightness(0.95)' }, focusVisibleRing: 'inside' },
+})
 
 interface Props {
   codes: string[]
@@ -21,41 +28,46 @@ export function MatriceConflits({ codes, conflits, onBasculerAdmis }: Props) {
 
   return (
     <>
-      <table className="matrice">
-        <thead>
-          <tr>
-            <th />
+      <Table.Root variant="outline" width="auto" textAlign="center" css={{ '& th, & td': { w: '7', h: '26px', p: '0', textAlign: 'center' } }}>
+        <Table.Header>
+          <Table.Row>
+            <Table.ColumnHeader />
             {codes.map((code) => (
-              <th key={code}>{code}</th>
+              <Table.ColumnHeader key={code} fontWeight="semibold" color="fg">
+                {code}
+              </Table.ColumnHeader>
             ))}
-          </tr>
-        </thead>
-        <tbody>
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>
           {codes.map((ligne) => (
-            <tr key={ligne}>
-              <th>{ligne}</th>
+            <Table.Row key={ligne}>
+              <Table.ColumnHeader fontWeight="semibold" color="fg">
+                {ligne}
+              </Table.ColumnHeader>
               {codes.map((colonne) => {
-                if (ligne === colonne) return <td key={colonne} className="diagonale" />
+                if (ligne === colonne) return <Table.Cell key={colonne} bg="bg.emphasized" />
                 const conflit = trouver(ligne, colonne)
-                if (!conflit) return <td key={colonne} title="Compatibles" />
-                const { symbole, titre } = SYMBOLES[conflit.nature]
+                if (!conflit) return <Table.Cell key={colonne} title="Compatibles" />
+                const { symbole, titre, couleur } = SYMBOLES[conflit.admis ? 'admis' : conflit.nature]
                 return (
-                  <td
+                  <Table.Cell
                     key={colonne}
-                    className={conflit.admis ? `conflit admis` : `conflit ${conflit.nature}`}
-                    title={`${titre} : ${conflit.cause.join(' / ')}${conflit.admis ? ' — admis' : ''}. Cliquer pour ${conflit.admis ? 'annuler' : 'admettre'}.`}
+                    color={couleur}
+                    style={{ background: `color-mix(in srgb, var(--chakra-colors-${couleur.replace('.', '-')}) 16%, transparent)` }}
+                    title={`${SYMBOLES[conflit.nature].titre} : ${conflit.cause.join(' / ')}${conflit.admis ? ' — admis' : ''}. Cliquer pour ${conflit.admis ? 'annuler' : 'admettre'}.`}
                   >
-                    <button onClick={() => onBasculerAdmis(ligne, colonne)}>{conflit.admis ? '✓' : symbole}</button>
-                  </td>
+                    <Case aria-label={titre} onClick={() => onBasculerAdmis(ligne, colonne)}>
+                      {symbole}
+                    </Case>
+                  </Table.Cell>
                 )
               })}
-            </tr>
+            </Table.Row>
           ))}
-        </tbody>
-      </table>
-      <p className="discret note-legende">
-        ✕ croisement · ⋎ même sortie · P piétons · ✓ conflit admis (vert simultané toléré)
-      </p>
+        </Table.Body>
+      </Table.Root>
+      <Aide>✕ croisement · ⋎ même sortie · P piétons · ✓ conflit admis (vert simultané toléré)</Aide>
     </>
   )
 }

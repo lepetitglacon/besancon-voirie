@@ -1,452 +1,23 @@
-:root {
-  --texte: #1d2330;
-  --texte-doux: #5b6475;
-  --fond: #ffffff;
-  --panneau: rgba(255, 255, 255, 0.94);
-  --bordure: #dde1e8;
-  --ok: #1f8a4c;
-  --erreur: #c0392b;
-  --ombre: 0 4px 16px rgba(15, 23, 42, 0.12);
+/*
+ * Styles hors Chakra : habillage des popups MapLibre et dessin métier en SVG (calque du
+ * carrefour, chronogramme, graphe des étapes). Les couleurs viennent des tokens du thème
+ * (src/theme) ; le calque, posé sur la photo aérienne, garde son blanc et son encre fixes.
+ */
 
-  /* Couleurs des statuts de carrefour (docs/ARCHITECTURE.md §8) */
-  --statut-a-confirmer: #9aa1ad;
-  --statut-non-releve: #6b7280;
-  --statut-estime: #e08a1e;
-  --statut-mesure: #2f6fd6;
-  --statut-verifie: #1f8a4c;
-
-  font: 15px/1.45 system-ui, 'Segoe UI', Roboto, sans-serif;
-  color-scheme: light dark;
-  color: var(--texte);
-  background: var(--fond);
+body {
+  -webkit-font-smoothing: antialiased;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --texte: #e6e9ef;
-    --texte-doux: #a3abba;
-    --fond: #11151c;
-    --panneau: rgba(22, 27, 36, 0.94);
-    --bordure: #2c3442;
-    --ombre: 0 4px 16px rgba(0, 0, 0, 0.45);
-  }
-}
-
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-
-html,
-body,
-#root {
-  height: 100%;
-  margin: 0;
-}
-
-.panneau {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 1;
-  max-width: min(360px, calc(100vw - 24px));
-  padding: 12px 14px;
-  border: 1px solid var(--bordure);
-  border-radius: 10px;
-  background: var(--panneau);
-  box-shadow: var(--ombre);
-}
-
-.panneau h1 {
-  margin: 0 0 4px;
-  font-size: 17px;
-}
-
-.panneau p {
-  margin: 2px 0;
-  color: var(--texte-doux);
-  font-size: 13px;
-}
-
-.etat-ok {
-  color: var(--ok);
-}
-
-.etat-erreur {
-  color: var(--erreur);
-}
-
-.avertissement {
-  margin-top: 8px !important;
-  font-size: 12px !important;
-}
-
-.maplibregl-popup-content {
-  color: #1d2330;
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-:root {
-  --accent: #2f6fd6;
-  --accent-texte: #ffffff;
-  --champ: #ffffff;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --champ: #1b212c;
-  }
-}
-
-.panneau h2 {
-  margin: 10px 0 4px;
-  font-size: 15px;
-}
-
-.edition label {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin-top: 8px;
-  color: var(--texte-doux);
-  font-size: 12px;
-}
-
-.edition input,
-.edition select {
-  padding: 6px 8px;
-  border: 1px solid var(--bordure);
-  border-radius: 6px;
-  background: var(--champ);
-  color: var(--texte);
-  font: inherit;
-  font-size: 14px;
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-button {
-  padding: 5px 10px;
-  border: 1px solid var(--bordure);
-  border-radius: 6px;
-  background: var(--champ);
-  color: var(--texte);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-button.principal {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-texte);
-}
-
-button.danger {
-  color: var(--erreur);
-}
-
-button.lien {
-  margin-top: 4px;
+/* Popups de la carte : l'habillage vient de <PopupCarte>, MapLibre ne fournit que l'ancrage. */
+.popup-carte-ancre .maplibregl-popup-content {
   padding: 0;
-  border: 0;
   background: none;
-  color: var(--accent);
-  font-size: 12px;
-  text-decoration: underline;
-}
-
-.maplibregl-popup-content button {
-  background: #ffffff;
-  color: #1d2330;
-  border-color: #dde1e8;
-}
-
-.rectangle-selection {
-  position: absolute;
-  z-index: 2;
-  border: 2px dashed var(--accent);
-  background: rgba(47, 111, 214, 0.12);
-  pointer-events: none;
-}
-
-button.actif {
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-kbd {
-  padding: 0 4px;
-  border: 1px solid var(--bordure);
-  border-radius: 3px;
+  box-shadow: none;
   font: inherit;
-  font-size: 11px;
 }
 
-.panneau.large {
-  max-width: min(440px, calc(100vw - 24px));
-  max-height: calc(100vh - 24px);
-  overflow-y: auto;
-}
-
-.panneau h3 {
-  margin: 12px 0 4px;
-  font-size: 13px;
-}
-
-.branche {
-  margin-top: 10px;
-  padding: 8px;
-  border: 1px solid var(--bordure);
-  border-radius: 8px;
-}
-
-.branche-entete,
-.branche-ligne {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.branche-ligne {
-  margin-top: 6px;
-}
-
-.configuration input,
-.configuration select {
-  min-width: 0;
-  padding: 4px 6px;
-  border: 1px solid var(--bordure);
-  border-radius: 6px;
-  background: var(--champ);
-  color: var(--texte);
-  font: inherit;
-  font-size: 13px;
-}
-
-.branche-entete input {
-  flex: 1;
-}
-
-.branche-entete input.code {
-  flex: 0 0 52px;
-  font-weight: 700;
-  text-align: center;
-}
-
-.en-ligne {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--texte-doux);
-  font-size: 12px;
-}
-
-.en-ligne input {
-  width: 48px;
-}
-
-.discret {
-  color: var(--texte-doux);
-  font-size: 12px;
-}
-
-.voies {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.voie {
-  display: flex;
-  gap: 1px;
-  padding: 3px;
-  border: 1px dashed var(--bordure);
-  border-radius: 6px;
-}
-
-button.fleche {
-  width: 26px;
-  padding: 2px 0;
-  border-color: transparent;
-  font-size: 15px;
-  line-height: 1;
-  opacity: 0.35;
-}
-
-button.fleche.active {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-texte);
-  opacity: 1;
-}
-
-.badge {
-  align-self: center;
-  padding: 1px 6px;
-  border-radius: 10px;
-  font-size: 11px;
-}
-
-.badge.osm {
-  background: rgba(31, 138, 76, 0.15);
-  color: var(--ok);
-}
-
-.badge.defaut {
-  background: rgba(224, 138, 30, 0.18);
-  color: #a15f0c;
-}
-
-.a-enregistrer {
-  color: #a15f0c;
-  font-size: 12px;
-}
-
-ul.mouvements {
-  margin: 0;
-  padding-left: 16px;
-  font-size: 12px;
-}
-
-.ligne {
-  margin-top: 10px;
-  padding: 8px;
-  border: 1px solid var(--bordure);
-  border-radius: 8px;
-}
-
-.ligne.active {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
-}
-
-.choix-mouvements {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px 8px;
-  margin-top: 6px;
-  font-size: 12px;
-}
-
-.choix-mouvements label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.choix-mouvements label.pris {
-  opacity: 0.45;
-}
-
-table.matrice {
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-table.matrice th,
-table.matrice td {
-  width: 28px;
-  height: 26px;
-  padding: 0;
-  border: 1px solid var(--bordure);
-  text-align: center;
-}
-
-table.matrice td.diagonale {
-  background: var(--bordure);
-}
-
-table.matrice td button {
-  width: 100%;
-  height: 100%;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  color: inherit;
-  font-weight: 700;
-}
-
-table.matrice td.croisement {
-  background: rgba(192, 57, 43, 0.18);
-  color: var(--erreur);
-}
-
-table.matrice td.convergence {
-  background: rgba(224, 138, 30, 0.2);
-  color: #a15f0c;
-}
-
-table.matrice td.pieton {
-  background: rgba(125, 60, 180, 0.16);
-  color: #7d3cb4;
-}
-
-table.matrice td.admis {
-  background: rgba(31, 138, 76, 0.16);
-  color: var(--ok);
-}
-
-.note-legende {
-  margin-top: 4px;
-}
-
-.modes {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.placement-feux {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  margin-top: 8px;
-}
-
-.libelle-sens {
-  min-width: 62px;
-}
-
-.voie select {
-  padding: 1px 2px;
-  font-size: 11px;
-}
-
-.fleches-deduites {
-  min-width: 16px;
-  font-size: 14px;
-  text-align: center;
-}
-
-.voie {
-  align-items: center;
-  border-style: solid;
-  border-width: 2px;
-}
-
-.pastille-voie {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  vertical-align: middle;
+.popup-carte-ancre .maplibregl-popup-tip {
+  display: none;
 }
 
 /* ── Calque de configuration (SVG au-dessus de la carte) ── */
@@ -493,12 +64,12 @@ table.matrice td.admis {
 
 .calque-voie.cible {
   opacity: 0.95;
-  stroke: #1f8a4c;
+  stroke: var(--chakra-colors-feu-vert);
 }
 
 .calque-passage {
   fill: none;
-  stroke: #7d3cb4;
+  stroke: var(--chakra-colors-conflit-pieton);
   opacity: 0.6;
 }
 
@@ -526,7 +97,7 @@ table.matrice td.admis {
 }
 
 .calque-courbe.a-retirer .trace {
-  stroke: #c0392b;
+  stroke: var(--chakra-colors-feu-rouge);
   stroke-width: 5;
   stroke-dasharray: 6 4;
 }
@@ -543,7 +114,7 @@ table.matrice td.admis {
 }
 
 .calque-elastique.valide {
-  stroke: #1f8a4c;
+  stroke: var(--chakra-colors-feu-vert);
   stroke-dasharray: none;
 }
 
@@ -570,7 +141,7 @@ table.matrice td.admis {
 
 .calque-poignee.active {
   cursor: grabbing;
-  stroke: #2f6fd6;
+  stroke: var(--chakra-colors-brand-solid);
   stroke-width: 3;
 }
 
@@ -579,11 +150,11 @@ table.matrice td.admis {
 }
 
 .calque-poignee.cible-possible {
-  stroke: #1f8a4c;
+  stroke: var(--chakra-colors-feu-vert);
 }
 
 .calque-poignee.cible {
-  fill: #1f8a4c;
+  fill: var(--chakra-colors-feu-vert);
   stroke: #ffffff;
   stroke-width: 3;
 }
@@ -632,7 +203,7 @@ table.matrice td.admis {
 .calque-code {
   fill: #ffffff;
   font-size: 15px;
-  stroke: #2f6fd6;
+  stroke: var(--chakra-colors-brand-solid);
   stroke-width: 5px;
 }
 
@@ -642,17 +213,17 @@ table.matrice td.admis {
 }
 
 .calque-courbe.feu-vert .trace {
-  stroke: #22c55e;
+  stroke: var(--chakra-colors-feu-vert);
   stroke-width: 5;
 }
 
 .calque-courbe.feu-jaune .trace {
-  stroke: #facc15;
+  stroke: var(--chakra-colors-feu-orange);
   stroke-width: 5;
 }
 
 .calque-courbe.feu-rouge .trace {
-  stroke: #ef4444;
+  stroke: var(--chakra-colors-feu-rouge);
   stroke-width: 2;
   opacity: 0.45;
 }
@@ -664,12 +235,12 @@ table.matrice td.admis {
 }
 
 .calque-passage.feu-vert {
-  stroke: #22c55e;
+  stroke: var(--chakra-colors-feu-vert);
   opacity: 0.9;
 }
 
 .calque-passage.feu-rouge {
-  stroke: #ef4444;
+  stroke: var(--chakra-colors-feu-rouge);
   opacity: 0.5;
 }
 
@@ -677,113 +248,7 @@ table.matrice td.admis {
   opacity: 0.3;
 }
 
-/* ── Onglet « 3. Programme » ── */
-
-.plans {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.branche-entete input.code-plan {
-  flex: 0 1 140px;
-  font-weight: 700;
-}
-
-.plage {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-  font-size: 12px;
-}
-
-.jours {
-  display: flex;
-  gap: 2px;
-}
-
-.jours button {
-  width: 24px;
-  padding: 2px 0;
-  font-size: 11px;
-}
-
-.etape {
-  margin-top: 8px;
-  padding: 6px 8px;
-  border: 1px solid var(--bordure);
-  border-radius: 8px;
-}
-
-.etape.courante {
-  border-color: #22c55e;
-  box-shadow: 0 0 0 1px #22c55e;
-}
-
-.etape .en-ligne input {
-  width: 56px;
-}
-
-button.titre-etape {
-  margin-top: 0;
-  color: var(--texte);
-  font-size: 13px;
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.espace {
-  flex: 1;
-}
-
-.puces {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
-}
-
-button.puce {
-  min-width: 38px;
-  padding: 2px 6px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-button.puce.au-vert {
-  border-color: #16a34a;
-  background: #22c55e;
-  color: #ffffff;
-}
-
-button.puce.bloquee {
-  text-decoration: line-through;
-}
-
-button.puce.inconnue {
-  border-color: var(--erreur);
-  color: var(--erreur);
-}
-
-.transition-etapes {
-  margin: 4px 0 0 10px;
-}
-
-.lecture {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin: 4px 0;
-}
-
-.lecture .discret {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-}
+/* ── Chronogramme (onglets 3 et 4) ── */
 
 svg.chronogramme {
   display: block;
@@ -796,83 +261,55 @@ svg.chronogramme {
 }
 
 .chronogramme .etape rect {
-  fill: rgba(47, 111, 214, 0.14);
-  stroke: rgba(47, 111, 214, 0.5);
+  fill: var(--chakra-colors-brand-subtle);
+  stroke: var(--chakra-colors-brand-emphasized);
   stroke-width: 0.5;
 }
 
 .chronogramme .etape text {
-  fill: var(--accent);
+  fill: var(--chakra-colors-brand-solid);
   font-weight: 700;
 }
 
 .chronogramme .transition {
-  fill: var(--bordure);
+  fill: var(--chakra-colors-border);
   opacity: 0.6;
 }
 
 .chronogramme .code {
-  fill: var(--texte);
+  fill: var(--chakra-colors-fg);
   font-weight: 700;
 }
 
 .chronogramme .rouge {
-  fill: #ef4444;
+  fill: var(--chakra-colors-feu-rouge);
   opacity: 0.55;
 }
 
 .chronogramme .vert {
-  fill: #22c55e;
+  fill: var(--chakra-colors-feu-vert);
 }
 
 .chronogramme .jaune {
-  fill: #facc15;
+  fill: var(--chakra-colors-feu-orange);
 }
 
 .chronogramme .axe line {
-  stroke: var(--texte-doux);
+  stroke: var(--chakra-colors-fg-muted);
   stroke-width: 0.5;
 }
 
 .chronogramme .axe text {
-  fill: var(--texte-doux);
+  fill: var(--chakra-colors-fg-muted);
 }
 
 .chronogramme .curseur line {
-  stroke: var(--texte);
+  stroke: var(--chakra-colors-fg);
   stroke-width: 1;
 }
 
 .chronogramme .curseur path {
-  fill: var(--texte);
-}
-
-.degagements {
-  margin-top: 10px;
-  font-size: 12px;
-}
-
-.degagements summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.degagements table {
-  border-collapse: collapse;
-}
-
-.degagements th {
-  padding-right: 8px;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.degagements td {
-  padding: 1px 6px;
-}
-
-.degagements input {
-  width: 52px;
+  fill: var(--chakra-colors-fg);
 }
 
 /* ── Onglet « 4. Graphe » ── */
@@ -886,8 +323,8 @@ svg.graphe-etapes {
 }
 
 .graphe-etapes .noeud rect {
-  fill: var(--champ);
-  stroke: var(--accent);
+  fill: var(--chakra-colors-bg-panel);
+  stroke: var(--chakra-colors-brand-solid);
   stroke-width: 1.5;
 }
 
@@ -896,48 +333,48 @@ svg.graphe-etapes {
 }
 
 .graphe-etapes .noeud.hors-cycle rect {
-  stroke: #e08a1e;
-  fill: rgba(224, 138, 30, 0.1);
+  stroke: var(--chakra-colors-statut-estime);
+  fill: color-mix(in srgb, var(--chakra-colors-statut-estime) 10%, transparent);
 }
 
 .graphe-etapes .noeud.courant rect {
-  stroke: #16a34a;
+  stroke: var(--chakra-colors-feu-vert);
   stroke-width: 3;
-  fill: rgba(34, 197, 94, 0.18);
+  fill: color-mix(in srgb, var(--chakra-colors-feu-vert) 18%, transparent);
 }
 
 .graphe-etapes .noeud .titre {
-  fill: var(--texte);
+  fill: var(--chakra-colors-fg);
   font-size: 10px;
   font-weight: 700;
 }
 
 .graphe-etapes .noeud .lignes {
-  fill: var(--texte-doux);
+  fill: var(--chakra-colors-fg-muted);
 }
 
 .graphe-etapes .arc path {
   fill: none;
-  stroke: var(--texte-doux);
+  stroke: var(--chakra-colors-fg-muted);
   stroke-width: 1.3;
 }
 
 .graphe-etapes .arc text {
-  fill: var(--texte);
+  fill: var(--chakra-colors-fg);
   paint-order: stroke;
-  stroke: var(--fond);
+  stroke: var(--chakra-colors-bg-panel);
   stroke-width: 3px;
   stroke-linejoin: round;
 }
 
 .graphe-etapes .arc.saut path {
-  stroke: var(--accent);
+  stroke: var(--chakra-colors-brand-solid);
   stroke-dasharray: 4 3;
 }
 
 .graphe-etapes .arc.demande path,
 .graphe-etapes .arc.reprise path {
-  stroke: #e08a1e;
+  stroke: var(--chakra-colors-statut-estime);
 }
 
 .graphe-etapes .arc.reprise path {
@@ -945,74 +382,33 @@ svg.graphe-etapes {
 }
 
 .graphe-etapes .arc.actif path {
-  stroke: #16a34a;
+  stroke: var(--chakra-colors-feu-vert);
   stroke-width: 2.5;
 }
 
 .graphe-etapes .fleche path {
-  fill: var(--texte-doux);
+  fill: var(--chakra-colors-fg-muted);
 }
 
 .graphe-etapes .fleche.saut path {
-  fill: var(--accent);
+  fill: var(--chakra-colors-brand-solid);
 }
 
 .graphe-etapes .fleche.demande path,
 .graphe-etapes .fleche.reprise path {
-  fill: #e08a1e;
+  fill: var(--chakra-colors-statut-estime);
 }
 
 .graphe-etapes .fleche.actif path {
-  fill: #16a34a;
-}
-
-.legende-saut {
-  color: var(--accent);
-}
-
-.legende-demande {
-  color: #e08a1e;
-}
-
-table.table-graphe {
-  margin-top: 4px;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.table-graphe th,
-.table-graphe td {
-  padding: 2px 6px 2px 0;
-  text-align: left;
-}
-
-.table-graphe select {
-  font-size: 12px;
-}
-
-.arc-saisi {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  margin-top: 4px;
-  font-size: 12px;
-}
-
-.arc-saisi input[type='number'] {
-  width: 64px;
+  fill: var(--chakra-colors-feu-vert);
 }
 
 .chronogramme .demande {
-  fill: #2f6fd6;
-}
-
-.en-ligne input[type='number'] {
-  width: 60px;
+  fill: var(--chakra-colors-brand-solid);
 }
 
 .graphe-etapes .noeud .reprise {
-  fill: #a15f0c;
+  fill: var(--chakra-colors-fg-warning);
   font-size: 8px;
 }
 
@@ -1021,113 +417,3 @@ table.table-graphe {
   stroke-width: 1;
 }
 
-.bascule {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  font-size: 13px;
-}
-
-.popup-rame {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  color: #1d2330;
-  font-size: 12px;
-}
-
-.popup-rame .source {
-  color: #5b6475;
-  font-size: 11px;
-}
-
-.creneau {
-  display: flex;
-  gap: 6px;
-  margin: 4px 0 4px 22px;
-}
-
-.creneau select {
-  font: inherit;
-  font-size: 12px;
-}
-
-.legende {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  margin: 4px 0 4px 22px;
-  padding: 0;
-  list-style: none;
-  font-size: 12px;
-}
-
-.legende li {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.pastille {
-  display: inline-block;
-  width: 14px;
-  height: 5px;
-  border-radius: 2px;
-}
-
-.onglets {
-  display: flex;
-  gap: 2px;
-  margin: 8px 0 4px;
-  padding: 2px;
-  border-radius: 8px;
-  background: var(--bordure);
-}
-
-.onglets button {
-  flex: 1;
-  padding: 4px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--texte-doux);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.onglets button[aria-selected='true'] {
-  background: var(--fond);
-  color: var(--texte);
-  font-weight: 600;
-}
-
-.fond {
-  margin: 10px 0 0;
-  padding: 6px 8px;
-  border: 1px solid var(--bordure);
-  border-radius: 8px;
-}
-
-.fond legend {
-  padding: 0 4px;
-  color: var(--texte-doux);
-  font-size: 12px;
-}
-
-.fond .bascule {
-  margin-top: 4px;
-}
-
-.choix-fond {
-  display: flex;
-  gap: 12px;
-  font-size: 13px;
-}
-
-.choix-fond label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}

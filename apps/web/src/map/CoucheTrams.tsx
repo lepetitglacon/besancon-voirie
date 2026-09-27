@@ -5,6 +5,7 @@ import {
   type Map as CarteMapLibre,
   type MapLayerMouseEvent,
 } from 'maplibre-gl'
+import { Text } from '@chakra-ui/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -16,6 +17,7 @@ import {
   type SymbolLayerSpecification,
 } from 'react-map-gl/maplibre'
 import type { Coordonnees } from '@voirie/engine'
+import { Aide, PopupCarte } from '../ds'
 import {
   positionnerRames,
   preparerReseau,
@@ -137,42 +139,38 @@ function duree(secondes: number): string {
   return `${Math.round(secondes / 60)} min`
 }
 
-function DetailRame({ rame }: { rame: ProprietesRame }) {
+function DetailRame({ rame, onFermer }: { rame: ProprietesRame; onFermer: () => void }) {
   return (
-    <div className="popup-rame">
-      <strong>
-        {rame.ligne} → {rame.destination}
-      </strong>
-      <span>Rame {rame.vehicule}</span>
+    <PopupCarte taille="compacte" titre={`${rame.ligne} → ${rame.destination}`} soustitre={`Rame ${rame.vehicule}`} onFermer={onFermer}>
       {rame.etat === 'au_terminus' ? (
-        <span>
+        <Text>
           Au terminus {rame.arretSuivant}, départ dans {duree(rame.restant)}
-        </span>
+        </Text>
       ) : (
         <>
-          <span>
+          <Text>
             {rame.arretPrecedent} → {rame.arretSuivant}
-          </span>
-          <span>
+          </Text>
+          <Text>
             {rame.aQuai === 'precedent'
               ? `À quai à ${rame.arretPrecedent}, départ dans ${duree(rame.departDans ?? 0)}`
               : rame.aQuai === 'suivant'
                 ? `À quai à ${rame.arretSuivant}`
                 : `Arrivée prévue dans ${duree(rame.restant)}`}
-          </span>
-          <span>
+          </Text>
+          <Text>
             Vitesse moyenne du tronçon : {rame.vitesse} km/h · zone probable : {rame.zone} m
-          </span>
-          <span className="source">
+          </Text>
+          <Aide textStyle="2xs">
             {rame.sourceDuree === 'historique'
               ? `Durée du tronçon : médiane de ${rame.echantillons} passages observés`
               : rame.sourceDuree === 'flux'
                 ? 'Durée du tronçon : prévisions Ginko (historique insuffisant)'
                 : 'Durée du tronçon : horaires théoriques (historique insuffisant)'}
-          </span>
+          </Aide>
         </>
       )}
-    </div>
+    </PopupCarte>
   )
 }
 
@@ -209,7 +207,7 @@ export function CoucheTrams({ reseau, tempsReel, couches }: Props) {
   }, [selection])
 
   const [contenuBulle] = useState(() => document.createElement('div'))
-  const [bulle] = useState(() => new PopupMapLibre({ offset: 12, closeOnClick: false }))
+  const [bulle] = useState(() => new PopupMapLibre({ offset: 12, closeOnClick: false, closeButton: false, maxWidth: 'none', className: 'popup-carte-ancre' }))
 
   const rameAffichee = (vehicule: string | undefined) =>
     derniereImage.current?.rames.features.find((rame) => rame.properties.vehicule === vehicule)
@@ -314,7 +312,7 @@ export function CoucheTrams({ reseau, tempsReel, couches }: Props) {
       <Source id="tram-rames" type="geojson" data={VIDE}>
         <Layer {...coucheRames} layout={{ visibility: visibilite(couches.rames) }} />
       </Source>
-      {selection !== undefined && detail && createPortal(<DetailRame rame={detail} />, contenuBulle)}
+      {selection !== undefined && detail && createPortal(<DetailRame rame={detail} onFermer={() => bulle.remove()} />, contenuBulle)}
     </>
   )
 }
