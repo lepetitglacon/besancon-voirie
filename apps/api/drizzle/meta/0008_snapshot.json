@@ -1,6 +1,6 @@
 {
-  "id": "84b68d62-d043-42c5-87d5-ab3060eb77cb",
-  "prevId": "4dbc576d-62cb-416a-a802-1ccde83862d9",
+  "id": "baf659a2-02e9-442f-b406-5f6b7892eb61",
+  "prevId": "906e3c4d-7836-4d61-a166-b79b31235328",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -52,6 +52,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'double'"
+        },
+        "voies_sortantes": {
+          "name": "voies_sortantes",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
         },
         "geom": {
           "name": "geom",
@@ -333,19 +340,6 @@
           "type": "geometry(point)",
           "primaryKey": false,
           "notNull": true
-        },
-        "geom_osm": {
-          "name": "geom_osm",
-          "type": "geometry(point)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "position_manuelle": {
-          "name": "position_manuelle",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "present_osm": {
           "name": "present_osm",
@@ -793,6 +787,138 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.tram_passage": {
+      "name": "tram_passage",
+      "schema": "",
+      "columns": {
+        "jour": {
+          "name": "jour",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course": {
+          "name": "course",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vehicule": {
+          "name": "vehicule",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parcours": {
+          "name": "parcours",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "arret": {
+          "name": "arret",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "arret_precedent": {
+          "name": "arret_precedent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "heure_prevue": {
+          "name": "heure_prevue",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "detecte_a": {
+          "name": "detecte_a",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "heure_theorique": {
+          "name": "heure_theorique",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "previsions": {
+          "name": "previsions",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        }
+      },
+      "indexes": {
+        "tram_passage_course_arret_idx": {
+          "name": "tram_passage_course_arret_idx",
+          "columns": [
+            {
+              "expression": "jour",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "course",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "arret",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "tram_passage_heure_idx": {
+          "name": "tram_passage_heure_idx",
+          "columns": [
+            {
+              "expression": "heure_prevue",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "tram_passage_jour_course_sequence_pk": {
+          "name": "tram_passage_jour_course_sequence_pk",
+          "columns": [
+            "jour",
+            "course",
+            "sequence"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.voie": {
       "name": "voie",
       "schema": "",
@@ -820,6 +946,12 @@
         "rang": {
           "name": "rang",
           "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mouvements": {
+          "name": "mouvements",
+          "type": "text[]",
           "primaryKey": false,
           "notNull": true
         },
@@ -940,7 +1072,76 @@
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
+  "views": {
+    "public.tram_troncon_observe": {
+      "name": "tram_troncon_observe",
+      "schema": "public",
+      "columns": {
+        "parcours": {
+          "name": "parcours",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "depart": {
+          "name": "depart",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "arrivee": {
+          "name": "arrivee",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "jour": {
+          "name": "jour",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course": {
+          "name": "course",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vehicule": {
+          "name": "vehicule",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "arrivee_a": {
+          "name": "arrivee_a",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duree_s": {
+          "name": "duree_s",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "heure": {
+          "name": "heure",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type_jour": {
+          "name": "type_jour",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "materialized": false,
+      "isExisting": true
+    }
+  },
   "_meta": {
     "columns": {},
     "schemas": {},

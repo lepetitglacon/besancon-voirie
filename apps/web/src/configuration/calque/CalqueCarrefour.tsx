@@ -19,6 +19,7 @@ import {
   Poignee,
   Voie,
   type EtatCourbe,
+  type EtatFeu,
   type EtatPoignee,
   type EtatVoie,
 } from './elements'
@@ -49,10 +50,13 @@ interface Props {
   mode: ModeEdition | null
   /** Connexions à mettre en avant (« de>vers »), par exemple celles de la ligne de feux active. */
   surlignees?: ReadonlySet<string>
+  /** Lecture d'un programme : couleur du feu de chaque connexion (« de>vers ») et passage piéton. */
+  feux?: { connexions: ReadonlyMap<string, EtatFeu>; traversees: ReadonlyMap<string, EtatFeu> } | null
   onDeplacer: (poignee: PoigneeModele, position: LonLat) => void
   /** Ajoute la connexion, ou la retire si elle existe. */
   onConnecter: (de: string, vers: string) => void
-  feux: FeuPlacable[]
+  /** Feux physiques du carrefour, à poser sur leur mât en mode « feux ». */
+  feuxPlacables: FeuPlacable[]
   /** Pose le feu (ou le remet à sa position OSM : null) ; l'aperçu reste jusqu'à la fin de la promesse. */
   onPlacerFeu: (id: string, position: LonLat | null) => Promise<void>
   onApercuFeu: (apercu: ApercuFeu | null) => void
@@ -82,7 +86,8 @@ const cleConnexion = (c: Connexion) => `${c.de}>${c.vers}`
 const symboles = new Map(FLECHES.map((f) => [f.direction, f.symbole]))
 
 export function CalqueCarrefour(props: Props) {
-  const { branches, connexions, mode, surlignees, onDeplacer, onConnecter, feux, onPlacerFeu, onApercuFeu } = props
+  const { branches, connexions, mode, surlignees, feux, onDeplacer, onConnecter, feuxPlacables, onPlacerFeu, onApercuFeu } =
+    props
   const projection = useProjection()
   const [survol, setSurvol] = useState<Survol>(null)
   const [glisse, setGlisse] = useState<Glisse | null>(null)
@@ -262,9 +267,9 @@ export function CalqueCarrefour(props: Props) {
   }
 
   // Mode « feux » : chaque feu se tire jusqu'à son mât ; un feu déjà placé montre sa position OSM.
-  const feuxPlacables =
+  const feuxAffiches =
     mode === 'feux'
-      ? feux.map((feu) => {
+      ? feuxPlacables.map((feu) => {
           const enCours = glisse?.type === 'feu' && glisse.id === feu.id ? glisse : null
           const position = enCours?.position ?? feu.position
           return { ...feu, position, enCours: enCours !== null, deplace: feu.placeALaMain || enCours !== null }
@@ -290,7 +295,14 @@ export function CalqueCarrefour(props: Props) {
   return (
     <svg className={`calque-carrefour ${mode ?? 'lecture'}`} aria-label="Configuration du carrefour">
       {apercu.branches.map(
-        (b) => b.traversee && <PassagePieton key={`passage-${b.code}`} segment={segmentPx(b.traversee)} largeur={largeurPassage} />,
+        (b) => b.traversee && (
+            <PassagePieton
+              key={`passage-${b.code}`}
+              segment={segmentPx(b.traversee)}
+              largeur={largeurPassage}
+              feu={feux ? (feux.traversees.get(b.code) ?? 'libre') : undefined}
+            />
+          ),
       )}
 
       {[...voies].map(([cle, voie]) => (
@@ -319,6 +331,7 @@ export function CalqueCarrefour(props: Props) {
             sortie={segmentPx(sortie.geom)}
             couleur={couleurs.get(c.de) ?? '#ffffff'}
             etat={etatCourbe(cle)}
+            feu={feux ? (feux.connexions.get(cle) ?? 'libre') : undefined}
             titre={mode === 'connecter' ? `${c.de} → ${c.vers} : cliquer pour retirer` : `${c.de} → ${c.vers}`}
             onSurvol={mode ? (actif) => setSurvol(actif ? { type: 'connexion', cle } : null) : undefined}
             onClic={mode === 'connecter' ? () => onConnecter(c.de, c.vers) : undefined}
@@ -357,7 +370,7 @@ export function CalqueCarrefour(props: Props) {
         <Poignee key={cle} {...poignee} {...g} />
       ))}
 
-      {feuxPlacables.map(
+      {feuxAffiches.map(
         (feu) =>
           feu.deplace &&
           feu.osm && (
@@ -369,7 +382,7 @@ export function CalqueCarrefour(props: Props) {
             />
           ),
       )}
-      {feuxPlacables.map((feu) => (
+      {feuxAffiches.map((feu) => (
         <Poignee
           key={`feu-${feu.id}`}
           centre={px(feu.position)}

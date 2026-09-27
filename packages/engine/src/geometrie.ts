@@ -130,6 +130,46 @@ export function polylignesSeCoupent(a: readonly XY[], b: readonly XY[]): boolean
   return false;
 }
 
+/** Longueur d'une polyligne (m). */
+export function longueurPolyligne(points: readonly XY[]): number {
+  let longueur = 0;
+  for (let i = 0; i < points.length - 1; i++) longueur += norme(moins(points[i + 1]!, points[i]!));
+  return longueur;
+}
+
+/**
+ * Points où deux polylignes se coupent, repérés par la distance parcourue depuis le début
+ * de chacune (m) : `da` le long de `a`, `db` le long de `b`.
+ */
+export function intersectionsPolylignes(a: readonly XY[], b: readonly XY[]): Array<{ da: number; db: number; point: XY }> {
+  const resultats: Array<{ da: number; db: number; point: XY }> = [];
+  let debutA = 0;
+  for (let i = 0; i < a.length - 1; i++) {
+    const a1 = a[i]!;
+    const a2 = a[i + 1]!;
+    const longueurA = norme(moins(a2, a1));
+    let debutB = 0;
+    for (let j = 0; j < b.length - 1; j++) {
+      const b1 = b[j]!;
+      const b2 = b[j + 1]!;
+      const longueurB = norme(moins(b2, b1));
+      if (segmentsSeCoupent(a1, a2, b1, b2)) {
+        // a1 + t (a2 − a1) = b1 + u (b2 − b1)
+        const r = moins(a2, a1);
+        const s = moins(b2, b1);
+        const q = moins(b1, a1);
+        const denominateur = r[0] * s[1] - r[1] * s[0];
+        const t = (q[0] * s[1] - q[1] * s[0]) / denominateur;
+        const u = (q[0] * r[1] - q[1] * r[0]) / denominateur;
+        resultats.push({ da: debutA + t * longueurA, db: debutB + u * longueurB, point: [a1[0] + t * r[0], a1[1] + t * r[1]] });
+      }
+      debutB += longueurB;
+    }
+    debutA += longueurA;
+  }
+  return resultats;
+}
+
 /**
  * Voie parallèle à `segment`, décalée d'une largeur de voie sur sa gauche ou sa droite
  * (côtés vus en regardant du bout côté carrefour vers le bout éloigné).

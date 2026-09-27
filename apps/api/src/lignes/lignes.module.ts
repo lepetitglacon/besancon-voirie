@@ -7,5 +7,6 @@ import { LignesService } from './lignes.service.js';
   imports: [BranchesModule],
   controllers: [LignesController],
   providers: [LignesService],
+  exports: [LignesService],
 })
 export class LignesModule {}

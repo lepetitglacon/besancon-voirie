@@ -34,6 +34,7 @@ pnpm dev            # packages en watch + API :3000 + web :5173
 | `pnpm typecheck` / `pnpm lint` | Vérifications TypeScript et oxlint |
 | `pnpm db:psql` | Console SQL sur la base de développement |
 | `pnpm db:migrate` | Applique les nouvelles migrations Drizzle |
+| `pnpm db:verifier [base]` | Compare le journal des migrations à une base (par défaut celle du `.env`) : à lancer avant tout merge, voir `CLAUDE.md` |
 | `pnpm db:reset` | Recrée le conteneur de zéro (supprime le volume et toutes les bases) |
 
 ### Avec le Nevven Worktree Manager
@@ -513,12 +514,13 @@ métropole. Un simple mail au service Mobilité peut les obtenir, facultatif. Le
 - [x] Sélection des feux par rectangle (bouton, ou Maj + glisser).
 - [x] Configuration, étape 1 : branches, voies calées sur la photo IGN, passages piétons, connexions entre voies par glisser-déposer (« lane connector » de TM:PE) ; flèches et mouvements déduits — voir [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 - [x] Configuration, étape 2 : lignes de feux, feux physiques, matrice des conflits et conflits admis.
-- [x] Fond « Photo aérienne » (IGN BD ORTHO) pour vérifier voies et marquages.
-- [ ] Configuration, étape 3 : programme par étapes, jaune et dégagement, diagramme de feux.
-- [ ] Configuration, étape 4 : graphe des étapes (feux actués, priorité tram).
+- [x] Fond de carte « Satellite » (orthophotos IGN) pour vérifier voies et marquages.
+- [x] Configuration, étape 3 : plans de feux et plages horaires, programme par étapes, jaune et rouges de dégagement calculés sur la géométrie, diagramme de feux, lecture du cycle sur la carte.
+- [x] Configuration, étape 4 : graphe des étapes (étapes sur appel, priorité tram, arcs conditionnels) et simulation d'un scénario de demandes (attentes, journal, lecture sur la carte).
+- [ ] Comparer le diagramme de feux aux relevés terrain (après le chrono).
 - [x] Carte MapLibre : carrefours colorés par statut, bulle avec nom, nature et tram.
 - [ ] Fiche carrefour avec diagramme de feux ; calcul des branches (`ST_Azimuth`).
-- [ ] `engine/` : phases, rouges de dégagement, capacité par ligne, contrôles de cohérence.
+- [ ] `engine/` : capacité par ligne, contrôles de cohérence avec les relevés (phases et rouges de dégagement : faits à l'étape 3).
 - [ ] Chrono de feux (PWA hors-ligne) → `POST /api/releves` → modération.
 - [ ] **Pilote** : relever entièrement **un axe de 4 à 6 carrefours consécutifs**, pour préparer la phase 1 bis.
 - [ ] Ouvrir les contributions (guide de relevé, écran de modération).

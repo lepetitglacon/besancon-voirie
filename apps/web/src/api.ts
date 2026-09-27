@@ -2,16 +2,23 @@ import type { LonLat } from '@voirie/engine'
 import type {
   Bbox,
   BranchesCarrefour,
-  ConfigurationBranches,
-  ConfigurationLignes,
-  LignesCarrefour,
-  DetectionBranches,
   CarrefourResume,
   CarrefoursGeoJson,
+  ConfigurationBranches,
+  ConfigurationLignes,
+  ConfigurationProgramme,
   CreerCarrefour,
+  DetectionBranches,
+  EtatHistoriqueTram,
   FeuxGeoJson,
+  HistoriqueTroncons,
+  LignesCarrefour,
   ModifierCarrefour,
   NatureCarrefour,
+  ProgrammeCarrefour,
+  ReseauTram,
+  TramsTempsReel,
+  TypeJour,
 } from '@voirie/schema'
 
 export interface Sante {
@@ -66,4 +73,17 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(configuration),
     }),
+  programme: (carrefourId: string) => requete<ProgrammeCarrefour>(`/api/carrefours/${carrefourId}/programme`),
+  enregistrerProgramme: (carrefourId: string, configuration: ConfigurationProgramme) =>
+    requete<ProgrammeCarrefour>(`/api/carrefours/${carrefourId}/programme`, {
+      method: 'PUT',
+      body: JSON.stringify(configuration),
+    }),
+  reseauTram: () => requete<ReseauTram>('/api/tram/reseau'),
+  tramsTempsReel: () => requete<TramsTempsReel>('/api/tram/temps-reel'),
+  historiqueTroncons: (typeJour: TypeJour, heure: number | null) =>
+    requete<HistoriqueTroncons>(
+      `/api/tram/historique/troncons?typeJour=${typeJour}${heure === null ? '' : `&heure=${heure}`}`,
+    ),
+  historiqueEtat: () => requete<EtatHistoriqueTram>('/api/tram/historique/etat'),
 }

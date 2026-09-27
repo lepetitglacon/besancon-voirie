@@ -55,15 +55,15 @@ export interface ConflitLignes {
   admis: boolean;
 }
 
-interface Trajectoire {
+export interface Trajectoire {
   cle: string;
   de: string;
   vers: string;
   courbe: XY[];
 }
 
-/** Trajectoires de chaque mouvement (« S>O »), prêtes pour les calculs d'intersection. */
-function trajectoiresParMouvement(geometrie: GeometrieCarrefour): Map<string, Trajectoire[]> {
+/** Trajectoires de chaque mouvement (« S>O »), en mètres dans le repère local du carrefour. */
+export function trajectoiresParMouvement(geometrie: GeometrieCarrefour): Map<string, Trajectoire[]> {
   const repere = repereLocal(geometrie.centre);
   const parMouvement = new Map<string, Trajectoire[]>();
   for (const connexion of geometrie.connexions) {

@@ -57,7 +57,7 @@ export function OngletBranches({ brouillon, centre, sources, mode, onMode, onCha
       {mode !== 'feux' && (
         <p className="discret">
           {mode === 'ajuster'
-            ? 'Faites glisser les extrémités des voies et des passages piétons pour les caler sur le marquage de la photo (bouton « Photo aérienne »).'
+            ? 'Faites glisser les extrémités des voies et des passages piétons pour les caler sur le marquage de la photo (fond de carte « Satellite »).'
             : 'Glissez du point coloré d’une voie entrante vers le point blanc d’une voie sortante. Refaire le même geste retire la connexion.'}
         </p>
       )}
@@ -152,7 +152,7 @@ export function OngletBranches({ brouillon, centre, sources, mode, onMode, onCha
       <ul className="mouvements">
         {connexions.map((c) => (
           <li key={`${c.de}>${c.vers}`}>
-            <span className="pastille" style={{ background: couleurs.get(c.de) }} /> {c.de} → {c.vers}{' '}
+            <span className="pastille-voie" style={{ background: couleurs.get(c.de) }} /> {c.de} → {c.vers}{' '}
             <button className="lien" onClick={() => onChanger(basculerConnexion(brouillon, c.de, c.vers))}>
               retirer
             </button>

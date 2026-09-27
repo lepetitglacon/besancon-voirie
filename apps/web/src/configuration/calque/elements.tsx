@@ -37,8 +37,18 @@ export function Voie({ segment, largeur, couleur, sortante, etat, interactive, t
   )
 }
 
-export function PassagePieton({ segment, largeur }: { segment: [XY, XY]; largeur: number }) {
-  return <path className="calque-passage" d={d(segment)} strokeWidth={largeur} strokeDasharray={`${largeur / 5} ${largeur / 5}`} />
+/** Couleur du feu qui commande un élément, pendant la lecture d'un programme ; « libre » : aucune ligne. */
+export type EtatFeu = 'vert' | 'jaune' | 'rouge' | 'libre'
+
+export function PassagePieton({ segment, largeur, feu }: { segment: [XY, XY]; largeur: number; feu?: EtatFeu }) {
+  return (
+    <path
+      className={classes('calque-passage', feu && `feu-${feu}`)}
+      d={d(segment)}
+      strokeWidth={largeur}
+      strokeDasharray={`${largeur / 5} ${largeur / 5}`}
+    />
+  )
 }
 
 export type EtatCourbe = 'normale' | 'survolee' | 'surlignee' | 'estompee' | 'a-retirer'
@@ -49,16 +59,17 @@ interface PropsCourbe {
   sortie: [XY, XY]
   couleur: string
   etat: EtatCourbe
+  feu?: EtatFeu
   titre: string
   onSurvol?: (survol: boolean) => void
   onClic?: () => void
 }
 
-export function Courbe({ entree, sortie, couleur, etat, titre, onSurvol, onClic }: PropsCourbe) {
+export function Courbe({ entree, sortie, couleur, etat, feu, titre, onSurvol, onClic }: PropsCourbe) {
   const chemin = cheminConnexion(entree, sortie)
   const interactive = onSurvol !== undefined
   return (
-    <g className={classes('calque-courbe', etat)}>
+    <g className={classes('calque-courbe', etat, feu && `feu-${feu}`)}>
       {/* Tracé large et transparent : facilite le survol et le clic. */}
       {interactive && (
         <path

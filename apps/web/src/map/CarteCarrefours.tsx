@@ -1,7 +1,7 @@
 import type { LonLat } from '@voirie/engine'
 import type { Bbox, CarrefourResume, CarrefoursGeoJson, FeuResume, FeuxGeoJson } from '@voirie/schema'
 import type { Map as CarteMapLibre } from 'maplibre-gl'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Map, {
   Layer,
   NavigationControl,
@@ -14,12 +14,8 @@ import Map, {
 import { CalqueCarrefour, type ApercuFeu, type FeuPlacable } from '../configuration/calque/CalqueCarrefour'
 import type { Poignee } from '../configuration/modele'
 import type { AffichageConfiguration } from '../configuration/PanneauConfiguration'
-import {
-  coucheCarrefours,
-  coucheFeux,
-  couchePhoto,
-  SOURCE_PHOTO,
-} from './couches'
+import { coucheCarrefours, coucheFeux } from './couches'
+import { FondDeCarte, type OptionsFond } from './FondDeCarte'
 
 /** Centre de Besançon (Pont Battant). */
 const VUE_INITIALE = { longitude: 6.0241, latitude: 47.2378, zoom: 13.5 }
@@ -79,6 +75,10 @@ type Bulle =
 
 interface Props {
   carrefours: CarrefoursGeoJson | undefined
+  afficherCarrefours: boolean
+  fond: OptionsFond
+  /** Couches supplémentaires (trams…). */
+  children?: ReactNode
   feux: FeuxGeoJson | undefined
   /** null hors édition ; en édition, les feux sélectionnés et le carrefour modifié (null si nouveau). */
   edition: { selection: string[]; carrefourId: string | null; modeRectangle: boolean } | null
@@ -101,33 +101,11 @@ interface Props {
   onPlacerFeu: (id: string, position: LonLat | null) => Promise<void>
 }
 
-const CLE_FOND = 'besancon-voirie:fond'
-
-/** Préférence de fond de carte, mémorisée dans le navigateur (si le stockage est disponible). */
-function useFondPhoto(): [boolean, (photo: boolean) => void] {
-  const [photo, setPhoto] = useState(() => {
-    try {
-      return localStorage.getItem(CLE_FOND) === 'photo'
-    } catch {
-      return false
-    }
-  })
-  const choisir = (valeur: boolean) => {
-    setPhoto(valeur)
-    try {
-      localStorage.setItem(CLE_FOND, valeur ? 'photo' : 'plan')
-    } catch {
-      // Stockage indisponible (navigation privée…) : le choix vaut pour la session.
-    }
-  }
-  return [photo, choisir]
-}
-
 /** Zoom utilisé pour configurer un carrefour. */
 const ZOOM_CONFIGURATION = 18.3
 
 export function CarteCarrefours(props: Props) {
-  const { carrefours, edition, configuration } = props
+  const { carrefours, edition, configuration, afficherCarrefours, fond, children } = props
   const carte = useRef<MapRef>(null)
 
   // Feux du carrefour configuré, déplaçables ; celui qu'on tire est dessiné à sa nouvelle place.
@@ -157,9 +135,6 @@ export function CarteCarrefours(props: Props) {
       ),
     }
   }, [props.feux, apercuFeu])
-  const [photo, setPhoto] = useFondPhoto()
-  /** Premier calque de texte du fond de carte : la photo passe dessous, les noms de rues restent lisibles. */
-  const [premierTexte, setPremierTexte] = useState<string>()
 
   // Recentre la carte sur le carrefour quand on entre en configuration.
   const [lon, lat] = configuration?.position ?? []
@@ -244,23 +219,12 @@ export function CarteCarrefours(props: Props) {
       onMouseEnter={() => setSurvol(true)}
       onMouseLeave={() => setSurvol(false)}
       onClick={cliquer}
-      onLoad={(evenement) => {
-        setPremierTexte(evenement.target.getStyle().layers.find((calque) => calque.type === 'symbol')?.id)
-        props.onEmprise(emprise(evenement.target))
-      }}
+      onLoad={(evenement) => props.onEmprise(emprise(evenement.target))}
       onMoveEnd={(evenement) => props.onEmprise(emprise(evenement.target))}
     >
-      <NavigationControl position="top-right" />
-      <div className="bascule-fond">
-        <button aria-pressed={photo} onClick={() => setPhoto(!photo)}>
-          {photo ? 'Plan' : 'Photo aérienne'}
-        </button>
-      </div>
-      {premierTexte && (
-        <Source id="photo-aerienne" {...SOURCE_PHOTO}>
-          <Layer {...couchePhoto(photo)} beforeId={premierTexte} />
-        </Source>
-      )}
+      <NavigationControl position="top-right" visualizePitch={fond.relief3d} />
+      <FondDeCarte {...fond} />
+      {children}
       {rectangle && (
         <div
           className="rectangle-selection"
@@ -274,7 +238,7 @@ export function CarteCarrefours(props: Props) {
       )}
       {carrefours && (
         <Source id="carrefours" type="geojson" data={carrefours}>
-          <Layer {...coucheCarrefours(edition !== null)} />
+          <Layer {...coucheCarrefours(edition !== null)} layout={{ visibility: afficherCarrefours ? 'visible' : 'none' }} />
         </Source>
       )}
       {feux && (
@@ -292,9 +256,10 @@ export function CarteCarrefours(props: Props) {
           connexions={configuration.connexions}
           mode={configuration.mode}
           surlignees={new Set(configuration.connexionsSurlignees)}
+          feux={configuration.feux}
           onDeplacer={props.onDeplacerPoignee}
           onConnecter={props.onConnecter}
-          feux={feuxPlacables}
+          feuxPlacables={feuxPlacables}
           onPlacerFeu={props.onPlacerFeu}
           onApercuFeu={setApercuFeu}
         />

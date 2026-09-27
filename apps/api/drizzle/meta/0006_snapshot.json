@@ -1,6 +1,6 @@
 {
-  "id": "baf659a2-02e9-442f-b406-5f6b7892eb61",
-  "prevId": "906e3c4d-7836-4d61-a166-b79b31235328",
+  "id": "df59cd24-2a2d-4f3e-b99c-1ade8631d31c",
+  "prevId": "1628d8e5-ff5f-457a-bf0b-e0c567737ddd",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -62,12 +62,6 @@
         },
         "geom": {
           "name": "geom",
-          "type": "geometry(LineString, 4326)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "traversee": {
-          "name": "traversee",
           "type": "geometry(LineString, 4326)",
           "primaryKey": false,
           "notNull": false
@@ -163,13 +157,6 @@
           "notNull": true,
           "default": false
         },
-        "conflits_admis": {
-          "name": "conflits_admis",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
         "cree_le": {
           "name": "cree_le",
           "type": "timestamp with time zone",
@@ -210,93 +197,6 @@
           "nullsNotDistinct": false,
           "columns": [
             "slug"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.connexion": {
-      "name": "connexion",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "carrefour_id": {
-          "name": "carrefour_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "voie_entree_id": {
-          "name": "voie_entree_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "voie_sortie_id": {
-          "name": "voie_sortie_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "connexion_carrefour_id_carrefour_id_fk": {
-          "name": "connexion_carrefour_id_carrefour_id_fk",
-          "tableFrom": "connexion",
-          "tableTo": "carrefour",
-          "columnsFrom": [
-            "carrefour_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "connexion_voie_entree_id_voie_id_fk": {
-          "name": "connexion_voie_entree_id_voie_id_fk",
-          "tableFrom": "connexion",
-          "tableTo": "voie",
-          "columnsFrom": [
-            "voie_entree_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "connexion_voie_sortie_id_voie_id_fk": {
-          "name": "connexion_voie_sortie_id_voie_id_fk",
-          "tableFrom": "connexion",
-          "tableTo": "voie",
-          "columnsFrom": [
-            "voie_sortie_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "connexion_voie_entree_id_voie_sortie_id_unique": {
-          "name": "connexion_voie_entree_id_voie_sortie_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "voie_entree_id",
-            "voie_sortie_id"
           ]
         }
       },
@@ -452,6 +352,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "branche_code": {
+          "name": "branche_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "mouvements": {
           "name": "mouvements",
           "type": "text[]",
@@ -459,9 +365,21 @@
           "notNull": true,
           "default": "'{}'"
         },
+        "voies": {
+          "name": "voies",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "traverse": {
           "name": "traverse",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "geom": {
+          "name": "geom",
+          "type": "geometry(point)",
           "primaryKey": false,
           "notNull": false
         }
@@ -493,66 +411,6 @@
           ]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.ligne_feux_feu": {
-      "name": "ligne_feux_feu",
-      "schema": "",
-      "columns": {
-        "ligne_feux_id": {
-          "name": "ligne_feux_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "feu_id": {
-          "name": "feu_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "ligne_feux_feu_ligne_feux_id_ligne_feux_id_fk": {
-          "name": "ligne_feux_feu_ligne_feux_id_ligne_feux_id_fk",
-          "tableFrom": "ligne_feux_feu",
-          "tableTo": "ligne_feux",
-          "columnsFrom": [
-            "ligne_feux_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "ligne_feux_feu_feu_id_feu_id_fk": {
-          "name": "ligne_feux_feu_feu_id_feu_id_fk",
-          "tableFrom": "ligne_feux_feu",
-          "tableTo": "feu",
-          "columnsFrom": [
-            "feu_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "ligne_feux_feu_ligne_feux_id_feu_id_pk": {
-          "name": "ligne_feux_feu_ligne_feux_id_feu_id_pk",
-          "columns": [
-            "ligne_feux_id",
-            "feu_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -787,6 +645,138 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.tram_passage": {
+      "name": "tram_passage",
+      "schema": "",
+      "columns": {
+        "jour": {
+          "name": "jour",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course": {
+          "name": "course",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vehicule": {
+          "name": "vehicule",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parcours": {
+          "name": "parcours",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "arret": {
+          "name": "arret",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "arret_precedent": {
+          "name": "arret_precedent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "heure_prevue": {
+          "name": "heure_prevue",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "detecte_a": {
+          "name": "detecte_a",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "heure_theorique": {
+          "name": "heure_theorique",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "previsions": {
+          "name": "previsions",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        }
+      },
+      "indexes": {
+        "tram_passage_course_arret_idx": {
+          "name": "tram_passage_course_arret_idx",
+          "columns": [
+            {
+              "expression": "jour",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "course",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "arret",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "tram_passage_heure_idx": {
+          "name": "tram_passage_heure_idx",
+          "columns": [
+            {
+              "expression": "heure_prevue",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "tram_passage_jour_course_sequence_pk": {
+          "name": "tram_passage_jour_course_sequence_pk",
+          "columns": [
+            "jour",
+            "course",
+            "sequence"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.voie": {
       "name": "voie",
       "schema": "",
@@ -801,13 +791,6 @@
         "branche_id": {
           "name": "branche_id",
           "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sens": {
-          "name": "sens",
-          "type": "sens_voie",
-          "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
         },
@@ -830,12 +813,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'generale'"
-        },
-        "geom": {
-          "name": "geom",
-          "type": "geometry(LineString, 4326)",
-          "primaryKey": false,
-          "notNull": true
         }
       },
       "indexes": {},
@@ -856,12 +833,11 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "voie_branche_id_sens_rang_unique": {
-          "name": "voie_branche_id_sens_rang_unique",
+        "voie_branche_id_rang_unique": {
+          "name": "voie_branche_id_rang_unique",
           "nullsNotDistinct": false,
           "columns": [
             "branche_id",
-            "sens",
             "rang"
           ]
         }
@@ -887,14 +863,6 @@
         "entrant",
         "sortant",
         "double"
-      ]
-    },
-    "public.sens_voie": {
-      "name": "sens_voie",
-      "schema": "public",
-      "values": [
-        "entrante",
-        "sortante"
       ]
     },
     "public.statut_carrefour": {
@@ -940,7 +908,76 @@
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
+  "views": {
+    "public.tram_troncon_observe": {
+      "name": "tram_troncon_observe",
+      "schema": "public",
+      "columns": {
+        "parcours": {
+          "name": "parcours",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "depart": {
+          "name": "depart",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "arrivee": {
+          "name": "arrivee",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "jour": {
+          "name": "jour",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course": {
+          "name": "course",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vehicule": {
+          "name": "vehicule",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "arrivee_a": {
+          "name": "arrivee_a",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duree_s": {
+          "name": "duree_s",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "heure": {
+          "name": "heure",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type_jour": {
+          "name": "type_jour",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "materialized": false,
+      "isExisting": true
+    }
+  },
   "_meta": {
     "columns": {},
     "schemas": {},

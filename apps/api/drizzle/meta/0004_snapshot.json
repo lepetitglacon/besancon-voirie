@@ -1,6 +1,6 @@
 {
-  "id": "df59cd24-2a2d-4f3e-b99c-1ade8631d31c",
-  "prevId": "1628d8e5-ff5f-457a-bf0b-e0c567737ddd",
+  "id": "63db2d14-a48d-4232-b06b-21e05ea4e8e8",
+  "prevId": "0070cbb0-a3ac-4fe0-9db7-9272edc407a8",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -42,27 +42,6 @@
         "azimut_deg": {
           "name": "azimut_deg",
           "type": "real",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sens": {
-          "name": "sens",
-          "type": "sens_branche",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'double'"
-        },
-        "voies_sortantes": {
-          "name": "voies_sortantes",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "geom": {
-          "name": "geom",
-          "type": "geometry(LineString, 4326)",
           "primaryKey": false,
           "notNull": false
         }
@@ -149,6 +128,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'::jsonb"
+        },
+        "osm_nodes": {
+          "name": "osm_nodes",
+          "type": "bigint[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
         },
         "pres_tram": {
           "name": "pres_tram",
@@ -645,71 +631,134 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.voie": {
-      "name": "voie",
+    "public.tram_passage": {
+      "name": "tram_passage",
       "schema": "",
       "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "branche_id": {
-          "name": "branche_id",
-          "type": "uuid",
+        "jour": {
+          "name": "jour",
+          "type": "date",
           "primaryKey": false,
           "notNull": true
         },
-        "rang": {
-          "name": "rang",
+        "course": {
+          "name": "course",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sequence": {
+          "name": "sequence",
           "type": "smallint",
           "primaryKey": false,
           "notNull": true
         },
-        "mouvements": {
-          "name": "mouvements",
-          "type": "text[]",
+        "vehicule": {
+          "name": "vehicule",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parcours": {
+          "name": "parcours",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "type": {
-          "name": "type",
-          "type": "type_voie",
-          "typeSchema": "public",
+        "arret": {
+          "name": "arret",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "arret_precedent": {
+          "name": "arret_precedent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "heure_prevue": {
+          "name": "heure_prevue",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "detecte_a": {
+          "name": "detecte_a",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "heure_theorique": {
+          "name": "heure_theorique",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "previsions": {
+          "name": "previsions",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "'generale'"
+          "default": "'{}'::jsonb"
         }
       },
-      "indexes": {},
-      "foreignKeys": {
-        "voie_branche_id_branche_id_fk": {
-          "name": "voie_branche_id_branche_id_fk",
-          "tableFrom": "voie",
-          "tableTo": "branche",
-          "columnsFrom": [
-            "branche_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "voie_branche_id_rang_unique": {
-          "name": "voie_branche_id_rang_unique",
-          "nullsNotDistinct": false,
+      "indexes": {
+        "tram_passage_course_arret_idx": {
+          "name": "tram_passage_course_arret_idx",
           "columns": [
-            "branche_id",
-            "rang"
+            {
+              "expression": "jour",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "course",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "arret",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "tram_passage_heure_idx": {
+          "name": "tram_passage_heure_idx",
+          "columns": [
+            {
+              "expression": "heure_prevue",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "tram_passage_jour_course_sequence_pk": {
+          "name": "tram_passage_jour_course_sequence_pk",
+          "columns": [
+            "jour",
+            "course",
+            "sequence"
           ]
         }
       },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -722,15 +771,6 @@
       "values": [
         "carrefour",
         "traversee_pietonne"
-      ]
-    },
-    "public.sens_branche": {
-      "name": "sens_branche",
-      "schema": "public",
-      "values": [
-        "entrant",
-        "sortant",
-        "double"
       ]
     },
     "public.statut_carrefour": {
@@ -760,23 +800,82 @@
         "vehicule",
         "pieton"
       ]
-    },
-    "public.type_voie": {
-      "name": "type_voie",
-      "schema": "public",
-      "values": [
-        "generale",
-        "bus",
-        "velo",
-        "tram"
-      ]
     }
   },
   "schemas": {},
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
+  "views": {
+    "public.tram_troncon_observe": {
+      "name": "tram_troncon_observe",
+      "schema": "public",
+      "columns": {
+        "parcours": {
+          "name": "parcours",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "depart": {
+          "name": "depart",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "arrivee": {
+          "name": "arrivee",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "jour": {
+          "name": "jour",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course": {
+          "name": "course",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vehicule": {
+          "name": "vehicule",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "arrivee_a": {
+          "name": "arrivee_a",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duree_s": {
+          "name": "duree_s",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "heure": {
+          "name": "heure",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type_jour": {
+          "name": "type_jour",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "materialized": false,
+      "isExisting": true
+    }
+  },
   "_meta": {
     "columns": {},
     "schemas": {},

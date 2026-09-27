@@ -53,7 +53,7 @@ export function MatriceConflits({ codes, conflits, onBasculerAdmis }: Props) {
           ))}
         </tbody>
       </table>
-      <p className="discret legende">
+      <p className="discret note-legende">
         ✕ croisement · ⋎ même sortie · P piétons · ✓ conflit admis (vert simultané toléré)
       </p>
     </>
