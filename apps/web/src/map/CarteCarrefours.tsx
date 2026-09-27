@@ -74,13 +74,8 @@ interface Props {
   /** Feux couverts par un rectangle tracé en mode composition. */
   onAjouterFeux: (feux: FeuResume[]) => void
   onComposerDepuis: (feu: FeuResume) => void
-  /** Carrefour sélectionné (fiche dans la carte d'en-tête), mis en évidence sur la carte. */
-  selection: string | null
-  /**
-   * Clic sur un carrefour ou l'un de ses feux : il remplace le carrefour sélectionné, ou celui
-   * qu'on configure. null : clic dans le vide, hors configuration.
-   */
-  onSelectionner: (choix: { carrefour: CarrefourResume; position: [number, number] } | null) => void
+  /** Clic sur un carrefour ou l'un de ses feux : il s'ouvre en configuration, à la place de celui qui l'était. */
+  onOuvrir: (choix: { carrefour: CarrefourResume; position: [number, number] }) => void
   /** Carrefour en cours de configuration : voies et connexions dessinées, bulles désactivées. */
   configuration: (AffichageConfiguration & { carrefourId: string; position: [number, number] }) | null
   /** Clic sur un feu pendant la configuration : choix des feux d'une ligne, ou popup du feu. */
@@ -215,7 +210,7 @@ export function CarteCarrefours(props: Props) {
       // Un autre carrefour remplace celui qu'on configure (ses brouillons sont conservés),
       // sauf pendant un tracé ou le choix des feux d'une ligne.
       const autre = vise && vise.carrefour.id !== configuration.carrefourId
-      if (autre && configuration.mode !== null && !configuration.choixFeux) return props.onSelectionner(vise)
+      if (autre && configuration.mode !== null && !configuration.choixFeux) return props.onOuvrir(vise)
       if (objet?.layer.id === 'feux') return props.onClicFeuConfiguration(objet.properties as FeuResume, [longitude, latitude])
       return props.onClicCarteConfiguration()
     }
@@ -225,14 +220,9 @@ export function CarteCarrefours(props: Props) {
     }
     if (vise) {
       setBulle(undefined)
-      return props.onSelectionner(vise)
+      return props.onOuvrir(vise)
     }
-    if (objet?.layer.id === 'feux') {
-      props.onSelectionner(null)
-      return setBulle({ longitude, latitude, feu: objet.properties as FeuResume })
-    }
-    setBulle(undefined)
-    props.onSelectionner(null)
+    setBulle(objet?.layer.id === 'feux' ? { longitude, latitude, feu: objet.properties as FeuResume } : undefined)
   }
 
   return (
@@ -287,7 +277,7 @@ export function CarteCarrefours(props: Props) {
       {carrefours && (
         <Source id="carrefours" type="geojson" data={carrefours}>
           <Layer
-            {...coucheCarrefours(edition !== null, props.selection ?? configuration?.carrefourId ?? null)}
+            {...coucheCarrefours(edition !== null, configuration?.carrefourId ?? null)}
             layout={{ visibility: afficherCarrefours ? 'visible' : 'none' }}
           />
         </Source>

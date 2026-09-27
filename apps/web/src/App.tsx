@@ -5,8 +5,7 @@ import { Badge, Box, HStack, IconButton, Kbd, Popover, Portal, Stack, Tabs, Text
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { useMap } from 'react-map-gl/maplibre'
 import { api } from './api'
-import { FicheCarrefour } from './carrefour/FicheCarrefour'
-import { useBrouillons, type BrouillonsCarrefour } from './configuration/brouillons'
+import { abandonnerBrouillons, useBrouillons, type BrouillonsCarrefour } from './configuration/brouillons'
 import { CarteSuivi } from './configuration/CarteSuivi'
 import { MENU_CONFIGURATION, type ActionConfiguration } from './configuration/actions'
 import {
@@ -85,8 +84,6 @@ function App() {
     heure: new Date().getHours(),
   }))
   const [edition, setEdition] = useState<Edition | null>(null)
-  /** Carrefour sélectionné : sa fiche remplace la carte d'en-tête. */
-  const [selection, setSelection] = useState<CarrefourChoisi | null>(null)
   const [configuration, setConfiguration] = useState<(CarrefourChoisi & {
     /** Proposition IA à charger à l'ouverture (« Ouvrir » d'une notification). */
     ouvrirAnalyseIa?: { id: string }
@@ -180,7 +177,8 @@ function App() {
   const supprimer = useMutation({
     mutationFn: (carrefour: CarrefourResume) => api.supprimerCarrefour(carrefour.id),
     onSuccess: (_, carrefour) => {
-      setSelection((choix) => (choix?.carrefour.id === carrefour.id ? null : choix))
+      abandonnerBrouillons(carrefour.id)
+      setConfiguration((ouverte) => (ouverte?.carrefour.id === carrefour.id ? null : ouverte))
       return rafraichir()
     },
     onError: (erreur) => window.alert(erreur.message),
@@ -220,23 +218,17 @@ function App() {
 
   const feuxLibres = feux.data?.features.filter((f) => f.properties.carrefour_id === null).length
 
-  // La fiche suit les données à jour du carrefour (nombre de feux après une modification…).
-  const carrefourSelectionne = selection
-    ? (carrefours.data?.features.find((f) => f.id === selection.carrefour.id)?.properties ?? selection.carrefour)
+  // Le résumé suit les données à jour du carrefour ouvert (nombre de feux après une modification…).
+  const carrefourOuvert = configuration
+    ? (carrefours.data?.features.find((f) => f.id === configuration.carrefour.id)?.properties ?? configuration.carrefour)
     : null
 
+  /** Un clic sur un carrefour l'ouvre en édition, à la place de celui qui l'était. */
   const configurer = (choix: CarrefourChoisi) => {
     setEdition(null)
-    setSelection(choix)
     setConfiguration(choix)
   }
   const reprendre = (b: BrouillonsCarrefour) => configurer({ carrefour: b.carrefour, position: b.position })
-
-  /** Un clic sur un carrefour remplace celui qu'on regarde : sa fiche, ou sa configuration. */
-  const selectionner = (choix: CarrefourChoisi | null) => {
-    if (configuration) return choix && configurer(choix)
-    setSelection(choix)
-  }
 
   const confirmerSuppression = (carrefour: CarrefourResume) => {
     if (window.confirm(`Supprimer « ${carrefour.nom} » ? Ses feux redeviendront libres.`)) supprimer.mutate(carrefour)
@@ -277,7 +269,6 @@ function App() {
   const ouvrirAnalyseIa = useCallback((analyse: AnalyseIa) => {
     const choix = { carrefour: analyse.carrefour, position: analyse.position }
     setEdition(null)
-    setSelection(choix)
     setConfiguration({ ...choix, ouvrirAnalyseIa: { id: analyse.id } })
   }, [])
 
@@ -300,11 +291,6 @@ function App() {
     if (configuration || e.ctrlKey || e.metaKey || e.altKey) return
     if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
     const lettre = e.key.toLowerCase()
-    if (!edition && selection) {
-      if (e.key === 'Escape') return setSelection(null)
-      const surLaCarte = e.target === document.body || (e.target instanceof HTMLElement && e.target.classList.contains('maplibregl-canvas'))
-      if (e.key === 'Enter' && surLaCarte) return configurer(selection)
-    }
     if (!edition) return lettre === 'n' && composer()
     if (e.key === 'Escape') return setEdition(null)
     if (lettre === 'r' || lettre === 'v') setEdition({ ...edition, modeRectangle: lettre === 'r' })
@@ -361,8 +347,7 @@ function App() {
                 modeRectangle: false,
               })
             }
-            selection={configuration ? null : (selection?.carrefour.id ?? null)}
-            onSelectionner={selectionner}
+            onOuvrir={configurer}
             configuration={
               configuration && {
                 carrefourId: configuration.carrefour.id,
@@ -394,58 +379,52 @@ function App() {
         <ConfigurationCarrefour
           key={configuration.carrefour.id}
           ref={panneauConfiguration}
-          carrefour={configuration.carrefour}
+          carrefour={carrefourOuvert ?? configuration.carrefour}
           position={configuration.position}
           ciblePopup={ciblePopup}
           onAffichage={setAffichageConfiguration}
           onPlacerFeu={placerFeu}
           ouvrirAnalyseIa={configuration.ouvrirAnalyseIa ?? null}
           onPanneauBas={setPanneauBasOuvert}
+          onModifierFeux={() => {
+            setConfiguration(null)
+            modifier(configuration.carrefour)
+          }}
+          onSupprimer={() => confirmerSuppression(configuration.carrefour)}
           onFermer={() => setConfiguration(null)}
         />
       ) : (
         <>
-          {carrefourSelectionne && selection && !edition ? (
-            <FicheCarrefour
-              carrefour={carrefourSelectionne}
-              brouillons={brouillons.get(carrefourSelectionne.id)}
-              onConfigurer={() => configurer({ carrefour: carrefourSelectionne, position: selection.position })}
-              onModifierFeux={() => modifier(carrefourSelectionne)}
-              onSupprimer={() => confirmerSuppression(carrefourSelectionne)}
-              onFermer={() => setSelection(null)}
-            />
-          ) : (
-            <CarteEnTete
-              position="fixed"
-              top="3"
-              left="3"
-              zIndex="2"
-              w="340px"
-              maxW="calc(100vw - 24px)"
-              surtitre="Besançon Voirie"
-              titre={edition ? (edition.carrefourId ? 'Modifier le carrefour' : 'Composer un carrefour') : 'Inventaire citoyen des feux tricolores'}
-              badges={
-                <>
-                  {sante.isSuccess && <Badge colorPalette="green">API connectée</Badge>}
-                  {sante.isError && <Badge colorPalette="red">API injoignable</Badge>}
-                  {carrefours.data && <Badge colorPalette="gray">{carrefours.data.features.length} carrefour(s) dans la vue</Badge>}
-                  {feuxLibres !== undefined && feuxLibres > 0 && <Badge colorPalette="orange">{feuxLibres} feu(x) à regrouper</Badge>}
-                </>
-              }
-            >
-              {edition && (
-                <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
-                  <PanneauEdition
-                    edition={edition}
-                    enregistrement={{ enCours: enregistrer.isPending, erreur: enregistrer.error?.message ?? null }}
-                    onChanger={setEdition}
-                    onEnregistrer={(nom) => enregistrer.mutate({ edition, nom })}
-                    onAnnuler={() => setEdition(null)}
-                  />
-                </Box>
-              )}
-            </CarteEnTete>
-          )}
+          <CarteEnTete
+            position="fixed"
+            top="3"
+            left="3"
+            zIndex="2"
+            w="340px"
+            maxW="calc(100vw - 24px)"
+            surtitre="Besançon Voirie"
+            titre={edition ? (edition.carrefourId ? 'Modifier le carrefour' : 'Composer un carrefour') : 'Inventaire citoyen des feux tricolores'}
+            badges={
+              <>
+                {sante.isSuccess && <Badge colorPalette="green">API connectée</Badge>}
+                {sante.isError && <Badge colorPalette="red">API injoignable</Badge>}
+                {carrefours.data && <Badge colorPalette="gray">{carrefours.data.features.length} carrefour(s) dans la vue</Badge>}
+                {feuxLibres !== undefined && feuxLibres > 0 && <Badge colorPalette="orange">{feuxLibres} feu(x) à regrouper</Badge>}
+              </>
+            }
+          >
+            {edition && (
+              <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
+                <PanneauEdition
+                  edition={edition}
+                  enregistrement={{ enCours: enregistrer.isPending, erreur: enregistrer.error?.message ?? null }}
+                  onChanger={setEdition}
+                  onEnregistrer={(nom) => enregistrer.mutate({ edition, nom })}
+                  onAnnuler={() => setEdition(null)}
+                />
+              </Box>
+            )}
+          </CarteEnTete>
 
           {edition && (
             <BandeauMode

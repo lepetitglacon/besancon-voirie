@@ -29,6 +29,8 @@ import { useCallback, useEffect, useEffectEvent, useImperativeHandle, useMemo, u
 import { createPortal } from 'react-dom'
 import { useMap } from 'react-map-gl/maplibre'
 import { api } from '../api'
+import { NATURES } from '../carrefour/libelles'
+import { ResumeCarrefour } from '../carrefour/ResumeCarrefour'
 import { Aide, BandeauMode, BarreOutils, CarteEnTete, Chiffre, Indice, Message, notifications, PanneauBas, Valeur, type EtatLampe } from '../ds'
 import { demanderNotificationsSysteme, enFile, useAnalysesIa } from './analysesIa'
 import { lireBrouillons, modifierBrouillons, useBrouillonsCarrefour, type ModificationsBrouillons } from './brouillons'
@@ -145,6 +147,9 @@ interface Props {
   ouvrirAnalyseIa?: { id: string } | null
   /** Le panneau bas s'ouvre ou se ferme : les cartes flottantes du bas se posent au-dessus. */
   onPanneauBas: (ouvert: boolean) => void
+  /** Revient au choix des feux du carrefour. */
+  onModifierFeux: () => void
+  onSupprimer: () => void
   /** Quitte la configuration ; les modifications non enregistrées restent dans la liste des brouillons. */
   onFermer: () => void
 }
@@ -159,7 +164,7 @@ const focusLibre = () => {
   return !actif || actif === document.body || actif.classList.contains('maplibregl-canvas')
 }
 
-export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneauBas, onFermer }: Props) {
+export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneauBas, onModifierFeux, onSupprimer, onFermer }: Props) {
   const queryClient = useQueryClient()
   const [outil, setOutil] = useState<OutilCarte>('selection')
   const [popup, setPopup] = useState<Popup | null>(null)
@@ -676,10 +681,11 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         w="340px"
         maxW="calc(100vw - 24px)"
         pe="10"
-        surtitre="Besançon Voirie · configuration"
+        surtitre={`Besançon Voirie · ${NATURES[carrefour.nature].toLowerCase()}`}
         titre={carrefour.nom}
         badges={
           <>
+            {carrefour.pres_tram && <Badge colorPalette="orange">Tram à proximité</Badge>}
             <Badge colorPalette="gray">{selectionLue ? `Sélection : ${selectionLue}` : 'Aucune sélection'}</Badge>
             {modifications > 0 && (
               <Badge colorPalette="orange">
@@ -706,6 +712,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         >
           ×
         </IconButton>
+        <ResumeCarrefour carrefour={carrefour} onModifierFeux={onModifierFeux} onSupprimer={onSupprimer} mt="1.5" />
         {branches.length > 0 && (
           <HStack gap="2" mt="2">
             <Chiffre valeur={branches.length} libelle="branches" />

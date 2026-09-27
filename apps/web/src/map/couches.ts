@@ -14,7 +14,7 @@ const estTraversee: ExpressionSpecification = ['==', ['get', 'nature'], 'travers
 
 /**
  * Carrefours : disques pleins de loin, halos discrets de près pour laisser voir les feux.
- * Le carrefour sélectionné est cerclé de bleu.
+ * Le carrefour ouvert est cerclé de bleu.
  */
 export function coucheCarrefours(edition: boolean, selection: string | null): CircleLayerSpecification {
   const selectionne: ExpressionSpecification = ['==', ['get', 'id'], selection ?? '']

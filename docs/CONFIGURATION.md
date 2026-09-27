@@ -147,13 +147,12 @@ Dans l'application :
   comme brouillon (confirmation si des modifications ne sont pas enregistrées). La proposition
   est alors marquée consultée : elle quitte la liste au bout d'une heure.
 
-### Sélection et brouillons
+### Ouverture d'un carrefour et brouillons
 
-Un clic sur un carrefour (son disque ou l'un de ses feux) affiche sa fiche dans la carte
-d'en-tête : nature, feux, statut, et les actions « Supprimer », « Feux » et « Configurer »
-(<kbd>Entrée</kbd>). Un clic sur un autre carrefour la remplace, <kbd>Échap</kbd> ou un clic dans
-le vide la ferme. Pendant la configuration, un clic sur un autre carrefour ouvre directement sa
-configuration (sauf pendant le tracé de la zone IA ou le choix des feux d'une ligne).
+Un clic sur un carrefour (son disque ou l'un de ses feux) ouvre directement sa configuration,
+à la place de celle qui était ouverte, sauf pendant le tracé de la zone IA ou le choix des feux
+d'une ligne. La carte d'en-tête résume le carrefour : nature, nombre de feux, statut de la
+programmation, tram à proximité, avec « Feux » (ajouter ou retirer des feux) et « Supprimer ».
 
 Les modifications non enregistrées (branches, lignes de feux, programme) sont gardées par
 carrefour (`configuration/brouillons.ts`) : quitter la configuration ou passer à un autre
