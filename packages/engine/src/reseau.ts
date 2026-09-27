@@ -108,6 +108,9 @@ export interface BoutAuNoeud {
   azimut: number;
   arrivent: number;
   repartent: number;
+  /** Type de chaque voie qui arrive, puis qui repart (rang 0 = la plus à gauche). */
+  types_arrivent: TypeVoieReseau[];
+  types_repartent: TypeVoieReseau[];
 }
 
 /** Liaison d'une voie qui arrive au nœud vers une voie qui en repart (rangs dans chaque sens). */
@@ -116,6 +119,11 @@ export interface Liaison {
   voie_de: number;
   vers: string;
   voie_vers: number;
+}
+
+/** Types des `nombre` voies d'un sens : ceux saisis, complétés par des voies générales. */
+export function typesVoies(nombre: number, types: readonly TypeVoieReseau[] | null | undefined): TypeVoieReseau[] {
+  return Array.from({ length: nombre }, (_, rang) => types?.[rang] ?? 'generale');
 }
 
 /** Tronçons qui touchent le nœud, avec leurs voies et leur direction (mesurée à 10 m). */
@@ -140,21 +148,47 @@ export function boutsAuNoeud(
         const repere = repereLocal(depuis[0]!);
         const xy = depuis.map(repere.versXY);
         const loin = raccourcir(xy, Math.min(10, longueurXY(xy) * 0.9), 0)[0]!;
+        // Au bout `vers`, les voies du sens du tracé arrivent ; au bout `de`, elles repartent.
+        const avant = typesVoies(t.voies_avant, t.types_avant);
+        const arriere = typesVoies(t.voies_arriere, t.types_arriere);
+        const [arrivent, repartent] = extremite === 'vers' ? [avant, arriere] : [arriere, avant];
         return {
           troncon: t.id,
           extremite,
           azimut: ((Math.atan2(loin[0], loin[1]) * 180) / Math.PI + 360) % 360,
-          arrivent: extremite === 'vers' ? t.voies_avant : t.voies_arriere,
-          repartent: extremite === 'vers' ? t.voies_arriere : t.voies_avant,
+          arrivent: arrivent.length,
+          repartent: repartent.length,
+          types_arrivent: arrivent,
+          types_repartent: repartent,
         };
       }),
   );
 }
 
+/** Rangs des voies d'un type (vélo) ou des autres (circulation générale, bus, tram). */
+const rangs = (types: readonly TypeVoieReseau[], velo: boolean) =>
+  types.flatMap((type, rang) => ((type === 'velo') === velo ? [rang] : []));
+
+/** Paires proposées entre deux groupes de voies, selon la direction du mouvement. */
+function paires(sources: readonly number[], cibles: readonly number[], direction: string, prolongement: boolean): Array<[number, number]> {
+  if (sources.length === 0 || cibles.length === 0) return [];
+  const indices: Array<[number, number]> =
+    prolongement || direction === 'tout_droit'
+      ? liensParDefaut(sources.length, cibles.length)
+      : direction === 'gauche'
+        ? [[0, 0]]
+        : [[sources.length - 1, cibles.length - 1]];
+  return indices.map(([i, j]) => [sources[i]!, cibles[j]!]);
+}
+
 /**
  * Liaisons proposées à un nœud, comme les connexions d'un carrefour : tout droit voie à voie,
  * tourne-à-gauche depuis la voie de gauche vers la voie de gauche, tourne-à-droite de droite à
- * droite ; pas de demi-tour. Deux tronçons seuls se prolongent voie à voie.
+ * droite ; pas de demi-tour (pas même vers l'autre chaussée d'un boulevard). Deux tronçons seuls
+ * se prolongent voie à voie. Les voies vélo se
+ * relient entre elles ; sans voie vélo en face, un vélo rejoint la voie de droite (de gauche
+ * pour tourner à gauche), et une piste cyclable part de la voie de droite d'une rue sans voie
+ * vélo. Les voitures ne sont jamais envoyées sur une voie vélo.
  */
 export function liaisonsParDefaut(bouts: readonly BoutAuNoeud[]): Liaison[] {
   const liaisons: Liaison[] = [];
@@ -164,13 +198,17 @@ export function liaisonsParDefaut(bouts: readonly BoutAuNoeud[]): Liaison[] {
     for (const b of bouts) {
       if (b === a || b.repartent === 0 || b.troncon === a.troncon) continue;
       const direction = directionMouvement(a.azimut, b.azimut);
-      const paires: Array<[number, number]> =
-        prolongement || direction === 'tout_droit'
-          ? liensParDefaut(a.arrivent, b.repartent)
-          : direction === 'gauche'
-            ? [[0, 0]]
-            : [[a.arrivent - 1, b.repartent - 1]];
-      for (const [i, j] of paires) liaisons.push({ de: a.troncon, voie_de: i, vers: b.troncon, voie_vers: j });
+      if (direction === 'demi_tour' && !prolongement) continue;
+      const [motA, motB] = [rangs(a.types_arrivent, false), rangs(b.types_repartent, false)];
+      const [veloA, veloB] = [rangs(a.types_arrivent, true), rangs(b.types_repartent, true)];
+      const liste = paires(motA, motB, direction, prolongement);
+      if (veloA.length > 0 && veloB.length > 0) liste.push(...paires(veloA, veloB, direction, prolongement));
+      else if (veloA.length > 0 && motB.length > 0) {
+        for (const i of veloA) liste.push([i, direction === 'gauche' ? motB[0]! : motB.at(-1)!]);
+      } else if (veloB.length > 0 && motB.length === 0 && motA.length > 0) {
+        liste.push([motA.at(-1)!, direction === 'gauche' ? veloB[0]! : veloB.at(-1)!]);
+      }
+      for (const [i, j] of liste) liaisons.push({ de: a.troncon, voie_de: i, vers: b.troncon, voie_vers: j });
     }
   }
   return liaisons;

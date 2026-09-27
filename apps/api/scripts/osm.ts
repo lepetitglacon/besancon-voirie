@@ -1,5 +1,6 @@
 /**
- * Import OpenStreetMap — docs/ARCHITECTURE.md §5.
+ * Import OpenStreetMap — docs/ARCHITECTURE.md §5. Les voies circulables, les pistes cyclables,
+ * les feux et les passages piétons servent aussi à semer le réseau routier (docs/RESEAU.md).
  *
  * Usage (depuis apps/api, Node 24+) :
  *   node scripts/osm.ts import [--refresh]   télécharge via Overpass (ou relit le cache
@@ -75,7 +76,15 @@ node["highway"="traffic_signals"];
 out body;
 node["crossing"="traffic_signals"];
 out body;
+node["highway"="crossing"];
+out body;
+node["crossing"]["crossing"!="no"];
+out body;
 way["highway"~"^(${voies})(_link)?$"];
+out body geom;
+way["highway"="cycleway"];
+out body geom;
+way["highway"="path"]["bicycle"="designated"];
 out body geom;
 way["railway"="tram"];
 out body geom;`;
@@ -99,6 +108,8 @@ export interface DonneesOsm {
   horodatage: string | null;
   commune: { id: number; nom: string; contours: Array<Array<[number, number]>> };
   signaux: Signal[];
+  /** Passages piétons (`highway=crossing` ou `crossing=*`), avec ou sans feux. */
+  passages: Signal[];
   voies: Ligne[];
   trams: Ligne[];
 }
@@ -108,6 +119,7 @@ const versLonLat = (points: Coord[]): Array<[number, number]> => points.map(({ l
 /** Répartit la réponse Overpass par nature d'objet, sans doublons. */
 export function trierElements(reponse: ReponseOverpass): DonneesOsm {
   const signaux = new Map<number, Signal>();
+  const passages = new Map<number, Signal>();
   const voies = new Map<number, Ligne>();
   const trams = new Map<number, Ligne>();
   let commune: DonneesOsm['commune'] | undefined;
@@ -121,9 +133,9 @@ export function trierElements(reponse: ReponseOverpass): DonneesOsm {
         .map((m) => versLonLat(m.geometry!));
       commune = { id: element.id, nom: tags.name ?? 'Besançon', contours };
     } else if (element.type === 'node') {
-      if (tags.highway === 'traffic_signals' || tags.crossing === 'traffic_signals') {
-        signaux.set(element.id, { id: element.id, tags, lon: element.lon, lat: element.lat });
-      }
+      const point = { id: element.id, tags, lon: element.lon, lat: element.lat };
+      if (tags.highway === 'traffic_signals' || tags.crossing === 'traffic_signals') signaux.set(element.id, point);
+      if (tags.highway === 'crossing' || (tags.crossing && tags.crossing !== 'no')) passages.set(element.id, point);
     } else if (element.geometry?.length >= 2) {
       const ligne = { id: element.id, tags, nodes: element.nodes, coords: versLonLat(element.geometry) };
       if (tags.railway === 'tram') trams.set(element.id, ligne);
@@ -138,6 +150,7 @@ export function trierElements(reponse: ReponseOverpass): DonneesOsm {
     horodatage: reponse.osm3s?.timestamp_osm_base ?? null,
     commune,
     signaux: [...signaux.values()],
+    passages: [...passages.values()],
     voies: [...voies.values()],
     trams: [...trams.values()],
   };
@@ -185,6 +198,7 @@ export interface BilanFeux {
 
 export interface BilanImport {
   signaux: number;
+  passages: number;
   voies: number;
   trams: number;
   feux: BilanFeux;
@@ -223,10 +237,11 @@ export async function chargerOsm(client: pg.ClientBase, donnees: DonneesOsm): Pr
   await client.query('BEGIN');
   try {
     await client.query(`
-      DROP TABLE IF EXISTS osm_meta, osm_commune, osm_signal, osm_way, osm_tram;
+      DROP TABLE IF EXISTS osm_meta, osm_commune, osm_signal, osm_passage, osm_way, osm_tram;
       CREATE TABLE osm_meta (cle text PRIMARY KEY, valeur text);
       CREATE TABLE osm_commune (osm_id bigint PRIMARY KEY, nom text NOT NULL, geom geometry(MultiPolygon, 4326) NOT NULL);
       CREATE TABLE osm_signal (osm_id bigint PRIMARY KEY, tags jsonb NOT NULL, geom geometry(Point, 4326) NOT NULL);
+      CREATE TABLE osm_passage (osm_id bigint PRIMARY KEY, tags jsonb NOT NULL, geom geometry(Point, 4326) NOT NULL);
       CREATE TABLE osm_way (osm_id bigint PRIMARY KEY, tags jsonb NOT NULL, nodes bigint[] NOT NULL, geom geometry(LineString, 4326) NOT NULL);
       CREATE TABLE osm_tram (osm_id bigint PRIMARY KEY, tags jsonb NOT NULL, nodes bigint[] NOT NULL, geom geometry(LineString, 4326) NOT NULL);
     `);
@@ -246,12 +261,17 @@ export async function chargerOsm(client: pg.ClientBase, donnees: DonneesOsm): Pr
     );
     if (commune[0]?.vide !== false) throw new Error('Contour de la commune impossible à reconstituer');
 
-    await client.query(
-      `INSERT INTO osm_signal (osm_id, tags, geom)
-       SELECT (e->>'id')::bigint, e->'tags', ST_SetSRID(ST_MakePoint((e->>'lon')::float8, (e->>'lat')::float8), 4326)
-       FROM jsonb_array_elements($1::jsonb) e`,
-      [JSON.stringify(donnees.signaux)],
-    );
+    for (const [table, points] of [
+      ['osm_signal', donnees.signaux],
+      ['osm_passage', donnees.passages],
+    ] as const) {
+      await client.query(
+        `INSERT INTO ${table} (osm_id, tags, geom)
+         SELECT (e->>'id')::bigint, e->'tags', ST_SetSRID(ST_MakePoint((e->>'lon')::float8, (e->>'lat')::float8), 4326)
+         FROM jsonb_array_elements($1::jsonb) e`,
+        [JSON.stringify(points)],
+      );
+    }
 
     for (const [table, lignes] of [
       ['osm_way', donnees.voies],
@@ -285,7 +305,13 @@ export async function chargerOsm(client: pg.ClientBase, donnees: DonneesOsm): Pr
 
     const feux = await synchroniserFeux(client);
     await client.query('COMMIT');
-    return { signaux: donnees.signaux.length, voies: donnees.voies.length, trams: donnees.trams.length, feux };
+    return {
+      signaux: donnees.signaux.length,
+      passages: donnees.passages.length,
+      voies: donnees.voies.length,
+      trams: donnees.trams.length,
+      feux,
+    };
   } catch (erreur) {
     await client.query('ROLLBACK');
     throw erreur;

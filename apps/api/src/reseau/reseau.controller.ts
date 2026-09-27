@@ -15,10 +15,13 @@ import {
 } from '@nestjs/common';
 import {
   BboxQuery,
+  CoupeTroncon,
   FichierSumo,
+  ModificationNoeud,
   ModificationTroncon,
   NouveauTroncon,
   SaisieLiaisons,
+  SemisReseau,
   type Bbox,
 } from '@voirie/schema';
 import { EditionGuard } from '../common/edition.guard.js';
@@ -35,12 +38,15 @@ export class ReseauController {
     return this.reseau.dansEmprise(bbox);
   }
 
-  /** POST /api/reseau/generer : (re)crée les tronçons OSM, garde ceux corrigés à la main. */
-  @Post('generer')
+  /**
+   * POST /api/reseau/semer { reinitialiser? } : sème le réseau depuis OSM, une seule fois (409
+   * ensuite) ; `reinitialiser` efface tout le réseau avant, corrections comprises.
+   */
+  @Post('semer')
   @UseGuards(EditionGuard)
   @HttpCode(200)
-  generer() {
-    return this.reseau.generer();
+  semer(@Body(new ZodValidationPipe(SemisReseau)) { reinitialiser }: SemisReseau) {
+    return this.reseau.semer(reinitialiser);
   }
 
   @Post('troncons')
@@ -60,6 +66,28 @@ export class ReseauController {
   @HttpCode(204)
   supprimer(@Param('id', ParseUUIDPipe) id: string) {
     return this.reseau.supprimer(id);
+  }
+
+  /** POST /api/reseau/troncons/:id/couper { position } : nouveau nœud au point le plus proche. */
+  @Post('troncons/:id/couper')
+  @UseGuards(EditionGuard)
+  couper(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(CoupeTroncon)) { position }: CoupeTroncon) {
+    return this.reseau.couper(id, position);
+  }
+
+  /** PATCH /api/reseau/noeuds/:id : position, ligne d'arrêt à feux, passage piéton, carrefour. */
+  @Patch('noeuds/:id')
+  @UseGuards(EditionGuard)
+  modifierNoeud(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(ModificationNoeud)) modification: ModificationNoeud) {
+    return this.reseau.modifierNoeud(id, modification);
+  }
+
+  /** DELETE /api/reseau/noeuds/:id : retire un nœud entre deux tronçons de mêmes voies (ils fusionnent). */
+  @Delete('noeuds/:id')
+  @UseGuards(EditionGuard)
+  @HttpCode(204)
+  fusionner(@Param('id', ParseUUIDPipe) id: string) {
+    return this.reseau.fusionner(id);
   }
 
   /** PUT /api/reseau/noeuds/:id/liaisons { liaisons: [...] | null } : liaisons voie à voie d'un nœud. */

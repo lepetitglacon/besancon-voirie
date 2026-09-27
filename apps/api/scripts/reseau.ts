@@ -2,7 +2,8 @@
  * Réseau routier — docs/RESEAU.md. Client de l'API en cours d'exécution (`pnpm dev`).
  *
  * Usage (depuis apps/api, Node 24+) :
- *   node scripts/reseau.ts generer                  (re)crée les tronçons depuis les voies OSM importées
+ *   node scripts/reseau.ts semer [--reinitialiser]  sème le réseau depuis les données OSM importées (une seule
+ *                                                   fois ; --reinitialiser efface tout le réseau avant)
  *   node scripts/reseau.ts sumo [--bbox=o,s,e,n]    écrit data/sumo/reseau.{nod,edg,con}.xml et reseau.netccfg
  *        [--sortie=dossier]                         puis : cd data/sumo && netconvert -c reseau.netccfg
  *   --api=http://localhost:3000                     URL de l'API (par défaut : API_PORT du .env)
@@ -31,9 +32,16 @@ async function principal(commande: string | undefined, options: string[]) {
   const env = parseEnv(readFileSync(`${racine}.env`, 'utf8'));
   const api = option(options, 'api') ?? `http://localhost:${process.env.API_PORT ?? env.API_PORT ?? 3000}`;
 
-  if (commande === 'generer') {
-    console.log('Génération du réseau depuis OSM…');
-    const bilan = await (await appeler(`${api}/api/reseau/generer`, { method: 'POST' })).json();
+  if (commande === 'semer') {
+    const reinitialiser = options.includes('--reinitialiser');
+    console.log(reinitialiser ? 'Réseau effacé, nouveau semis depuis OSM…' : 'Semis du réseau depuis OSM…');
+    const bilan = await (
+      await appeler(`${api}/api/reseau/semer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reinitialiser }),
+      })
+    ).json();
     console.log(bilan);
   } else if (commande === 'sumo') {
     const bbox = option(options, 'bbox');
@@ -46,7 +54,7 @@ async function principal(commande: string | undefined, options: string[]) {
     }
     console.log(`Puis : cd ${sortie} && netconvert -c reseau.netccfg`);
   } else {
-    console.error('Usage : node scripts/reseau.ts generer | sumo [--bbox=o,s,e,n] [--sortie=dossier] [--api=url]');
+    console.error('Usage : node scripts/reseau.ts semer [--reinitialiser] | sumo [--bbox=o,s,e,n] [--sortie=dossier] [--api=url]');
     process.exitCode = 1;
   }
 }

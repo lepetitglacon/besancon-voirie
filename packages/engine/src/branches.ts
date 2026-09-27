@@ -38,6 +38,12 @@ export function codesBranches(azimuts: readonly number[]): string[] {
 }
 
 /**
+ * Braquage (°) au-delà duquel on revient sur ses pas : demi-tour, même entre deux branches
+ * distinctes (les deux chaussées d'un boulevard).
+ */
+const DEMI_TOUR_MIN = 150;
+
+/**
  * Direction du mouvement entre une branche d'entrée et une branche de sortie.
  * Angle de braquage t = azimut de sortie − (azimut d'entrée + 180°).
  */
@@ -45,6 +51,7 @@ export function directionMouvement(azimutEntree: number, azimutSortie: number, m
   if (memeBranche) return 'demi_tour';
   const t = normaliserAngle(azimutSortie - (azimutEntree + 180));
   if (Math.abs(t) <= TOLERANCE_TOUT_DROIT) return 'tout_droit';
+  if (Math.abs(t) >= DEMI_TOUR_MIN) return 'demi_tour';
   return t > 0 ? 'droite' : 'gauche';
 }
 

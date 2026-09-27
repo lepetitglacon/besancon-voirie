@@ -20,7 +20,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import type { Anneau, ArcGraphe, Controleur, Etape, IntervalleVert, Liaison, Plage } from '@voirie/schema';
+import type { Anneau, ArcGraphe, Controleur, Etape, IntervalleVert, Liaison, Plage, TypeVoie } from '@voirie/schema';
 
 // Tables du projet — voir docs/ARCHITECTURE.md §4.
 // Les tables issues d'OpenStreetMap (osm_*) sont gérées par l'import, pas par Drizzle.
@@ -166,6 +166,8 @@ export const connexion = pgTable(
     voieSortieId: uuid('voie_sortie_id')
       .notNull()
       .references(() => voie.id, { onDelete: 'cascade' }),
+    /** Chemin suivi à travers un carrefour de plusieurs nœuds (vue tirée du réseau) ; null : courbe entre les voies. */
+    trace: ligne('trace'),
   },
   (t) => [unique().on(t.voieEntreeId, t.voieSortieId)],
 );
@@ -344,10 +346,11 @@ export const analyseIa = pgTable(
 // ── Réseau routier — docs/RESEAU.md ──
 
 export const sourceReseau = pgEnum('source_reseau', ['osm', 'manuel']);
+export const traverseePieton = pgEnum('traversee_pieton', ['feux', 'marquee', 'non_marquee']);
 
 /**
- * Nœud du réseau : intersection ou bout de voie OSM, point posé à la main. Un carrefour est un
- * groupe de nœuds (`carrefour_id`).
+ * Nœud du réseau : intersection, feu ou passage piéton OSM (les voies y sont coupées), bout de
+ * voie, point posé à la main. Un carrefour est un groupe de nœuds (`carrefour_id`).
  */
 export const noeud = pgTable(
   'noeud',
@@ -358,6 +361,10 @@ export const noeud = pgTable(
     geom: geometry('geom', { type: 'point', mode: 'xy', srid: 4326 }).notNull(),
     /** Liaisons voie à voie saisies à ce nœud ; null : celles proposées par défaut. */
     liaisons: jsonb('liaisons').$type<Liaison[]>(),
+    /** Ligne d'arrêt à feux des véhicules : feu OSM `highway=traffic_signals` sur la voie, ou saisi. */
+    feux: boolean('feux').notNull().default(false),
+    /** Passage piéton sur le nœud ; null : aucun. */
+    pieton: traverseePieton('pieton'),
     creeLe: creeLe(),
   },
   (t) => [index('noeud_geom_idx').using('gist', t.geom), index('noeud_carrefour_idx').on(t.carrefourId)],
@@ -381,8 +388,8 @@ export const troncon = pgTable(
     geom: ligne('geom').notNull(),
     osmWayId: bigint('osm_way_id', { mode: 'number' }),
     /**
-     * Nœuds OSM d'origine du tronçon (découpe aux intersections) : ils l'identifient à la
-     * régénération, même après une coupe.
+     * Nœuds OSM d'origine du tronçon (découpe aux intersections, feux et passages piétons) : sa
+     * provenance, gardée même après une coupe.
      */
     osmDe: bigint('osm_de', { mode: 'number' }),
     osmVers: bigint('osm_vers', { mode: 'number' }),
@@ -390,11 +397,16 @@ export const troncon = pgTable(
     highway: text('highway'),
     voiesAvant: smallint('voies_avant').notNull().default(1),
     voiesArriere: smallint('voies_arriere').notNull().default(1),
+    /** Type de chaque voie par sens, rang 0 = la plus à gauche ; null : toutes générales. */
+    typesAvant: jsonb('types_avant').$type<TypeVoie[]>(),
+    typesArriere: jsonb('types_arriere').$type<TypeVoie[]>(),
     vitesseKmh: smallint('vitesse_kmh'),
     source: sourceReseau('source').notNull(),
-    /** Tronçon OSM corrigé à la main : la régénération depuis OSM le garde tel quel. */
+    /** Tags de la voie OSM au semis : de quoi comparer avec un nouvel import. */
+    osmTags: jsonb('osm_tags').$type<Record<string, string>>(),
+    /** Tronçon OSM corrigé à la main (un nouvel import OSM ne doit pas l'écraser). */
     modifie: boolean('modifie').notNull().default(false),
-    /** Tronçon OSM supprimé à la main : masqué, et pas recréé à la régénération. */
+    /** Tronçon OSM supprimé à la main : masqué, gardé pour ne pas le reproposer. */
     supprime: boolean('supprime').notNull().default(false),
     brancheDe: text('branche_de'),
     brancheVers: text('branche_vers'),

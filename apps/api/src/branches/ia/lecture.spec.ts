@@ -32,6 +32,8 @@ const detection: DetectionBranches = {
   mouvements: [],
   fleches: {},
   alertes: [],
+  graphe: false,
+  traces: {},
   sources: { S: 'defaut' },
 };
 

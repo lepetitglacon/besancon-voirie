@@ -12,15 +12,15 @@ const troncon = (id: string, de: string, vers: string, points: LonLat[], avant: 
   id,
   geometry: { type: 'LineString', coordinates: points },
   properties: {
-    id, nom: null, highway: null, voies_avant: avant, voies_arriere: arriere, vitesse_kmh: null, source: 'osm', modifie: false,
-    noeud_de: de, noeud_vers: vers, carrefour_de: null, carrefour_vers: null,
+    id, nom: null, highway: null, voies_avant: avant, voies_arriere: arriere, types_avant: null, types_arriere: null, vitesse_kmh: null,
+    source: 'osm', modifie: false, noeud_de: de, noeud_vers: vers, carrefour_de: null, carrefour_vers: null, branche_de: null, branche_vers: null,
   } satisfies TronconResume,
 })
 const noeud = (id: string, degre: number, carrefour: string | null = null): ReseauGeoJson['noeuds']['features'][number] => ({
   type: 'Feature',
   id,
   geometry: { type: 'Point', coordinates: origine },
-  properties: { id, carrefour_id: carrefour, osm_node_id: null, degre, liaisons: null },
+  properties: { id, carrefour_id: carrefour, osm_node_id: null, feux: false, pieton: null, degre, liaisons: null },
 })
 
 describe('voies des rues', () => {

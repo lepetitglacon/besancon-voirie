@@ -95,16 +95,16 @@ export function useModeReseau({ actif, bbox, zoom }: { actif: boolean; bbox: Bbo
   }
 
   const generation = useMutation({
-    mutationFn: api.genererReseau,
+    mutationFn: (reinitialiser: boolean) => api.semerReseau(reinitialiser),
     onSuccess: async (bilan) => {
       await rafraichir()
       notifications.create({
         type: 'success',
-        title: 'Réseau généré depuis OSM',
-        description: `${bilan.troncons} tronçons, ${bilan.noeuds} nœuds ; ${bilan.conserves} corrections gardées.`,
+        title: 'Réseau semé depuis OSM',
+        description: `${bilan.troncons} tronçons (${bilan.cyclables} cyclables), ${bilan.noeuds} nœuds, ${bilan.feux} feux, ${bilan.pieton} passages piétons ; ${bilan.carrefours} carrefour(s) retrouvé(s).`,
       })
     },
-    onError: (erreur) => notifications.create({ type: 'error', title: 'Génération impossible', description: erreur.message }),
+    onError: (erreur) => notifications.create({ type: 'error', title: 'Semis impossible', description: erreur.message }),
   })
 
   const terminer = (suivant: Trace) => {

@@ -46,6 +46,11 @@ export interface GeometrieCarrefour {
   traversees: ReadonlyMap<string, Segment>;
   /** Giratoire : codes des tronçons d'anneau (R1, R2…). */
   troncons?: ReadonlySet<string>;
+  /**
+   * Tracé réel de certaines connexions (« de>vers »), à la place de la courbe entre leurs deux
+   * voies : chemin à travers un carrefour de plusieurs nœuds (docs/RESEAU.md §4).
+   */
+  traces?: ReadonlyMap<string, readonly LonLat[]>;
 }
 
 export interface ConflitLignes {
@@ -76,7 +81,10 @@ export function trajectoiresParMouvement(geometrie: GeometrieCarrefour): Map<str
     const vers = lireCleVoie(connexion.vers);
     if (!entree || !sortie || !de || !vers) continue;
     const mouvement = `${de.branche}>${vers.branche}`;
-    const trajectoire = { cle: cleConnexion(connexion), de: connexion.de, vers: connexion.vers, courbe: courbeConnexionXY(entree, sortie, repere) };
+    const cle = cleConnexion(connexion);
+    const trace = geometrie.traces?.get(cle);
+    const courbe = trace && trace.length >= 2 ? trace.map(repere.versXY) : courbeConnexionXY(entree, sortie, repere);
+    const trajectoire = { cle, de: connexion.de, vers: connexion.vers, courbe };
     parMouvement.set(mouvement, [...(parMouvement.get(mouvement) ?? []), trajectoire]);
   }
   return parMouvement;

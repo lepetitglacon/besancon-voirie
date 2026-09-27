@@ -23,7 +23,7 @@
     "db:verifier": "pnpm --filter api db:verifier",
     "osm:import": "pnpm --filter api osm:import",
     "osm:seed": "pnpm --filter api osm:seed",
-    "reseau:generer": "pnpm --filter api reseau:generer",
+    "reseau:semer": "pnpm --filter api reseau:semer",
     "reseau:sumo": "pnpm --filter api reseau:sumo"
   },
   "devDependencies": {

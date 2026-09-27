@@ -1,4 +1,4 @@
-/** Contenu de la carte d'en-tête de l'éditeur des voies : aide, légende, génération OSM, export SUMO. */
+/** Contenu de la carte d'en-tête de l'éditeur des voies : aide, légende, semis OSM, export SUMO. */
 import { Box, Button, HStack, Kbd, Link, Stack, Text } from '@chakra-ui/react'
 import type { Bbox } from '@voirie/schema'
 import { api } from '../api'
@@ -21,7 +21,7 @@ interface Props {
   nbTroncons: number | undefined
   tronque: boolean
   bbox: Bbox | undefined
-  generation: { enCours: boolean; onGenerer: () => void }
+  generation: { enCours: boolean; onGenerer: (reinitialiser: boolean) => void }
 }
 
 export function EnTeteReseau({ outil, visible, nbTroncons, tronque, bbox, generation }: Props) {
@@ -61,22 +61,31 @@ export function EnTeteReseau({ outil, visible, nbTroncons, tronque, bbox, genera
       </HStack>
       {!visible && <Message ton="avertissement">Zoomez (niveau {ZOOM_MIN_RESEAU} au moins) pour voir le réseau.</Message>}
       {visible && nbTroncons === 0 && (
-        <Message ton="avertissement">Aucun tronçon ici : générez le réseau depuis OSM (après `pnpm osm:import`).</Message>
+        <Message ton="avertissement">Aucun tronçon ici : semez le réseau depuis OSM (après `pnpm osm:import`).</Message>
       )}
       {tronque && <Message ton="avertissement">Trop de tronçons dans la vue : seule une partie est affichée.</Message>}
       <HStack gap="2" justify="space-between">
         <Text textStyle="xs" color="fg.muted">
           {nbTroncons !== undefined && visible ? `${nbTroncons} tronçon(s) dans la vue` : ''}
         </Text>
-        <Button
-          size="xs"
-          variant="outline"
-          loading={generation.enCours}
-          title="Recrée les tronçons OSM ; ceux corrigés, supprimés ou tracés à la main sont gardés"
-          onClick={() => window.confirm('Régénérer le réseau depuis OSM ? Vos corrections sont gardées.') && generation.onGenerer()}
-        >
-          ⟳ Générer depuis OSM
-        </Button>
+        {nbTroncons === 0 ? (
+          <Button size="xs" variant="outline" loading={generation.enCours} title="Une seule fois : le réseau se corrige ensuite à la main" onClick={() => generation.onGenerer(false)}>
+            ⟳ Semer depuis OSM
+          </Button>
+        ) : (
+          <Button
+            size="xs"
+            variant="plain"
+            colorPalette="red"
+            loading={generation.enCours}
+            title="Efface tout le réseau (corrections, liaisons, nœuds des carrefours) et le sème de nouveau depuis OSM"
+            onClick={() =>
+              window.confirm('Effacer tout le réseau, corrections comprises, et le semer de nouveau depuis OSM ?') && generation.onGenerer(true)
+            }
+          >
+            Réinitialiser depuis OSM
+          </Button>
+        )}
       </HStack>
       <Box>
         <Text textStyle="xs" fontWeight="semibold" mb="1">

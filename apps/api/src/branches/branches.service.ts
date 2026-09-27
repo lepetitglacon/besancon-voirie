@@ -1,6 +1,7 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import {
+  azimutSegment,
   azimutsVoiesGiratoire,
   branchesTroncons,
   cleVoie,
@@ -67,12 +68,17 @@ function sensDe(branche: Branche): SensBranche {
   return entrantes && sortantes ? 'double' : entrantes ? 'entrant' : 'sortant';
 }
 
-/** Complète branches et connexions avec ce qui s'en déduit : sens, mouvements, flèches, alertes. */
+/**
+ * Complète branches et connexions avec ce qui s'en déduit : sens, mouvements, flèches, alertes.
+ * `reseau` : carrefour bâti sur le réseau (docs/RESEAU.md §4), avec le tracé réel de ses
+ * connexions ; le sens des mouvements s'y lit sur les voies elles-mêmes.
+ */
 export function deduire(
   centre: [number, number],
   branches: Branche[],
   connexions: Connexion[],
   anneau: Anneau | null = null,
+  reseau: { traces: Record<string, Array<[number, number]>> } | null = null,
 ): BranchesCarrefour {
   const avecDepart = new Set(connexions.map((c) => c.de));
   const alertes = branches.flatMap((b) =>
@@ -87,7 +93,9 @@ export function deduire(
       ...branches.filter((b) => !b.troncon && !b.noeud && !sitePropre(b)).map((b) => `${b.code} : rue raccordée à aucun nœud de l'anneau`),
     );
   }
-  const azimutsVoies = azimutsVoiesGiratoire(branches, anneau);
+  const azimutsVoies = reseau
+    ? new Map(branches.flatMap((b) => b.voies.map((v) => [cleVoie(b.code, v.sens, v.rang), azimutSegment(v.geom)] as const)))
+    : azimutsVoiesGiratoire(branches, anneau);
   return {
     centre,
     branches: branches.map((b): BrancheLue => ({ ...b, sens: sensDe(b) })),
@@ -96,7 +104,57 @@ export function deduire(
     mouvements: mouvementsDepuisConnexions(branches, connexions, azimutsVoies),
     fleches: flechesParVoie(branches, connexions, azimutsVoies),
     alertes,
+    graphe: reseau !== null,
+    traces: reseau?.traces ?? {},
   };
+}
+
+/** Connexion à écrire, avec le chemin réel qu'elle suit dans un carrefour de plusieurs nœuds. */
+export type ConnexionTracee = Connexion & { trace?: LonLat[] | null };
+
+/** Remplace branches, voies, passages piétons, connexions et anneau du carrefour (dans une transaction). */
+export async function ecrireBranches(
+  tx: Executeur,
+  carrefourId: string,
+  { branches, connexions, anneau }: { branches: Branche[]; connexions: ConnexionTracee[]; anneau: Anneau | null },
+): Promise<void> {
+  const ligne = (coords: unknown) => (coords ? JSON.stringify({ type: 'LineString', coordinates: coords }) : null);
+  await tx.execute(sql`UPDATE carrefour SET anneau = ${anneau ? JSON.stringify(anneau) : null}::jsonb WHERE id = ${carrefourId}`);
+  await tx.execute(sql`DELETE FROM branche WHERE carrefour_id = ${carrefourId}`);
+  const idsVoies = new Map<string, string>();
+  for (const b of branches) {
+    const { rows } = await tx.execute<{ id: string }>(sql`
+      INSERT INTO branche (carrefour_id, code, nom, azimut_deg, sens, osm_way_id, geom, traversee, priorite_entree, noeud, troncon)
+      VALUES (${carrefourId}, ${b.code}, ${b.nom}, ${b.azimut}, ${sensDe(b)}, ${b.osm_way_id},
+              ST_SetSRID(ST_GeomFromGeoJSON(${ligne(b.geom)}), 4326),
+              ST_SetSRID(ST_GeomFromGeoJSON(${ligne(b.traversee)}), 4326),
+              ${b.priorite_entree}::priorite_entree, ${b.noeud}, ${b.troncon})
+      RETURNING id
+    `);
+    for (const v of b.voies) {
+      const { rows: voie } = await tx.execute<{ id: string }>(sql`
+        INSERT INTO voie (branche_id, sens, rang, type, geom)
+        VALUES (${rows[0]!.id}, ${v.sens}, ${v.rang}, ${v.type}, ST_SetSRID(ST_GeomFromGeoJSON(${ligne(v.geom)}), 4326))
+        RETURNING id
+      `);
+      idsVoies.set(cleVoie(b.code, v.sens, v.rang), voie[0]!.id);
+    }
+  }
+  for (const c of connexions) {
+    const [entree, sortie] = [idsVoies.get(c.de), idsVoies.get(c.vers)];
+    if (!entree || !sortie) continue;
+    await tx.execute(sql`
+      INSERT INTO connexion (carrefour_id, voie_entree_id, voie_sortie_id, trace)
+      VALUES (${carrefourId}, ${entree}, ${sortie}, ST_SetSRID(ST_GeomFromGeoJSON(${c.trace && c.trace.length >= 2 ? ligne(c.trace) : null}), 4326))
+    `);
+  }
+}
+
+/** Le carrefour est bâti sur le réseau : il a des nœuds. */
+export async function surLeReseau(db: Executeur, carrefourId: string): Promise<boolean> {
+  if (!(await tableExiste(db, 'noeud'))) return false;
+  const { rows } = await db.execute(sql`SELECT 1 FROM noeud WHERE carrefour_id = ${carrefourId} LIMIT 1`);
+  return rows.length > 0;
 }
 
 @Injectable()
@@ -123,15 +181,20 @@ export class BranchesService {
       WHERE b.carrefour_id = ${carrefourId}
       ORDER BY b.azimut_deg
     `);
-    const { rows: connexions } = await this.db.execute<Connexion>(sql`
-      SELECT be.code || ':e' || ve.rang AS de, bs.code || ':s' || vs.rang AS vers
+    const { rows: lues } = await this.db.execute<Connexion & { trace: Array<[number, number]> | null }>(sql`
+      SELECT be.code || ':e' || ve.rang AS de, bs.code || ':s' || vs.rang AS vers,
+             (ST_AsGeoJSON(c.trace)::json)->'coordinates' AS trace
       FROM connexion c
       JOIN voie ve ON ve.id = c.voie_entree_id JOIN branche be ON be.id = ve.branche_id
       JOIN voie vs ON vs.id = c.voie_sortie_id JOIN branche bs ON bs.id = vs.branche_id
       WHERE c.carrefour_id = ${carrefourId}
       ORDER BY 1, 2
     `);
-    return deduire(centre, branches, connexions, anneau);
+    const connexions = lues.map(({ de, vers }) => ({ de, vers }));
+    const reseau = (await surLeReseau(this.db, carrefourId))
+      ? { traces: Object.fromEntries(lues.flatMap((c) => (c.trace ? [[`${c.de}>${c.vers}`, c.trace] as const] : []))) }
+      : null;
+    return deduire(centre, branches, connexions, anneau, reseau);
   }
 
   /**
@@ -202,7 +265,10 @@ export class BranchesService {
     return { ...deduire(centreCarrefour, branches, connexions, anneau), rayon_m: Math.round(rayon), sources: parDefaut };
   }
 
-  /** Remplace branches, voies, passages piétons, connexions et anneau du carrefour. */
+  /**
+   * Remplace branches, voies, passages piétons, connexions et anneau du carrefour. Refusé pour un
+   * carrefour bâti sur le réseau : ses branches se déduisent de ses nœuds.
+   */
   async enregistrer(carrefourId: string, { branches, connexions, anneau }: ConfigurationBranches): Promise<BranchesCarrefour> {
     const horsNoeud = anneau ? liaisonsHorsNoeud(branches, connexions, anneau) : [];
     if (horsNoeud.length > 0) {
@@ -213,35 +279,10 @@ export class BranchesService {
     }
     await this.db.transaction(async (tx) => {
       await this.carrefour(tx, carrefourId); // 404 si le carrefour n'existe pas
-      await tx.execute(sql`UPDATE carrefour SET anneau = ${anneau ? JSON.stringify(anneau) : null}::jsonb WHERE id = ${carrefourId}`);
-      await tx.execute(sql`DELETE FROM branche WHERE carrefour_id = ${carrefourId}`);
-      const idsVoies = new Map<string, string>();
-      for (const b of branches) {
-        const ligne = (coords: unknown) => (coords ? JSON.stringify({ type: 'LineString', coordinates: coords }) : null);
-        const { rows } = await tx.execute<{ id: string }>(sql`
-          INSERT INTO branche (carrefour_id, code, nom, azimut_deg, sens, osm_way_id, geom, traversee, priorite_entree, noeud, troncon)
-          VALUES (${carrefourId}, ${b.code}, ${b.nom}, ${b.azimut}, ${sensDe(b)}, ${b.osm_way_id},
-                  ST_SetSRID(ST_GeomFromGeoJSON(${ligne(b.geom)}), 4326),
-                  ST_SetSRID(ST_GeomFromGeoJSON(${ligne(b.traversee)}), 4326),
-                  ${b.priorite_entree}::priorite_entree, ${b.noeud}, ${b.troncon})
-          RETURNING id
-        `);
-        for (const v of b.voies) {
-          const { rows: voie } = await tx.execute<{ id: string }>(sql`
-            INSERT INTO voie (branche_id, sens, rang, type, geom)
-            VALUES (${rows[0]!.id}, ${v.sens}, ${v.rang}, ${v.type}, ST_SetSRID(ST_GeomFromGeoJSON(${ligne(v.geom)}), 4326))
-            RETURNING id
-          `);
-          idsVoies.set(cleVoie(b.code, v.sens, v.rang), voie[0]!.id);
-        }
+      if (await surLeReseau(tx, carrefourId)) {
+        throw new ConflictException('Carrefour bâti sur le réseau : ses branches se déduisent de ses nœuds et de leurs voies');
       }
-      for (const c of connexions) {
-        // Les clés ont été validées par le schéma : les deux voies existent.
-        await tx.execute(sql`
-          INSERT INTO connexion (carrefour_id, voie_entree_id, voie_sortie_id)
-          VALUES (${carrefourId}, ${idsVoies.get(c.de)!}, ${idsVoies.get(c.vers)!})
-        `);
-      }
+      await ecrireBranches(tx, carrefourId, { branches, connexions, anneau });
     });
     return this.lire(carrefourId);
   }
@@ -368,6 +409,7 @@ export function geometrieDe(config: BranchesCarrefour) {
     ),
     traversees: new Map(config.branches.flatMap((b) => (b.traversee ? [[b.code, b.traversee] as const] : []))),
     troncons: new Set(config.branches.filter((b) => b.troncon).map((b) => b.code)),
+    traces: new Map(Object.entries(config.traces ?? {})),
   };
 }
 

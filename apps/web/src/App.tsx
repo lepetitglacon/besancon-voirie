@@ -606,7 +606,7 @@ function App() {
                 nbTroncons={reseau.donnees.data?.troncons.features.length}
                 tronque={reseau.donnees.data?.tronque ?? false}
                 bbox={bbox}
-                generation={{ enCours: reseau.generation.isPending, onGenerer: () => reseau.generation.mutate() }}
+                generation={{ enCours: reseau.generation.isPending, onGenerer: (reinitialiser) => reseau.generation.mutate(reinitialiser) }}
               />
             )}
           </CarteEnTete>

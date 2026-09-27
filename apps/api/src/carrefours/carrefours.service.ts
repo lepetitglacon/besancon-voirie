@@ -12,6 +12,7 @@ import type {
 } from '@voirie/schema';
 import { DRIZZLE, type Db } from '../db/db.module.js';
 import { tableExiste, uuids, type Executeur, type Tx } from '../db/sql.js';
+import { materialiserCarrefour, rattacherNoeuds } from '../reseau/carrefours.js';
 import { recalculerCarrefour } from './positions.js';
 
 const LIMITE_CARREFOURS = 2000;
@@ -75,6 +76,8 @@ export class CarrefoursService {
       const id = rows[0]!.id;
       await tx.execute(sql`UPDATE feu SET carrefour_id = ${id} WHERE id = ANY (${uuids(feux)})`);
       await recalculerCarrefour(tx, id);
+      // Les nœuds du réseau parmi ses feux forment le carrefour (docs/RESEAU.md §4).
+      if ((await rattacherNoeuds(tx, id)) > 0) await materialiserCarrefour(tx, id);
       return this.resume(tx, id);
     });
   }
@@ -101,6 +104,8 @@ export class CarrefoursService {
         `);
       }
       await recalculerCarrefour(tx, id);
+      // Des feux ajoutés couvrent de nouveaux nœuds ; ceux déjà pris restent (retirés à la main).
+      if (modification.feux && (await rattacherNoeuds(tx, id)) > 0) await materialiserCarrefour(tx, id);
       return this.resume(tx, id);
     });
   }
@@ -168,7 +173,8 @@ export class CarrefoursService {
         SELECT w.tags->>'name' AS nom, min(${RANG_VOIE}) AS rang,
                min(ST_Distance(w.geom::geography, g.centre::geography)) AS distance
         FROM osm_way w, g
-        WHERE w.tags ? 'name' AND ST_DWithin(w.geom::geography, g.points::geography, ${RAYON_NOMMAGE_M})
+        WHERE w.tags ? 'name' AND w.tags->>'highway' NOT IN ('cycleway', 'path')
+          AND ST_DWithin(w.geom::geography, g.points::geography, ${RAYON_NOMMAGE_M})
         GROUP BY 1
       ) v
       ORDER BY rang NULLS LAST, distance

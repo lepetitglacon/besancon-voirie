@@ -4,6 +4,7 @@ import type {
   AnalyseIa,
   AnalyseIaDetail,
   Bbox,
+  BilanSemis,
   BranchesCarrefour,
   CadrePhotoIa,
   CarrefourResume,
@@ -19,6 +20,7 @@ import type {
   FeuxTempsReel,
   HistoriqueTroncons,
   LignesCarrefour,
+  ModificationNoeud,
   ModificationTroncon,
   ModifierCarrefour,
   NatureCarrefour,
@@ -120,15 +122,18 @@ export const api = {
 
   // ── Réseau routier (docs/RESEAU.md) ──
   reseau: (bbox: Bbox) => requete<ReseauGeoJson>(`/api/reseau?bbox=${parametreBbox(bbox)}`),
-  genererReseau: () =>
-    requete<{ voies_osm: number; noeuds: number; troncons: number; conserves: number }>('/api/reseau/generer', {
-      method: 'POST',
-    }),
+  semerReseau: (reinitialiser: boolean) =>
+    requete<BilanSemis>('/api/reseau/semer', { method: 'POST', body: JSON.stringify({ reinitialiser }) }),
   creerTroncon: (nouveau: NouveauTroncon) =>
     requete<Troncon>('/api/reseau/troncons', { method: 'POST', body: JSON.stringify(nouveau) }),
   modifierTroncon: (id: string, modification: ModificationTroncon) =>
     requete<Troncon>(`/api/reseau/troncons/${id}`, { method: 'PATCH', body: JSON.stringify(modification) }),
   supprimerTroncon: (id: string) => requete<void>(`/api/reseau/troncons/${id}`, { method: 'DELETE' }),
+  couperTroncon: (id: string, position: [number, number]) =>
+    requete<Noeud>(`/api/reseau/troncons/${id}/couper`, { method: 'POST', body: JSON.stringify({ position }) }),
+  modifierNoeud: (id: string, modification: ModificationNoeud) =>
+    requete<Noeud>(`/api/reseau/noeuds/${id}`, { method: 'PATCH', body: JSON.stringify(modification) }),
+  fusionnerNoeud: (id: string) => requete<void>(`/api/reseau/noeuds/${id}`, { method: 'DELETE' }),
   enregistrerLiaisons: (noeudId: string, saisie: SaisieLiaisons) =>
     requete<SaisieLiaisons>(`/api/reseau/noeuds/${noeudId}/liaisons`, { method: 'PUT', body: JSON.stringify(saisie) }),
   /** Lien de téléchargement d'un fichier de l'export SUMO (de l'emprise, ou de toute la ville). */
@@ -136,3 +141,4 @@ export const api = {
 }
 
 export type Troncon = ReseauGeoJson['troncons']['features'][number]
+export type Noeud = ReseauGeoJson['noeuds']['features'][number]

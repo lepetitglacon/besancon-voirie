@@ -28,7 +28,7 @@
     "db:verifier": "node scripts/verifier-migrations.ts",
     "osm:import": "node scripts/osm.ts import",
     "osm:seed": "node scripts/osm.ts seed",
-    "reseau:generer": "node scripts/reseau.ts generer",
+    "reseau:semer": "node scripts/reseau.ts semer",
     "reseau:sumo": "node scripts/reseau.ts sumo"
   },
   "dependencies": {
