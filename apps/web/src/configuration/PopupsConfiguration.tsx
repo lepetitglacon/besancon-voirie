@@ -1,6 +1,6 @@
 /**
  * Popups de la configuration d'un carrefour : un clic sur un élément de la carte (voie, liaison,
- * feu, code de branche, carrefour) ouvre une popup courte ancrée à cet élément.
+ * feu, code de branche) ouvre une popup courte ancrée à cet élément.
  */
 import { Badge, Button, HStack, Input, Stack, Text } from '@chakra-ui/react'
 import {
@@ -16,7 +16,6 @@ import {
   Aide,
   BarreOutils,
   Bascule,
-  Chiffre,
   Compteur,
   LigneConflit,
   Pastille,
@@ -430,49 +429,3 @@ const SOURCES: Record<SourceBranche, { couleur: string; libelle: string }> = {
   ia: { couleur: 'purple', libelle: 'Lu sur la photo par l’IA' },
 }
 const CONFIANCES: Record<ConfianceIa, string> = { haute: 'green', moyenne: 'orange', basse: 'red' }
-
-// ── Carrefour ──
-
-interface PropsCarrefour {
-  nom: string
-  brouillon: Brouillon
-  /** Durée du cycle du plan actif, null sans programme calculé. */
-  cycle: number | null
-  detectionEnCours: boolean
-  onDetecter: () => void
-  /** Une analyse OSM + IA de ce carrefour est déjà en file ou en cours. */
-  iaEnFile: boolean
-  onGenererIa: () => void
-  onPlan: () => void
-  onFermer: () => void
-}
-
-export function PopupCarrefour({ nom, brouillon, cycle, detectionEnCours, onDetecter, iaEnFile, onGenererIa, onPlan, onFermer }: PropsCarrefour) {
-  return (
-    <PopupCarte
-      titre={nom}
-      soustitre="Carrefour à feux"
-      onFermer={onFermer}
-      pied={
-        <>
-          <BarreOutils.Espace />
-          <Button variant="solid" onClick={onPlan}>
-            Plan de feux (Tab)
-          </Button>
-        </>
-      }
-    >
-      <HStack gap="2">
-        <Chiffre valeur={brouillon.branches.length} libelle="branches" />
-        <Chiffre valeur={brouillon.connexions.length} libelle="liaisons" />
-        <Chiffre valeur={cycle === null ? '—' : `${Math.round(cycle)} s`} libelle="cycle" />
-      </HStack>
-      <Button loading={detectionEnCours} loadingText="Détection…" onClick={onDetecter}>
-        Détecter les branches depuis OSM (O)
-      </Button>
-      <Button disabled={iaEnFile} onClick={onGenererIa} title="La détection OSM, corrigée par Claude d’après la photo aérienne IGN (~1 min, en file d’attente)">
-        {iaEnFile ? '✦ Analyse IA en file…' : '✦ Générer avec OSM + IA (I)'}
-      </Button>
-    </PopupCarte>
-  )
-}

@@ -103,8 +103,7 @@ connexions (`flechesParVoie`, `mouvementsDepuisConnexions`), côté API comme c�
 
 ### Proposition OSM + IA
 
-**✦ IA** (barre d'outils de la configuration, touche <kbd>I</kbd>, popup du carrefour ou menu
-contextuel) part de la détection OSM et la fait corriger par Claude d'après la photo aérienne
+**✦ IA** (barre d'outils de la configuration, touche <kbd>I</kbd> ou menu contextuel) part de la détection OSM et la fait corriger par Claude d'après la photo aérienne
 (`apps/api/src/branches/ia/`) :
 
 0. **Zone de la photo** : avant la mise en file, la carte montre le cadre de la photo, le reste
@@ -136,17 +135,31 @@ un redémarrage de l'API est remise en file et relancée. Un carrefour déjà en
 ajouté une seconde fois.
 
 Dans l'application :
-- une liste « ✦ Propositions IA » dans la carte d'en-tête de l'accueil : en attente (avec la
+- une liste « ✦ Propositions IA » dans la carte de suivi, en bas à droite : en attente (avec la
   place dans la file), en cours (chrono), prête (« Ouvrir »), en échec (motif au survol) ; « × »
   annule une demande ou retire une ligne ;
 - dans la carte d'en-tête du carrefour configuré : où en est son analyse, et « Charger » quand
   elle est prête ;
-- à la fin de chaque analyse, une notification « Proposition IA prête » avec un bouton
+- à la fin de chaque analyse, une notification (en bas à gauche) « Proposition IA prête » avec un bouton
   « Ouvrir », plus une notification système si l'onglet est en arrière-plan (permission
   demandée au premier ajout) ;
 - « Ouvrir » recentre la carte sur le carrefour, ouvre sa configuration et charge la proposition
   comme brouillon (confirmation si des modifications ne sont pas enregistrées). La proposition
   est alors marquée consultée : elle quitte la liste au bout d'une heure.
+
+### Sélection et brouillons
+
+Un clic sur un carrefour (son disque ou l'un de ses feux) affiche sa fiche dans la carte
+d'en-tête : nature, feux, statut, et les actions « Supprimer », « Feux » et « Configurer »
+(<kbd>Entrée</kbd>). Un clic sur un autre carrefour la remplace, <kbd>Échap</kbd> ou un clic dans
+le vide la ferme. Pendant la configuration, un clic sur un autre carrefour ouvre directement sa
+configuration (sauf pendant le tracé de la zone IA ou le choix des feux d'une ligne).
+
+Les modifications non enregistrées (branches, lignes de feux, programme) sont gardées par
+carrefour (`configuration/brouillons.ts`) : quitter la configuration ou passer à un autre
+carrefour ne les perd pas. La carte de suivi, en bas à droite, liste les carrefours concernés :
+« Reprendre » rouvre la configuration avec ses brouillons, « × » les abandonne. Ils vivent en
+mémoire : le navigateur demande confirmation avant de fermer ou recharger la page.
 
 Variables (`.env`) : `IA_CLAUDE_CMD` (commande, `claude` par défaut ; Claude Code doit être
 installé et connecté sur le serveur), `IA_MODELE` (`opus` par défaut), `IA_PARALLELE` (2),

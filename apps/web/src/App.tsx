@@ -5,9 +5,13 @@ import { Badge, Box, HStack, IconButton, Kbd, Popover, Portal, Stack, Tabs, Text
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { useMap } from 'react-map-gl/maplibre'
 import { api } from './api'
+import { FicheCarrefour } from './carrefour/FicheCarrefour'
+import { useBrouillons, type BrouillonsCarrefour } from './configuration/brouillons'
+import { CarteSuivi } from './configuration/CarteSuivi'
 import { MENU_CONFIGURATION, type ActionConfiguration } from './configuration/actions'
 import {
   ConfigurationCarrefour,
+  hauteurPanneau,
   type AffichageConfiguration,
   type ConfigurationCarrefourHandle,
 } from './configuration/ConfigurationCarrefour'
@@ -27,7 +31,6 @@ import {
   type EntreeMenu,
 } from './ds'
 import { useAnalysesIa, useNotificationsIa } from './configuration/analysesIa'
-import { FileIa } from './configuration/FileIa'
 import { PanneauEdition, type Edition } from './edition/PanneauEdition'
 import { CarteCarrefours } from './map/CarteCarrefours'
 import { CouchePertes } from './map/CouchePertes'
@@ -58,6 +61,12 @@ const COUCHES_BRUTES_DEFAUT: CouchesBrutes = {
   pertes: true,
 }
 
+/** Carrefour choisi sur la carte, avec la position de son centre. */
+interface CarrefourChoisi {
+  carrefour: CarrefourResume
+  position: [number, number]
+}
+
 /** Type de jour de la date donnée (heure locale du navigateur). */
 function typeJour(date: Date): TypeJour {
   const jour = date.getDay()
@@ -76,12 +85,14 @@ function App() {
     heure: new Date().getHours(),
   }))
   const [edition, setEdition] = useState<Edition | null>(null)
-  const [configuration, setConfiguration] = useState<{
-    carrefour: CarrefourResume
-    position: [number, number]
+  /** Carrefour sélectionné : sa fiche remplace la carte d'en-tête. */
+  const [selection, setSelection] = useState<CarrefourChoisi | null>(null)
+  const [configuration, setConfiguration] = useState<(CarrefourChoisi & {
     /** Proposition IA à charger à l'ouverture (« Ouvrir » d'une notification). */
     ouvrirAnalyseIa?: { id: string }
-  } | null>(null)
+  }) | null>(null)
+  const [panneauBasOuvert, setPanneauBasOuvert] = useState(false)
+  const brouillons = useBrouillons()
   const [affichageConfiguration, setAffichageConfiguration] = useState<AffichageConfiguration>({
     branches: [],
     connexions: [],
@@ -89,6 +100,7 @@ function App() {
     feuxSurlignes: [],
     connexionsSurlignees: [],
     feux: null,
+    choixFeux: false,
     selection: null,
     ancre: null,
     cadreIa: null,
@@ -167,7 +179,10 @@ function App() {
 
   const supprimer = useMutation({
     mutationFn: (carrefour: CarrefourResume) => api.supprimerCarrefour(carrefour.id),
-    onSuccess: rafraichir,
+    onSuccess: (_, carrefour) => {
+      setSelection((choix) => (choix?.carrefour.id === carrefour.id ? null : choix))
+      return rafraichir()
+    },
     onError: (erreur) => window.alert(erreur.message),
   })
 
@@ -205,6 +220,28 @@ function App() {
 
   const feuxLibres = feux.data?.features.filter((f) => f.properties.carrefour_id === null).length
 
+  // La fiche suit les données à jour du carrefour (nombre de feux après une modification…).
+  const carrefourSelectionne = selection
+    ? (carrefours.data?.features.find((f) => f.id === selection.carrefour.id)?.properties ?? selection.carrefour)
+    : null
+
+  const configurer = (choix: CarrefourChoisi) => {
+    setEdition(null)
+    setSelection(choix)
+    setConfiguration(choix)
+  }
+  const reprendre = (b: BrouillonsCarrefour) => configurer({ carrefour: b.carrefour, position: b.position })
+
+  /** Un clic sur un carrefour remplace celui qu'on regarde : sa fiche, ou sa configuration. */
+  const selectionner = (choix: CarrefourChoisi | null) => {
+    if (configuration) return choix && configurer(choix)
+    setSelection(choix)
+  }
+
+  const confirmerSuppression = (carrefour: CarrefourResume) => {
+    if (window.confirm(`Supprimer « ${carrefour.nom} » ? Ses feux redeviendront libres.`)) supprimer.mutate(carrefour)
+  }
+
   const reseauTram = useQuery({
     queryKey: ['tram', 'reseau'],
     queryFn: api.reseauTram,
@@ -238,10 +275,22 @@ function App() {
   // File des propositions OSM + IA : suivie partout, notifiée à la fin de chaque analyse.
   const analysesIa = useAnalysesIa()
   const ouvrirAnalyseIa = useCallback((analyse: AnalyseIa) => {
+    const choix = { carrefour: analyse.carrefour, position: analyse.position }
     setEdition(null)
-    setConfiguration({ carrefour: analyse.carrefour, position: analyse.position, ouvrirAnalyseIa: { id: analyse.id } })
+    setSelection(choix)
+    setConfiguration({ ...choix, ouvrirAnalyseIa: { id: analyse.id } })
   }, [])
+
   useNotificationsIa(analysesIa.data, ouvrirAnalyseIa)
+
+  // Modifications non enregistrées : le navigateur demande confirmation avant de quitter la page.
+  const brouillonsEnCours = brouillons.size > 0
+  useEffect(() => {
+    if (!brouillonsEnCours) return
+    const retenir = (e: BeforeUnloadEvent) => e.preventDefault()
+    window.addEventListener('beforeunload', retenir)
+    return () => window.removeEventListener('beforeunload', retenir)
+  }, [brouillonsEnCours])
 
   const composer = () =>
     demarrer({ carrefourId: null, selection: [], nature: 'carrefour', nomSaisi: null, modeRectangle: true })
@@ -251,6 +300,11 @@ function App() {
     if (configuration || e.ctrlKey || e.metaKey || e.altKey) return
     if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
     const lettre = e.key.toLowerCase()
+    if (!edition && selection) {
+      if (e.key === 'Escape') return setSelection(null)
+      const surLaCarte = e.target === document.body || (e.target instanceof HTMLElement && e.target.classList.contains('maplibregl-canvas'))
+      if (e.key === 'Enter' && surLaCarte) return configurer(selection)
+    }
     if (!edition) return lettre === 'n' && composer()
     if (e.key === 'Escape') return setEdition(null)
     if (lettre === 'r' || lettre === 'v') setEdition({ ...edition, modeRectangle: lettre === 'r' })
@@ -307,11 +361,8 @@ function App() {
                 modeRectangle: false,
               })
             }
-            onModifier={modifier}
-            onConfigurer={(carrefour, position) => {
-              setEdition(null)
-              setConfiguration({ carrefour, position })
-            }}
+            selection={configuration ? null : (selection?.carrefour.id ?? null)}
+            onSelectionner={selectionner}
             configuration={
               configuration && {
                 carrefourId: configuration.carrefour.id,
@@ -320,7 +371,7 @@ function App() {
               }
             }
             onClicFeuConfiguration={(feu, position) => panneauConfiguration.current?.clicFeu(feu, position)}
-            onClicCarteConfiguration={(cible, position) => panneauConfiguration.current?.clicCarte(cible, position)}
+            onClicCarteConfiguration={() => panneauConfiguration.current?.clicCarte()}
             onClicCalque={(clic) => panneauConfiguration.current?.clicCalque(clic)}
             onCiblePopup={setCiblePopup}
             onMenuContextuel={setPointMenu}
@@ -328,11 +379,6 @@ function App() {
             onConnecter={connecter}
             onDessinerZoneIa={dessinerZoneIa}
             onPlacerFeu={placerFeu}
-            onSupprimer={(carrefour) => {
-              if (window.confirm(`Supprimer « ${carrefour.nom} » ? Ses feux redeviendront libres.`)) {
-                supprimer.mutate(carrefour)
-              }
-            }}
           >
             {pertes && reseauTram.data && historique.data && (
               <CouchePertes reseau={reseauTram.data} historique={historique.data} />
@@ -349,49 +395,57 @@ function App() {
           key={configuration.carrefour.id}
           ref={panneauConfiguration}
           carrefour={configuration.carrefour}
+          position={configuration.position}
           ciblePopup={ciblePopup}
           onAffichage={setAffichageConfiguration}
           onPlacerFeu={placerFeu}
           ouvrirAnalyseIa={configuration.ouvrirAnalyseIa ?? null}
+          onPanneauBas={setPanneauBasOuvert}
           onFermer={() => setConfiguration(null)}
         />
       ) : (
         <>
-          <CarteEnTete
-            position="fixed"
-            top="3"
-            left="3"
-            zIndex="2"
-            w="340px"
-            maxW="calc(100vw - 24px)"
-            surtitre="Besançon Voirie"
-            titre={edition ? (edition.carrefourId ? 'Modifier le carrefour' : 'Composer un carrefour') : 'Inventaire citoyen des feux tricolores'}
-            badges={
-              <>
-                {sante.isSuccess && <Badge colorPalette="green">API connectée</Badge>}
-                {sante.isError && <Badge colorPalette="red">API injoignable</Badge>}
-                {carrefours.data && <Badge colorPalette="gray">{carrefours.data.features.length} carrefour(s) dans la vue</Badge>}
-                {feuxLibres !== undefined && feuxLibres > 0 && <Badge colorPalette="orange">{feuxLibres} feu(x) à regrouper</Badge>}
-              </>
-            }
-          >
-            {edition && (
-              <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
-                <PanneauEdition
-                  edition={edition}
-                  enregistrement={{ enCours: enregistrer.isPending, erreur: enregistrer.error?.message ?? null }}
-                  onChanger={setEdition}
-                  onEnregistrer={(nom) => enregistrer.mutate({ edition, nom })}
-                  onAnnuler={() => setEdition(null)}
-                />
-              </Box>
-            )}
-            {!edition && analysesIa.data && analysesIa.data.length > 0 && (
-              <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
-                <FileIa analyses={analysesIa.data} onOuvrir={ouvrirAnalyseIa} />
-              </Box>
-            )}
-          </CarteEnTete>
+          {carrefourSelectionne && selection && !edition ? (
+            <FicheCarrefour
+              carrefour={carrefourSelectionne}
+              brouillons={brouillons.get(carrefourSelectionne.id)}
+              onConfigurer={() => configurer({ carrefour: carrefourSelectionne, position: selection.position })}
+              onModifierFeux={() => modifier(carrefourSelectionne)}
+              onSupprimer={() => confirmerSuppression(carrefourSelectionne)}
+              onFermer={() => setSelection(null)}
+            />
+          ) : (
+            <CarteEnTete
+              position="fixed"
+              top="3"
+              left="3"
+              zIndex="2"
+              w="340px"
+              maxW="calc(100vw - 24px)"
+              surtitre="Besançon Voirie"
+              titre={edition ? (edition.carrefourId ? 'Modifier le carrefour' : 'Composer un carrefour') : 'Inventaire citoyen des feux tricolores'}
+              badges={
+                <>
+                  {sante.isSuccess && <Badge colorPalette="green">API connectée</Badge>}
+                  {sante.isError && <Badge colorPalette="red">API injoignable</Badge>}
+                  {carrefours.data && <Badge colorPalette="gray">{carrefours.data.features.length} carrefour(s) dans la vue</Badge>}
+                  {feuxLibres !== undefined && feuxLibres > 0 && <Badge colorPalette="orange">{feuxLibres} feu(x) à regrouper</Badge>}
+                </>
+              }
+            >
+              {edition && (
+                <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
+                  <PanneauEdition
+                    edition={edition}
+                    enregistrement={{ enCours: enregistrer.isPending, erreur: enregistrer.error?.message ?? null }}
+                    onChanger={setEdition}
+                    onEnregistrer={(nom) => enregistrer.mutate({ edition, nom })}
+                    onAnnuler={() => setEdition(null)}
+                  />
+                </Box>
+              )}
+            </CarteEnTete>
+          )}
 
           {edition && (
             <BandeauMode
@@ -437,6 +491,18 @@ function App() {
           </BarreOutils.Root>
         </>
       )}
+
+      <CarteSuivi
+        position="fixed"
+        right="3"
+        bottom={configuration && panneauBasOuvert ? `calc(${hauteurPanneau} + 12px)` : '3'}
+        zIndex="2"
+        brouillons={brouillons}
+        ouvert={configuration?.carrefour.id ?? null}
+        onReprendre={reprendre}
+        analyses={analysesIa.data ?? []}
+        onOuvrirAnalyse={ouvrirAnalyseIa}
+      />
 
       <Popover.Root positioning={{ placement: 'left-start', gutter: 10 }}>
         <Popover.Trigger asChild>
