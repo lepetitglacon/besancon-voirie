@@ -121,10 +121,27 @@ d'après la photo aérienne (`apps/api/src/branches/ia/`) :
    `ConfigurationBranches`, comme un `PUT`. Elle arrive dans l'éditeur comme celle d'OSM, avec
    pour chaque branche un badge « lu sur la photo », la confiance de l'IA et ses remarques.
 
-Une seule analyse à la fois par carrefour. Variables (`.env`) : `IA_CLAUDE_CMD` (commande,
-`claude` par défaut ; Claude Code doit être installé et connecté sur le serveur), `IA_MODELE`
-(`opus` par défaut), `IA_DELAI_S` (300), `IA_GARDER_FICHIERS=true` pour garder la photo dans
-`/tmp/voirie-ia-*`.
+**File d'attente.** Le bouton met le carrefour en file (`analyse_ia`) et rend la main tout de
+suite : on peut en demander plusieurs et continuer à travailler. Un travailleur de l'API
+(`FileIaService`) lance les analyses dans l'ordre, `IA_PARALLELE` à la fois (2 par défaut, 0 pour
+n'en lancer aucune, comme dans les tests e2e). La file est en base : une analyse interrompue par
+un redémarrage de l'API est remise en file et relancée. Un carrefour déjà en file n'y est pas
+ajouté une seconde fois.
+
+Dans l'application :
+- une liste « ✦ Propositions IA » en haut du panneau latéral : en attente (avec la place dans
+  la file), en cours (chrono), prête (« Ouvrir »), en échec (motif au survol) ; « × » annule une
+  demande ou retire une ligne ;
+- à la fin de chaque analyse, une notification « Proposition IA prête » avec un bouton
+  « Ouvrir », plus une notification système si l'onglet est en arrière-plan (permission
+  demandée au premier ajout) ;
+- « Ouvrir » recentre la carte sur le carrefour, ouvre sa configuration et charge la proposition
+  comme brouillon (confirmation si des modifications ne sont pas enregistrées). La proposition
+  est alors marquée consultée : elle quitte la liste au bout d'une heure.
+
+Variables (`.env`) : `IA_CLAUDE_CMD` (commande, `claude` par défaut ; Claude Code doit être
+installé et connecté sur le serveur), `IA_MODELE` (`opus` par défaut), `IA_PARALLELE` (2),
+`IA_DELAI_S` (300), `IA_GARDER_FICHIERS=true` pour garder la photo dans `/tmp/voirie-ia-*`.
 
 Premier essai, Edgar Faure × Maréchal Foch (chaussées séparées, 8 feux) : 52 s, 0,18 $ avec
 Opus 5.5. 4 branches et 9 connexions, voies posées sur le marquage (3 entrantes sur Edgar Faure
@@ -140,7 +157,11 @@ car sous les arbres.
 |---|---|---|
 | GET | `/api/carrefours/:id/branches` | Centre, branches (voies, passages piétons), connexions, mouvements, flèches, alertes |
 | GET | `/api/carrefours/:id/branches/detection` | Proposition depuis OSM, **non enregistrée** |
-| POST | `/api/carrefours/:id/branches/detection-ia` | Proposition OSM corrigée par l'IA d'après l'orthophoto IGN, **non enregistrée** (`EditionGuard`, 1 à 3 min) |
+| POST | `/api/carrefours/:id/branches/detection-ia` | Met le carrefour dans la file « OSM + IA » (`EditionGuard`), 202 avec l'analyse |
+| GET | `/api/analyses-ia` | File : en attente, en cours, finies non consultées ou depuis moins d'une heure |
+| GET | `/api/analyses-ia/:id` | Une analyse, avec sa proposition (`DetectionBranchesIa`, **non enregistrée**) une fois terminée |
+| PUT | `/api/analyses-ia/:id/consultee` | Proposition chargée dans l'éditeur (`EditionGuard`) |
+| DELETE | `/api/analyses-ia/:id` | Annule ou retire une analyse, sauf en cours (409) (`EditionGuard`) |
 | PUT | `/api/carrefours/:id/branches` | `{ branches, connexions }` : remplace tout (`EditionGuard`) |
 
 Validation : codes de branche uniques, rangs consécutifs depuis 0 dans chaque sens, une

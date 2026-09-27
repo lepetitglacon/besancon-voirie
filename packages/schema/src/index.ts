@@ -4,3 +4,4 @@ export * from './branches.js';
 export * from './lignes.js';
 export * from './programme.js';
 export * from './tram.js';
+export * from './analyses-ia.js';

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { LonLat } from '@voirie/engine'
-import type { Bbox, CarrefourResume, FeuResume, TypeJour } from '@voirie/schema'
+import type { AnalyseIa, Bbox, CarrefourResume, FeuResume, TypeJour } from '@voirie/schema'
 import { Badge, Button, Heading, HStack, Stack, Tabs, Text } from '@chakra-ui/react'
 import { useCallback, useRef, useState } from 'react'
 import { api } from './api'
@@ -9,6 +9,8 @@ import {
   type AffichageConfiguration,
   type PanneauConfigurationHandle,
 } from './configuration/PanneauConfiguration'
+import { useAnalysesIa, useNotificationsIa } from './configuration/analysesIa'
+import { FileIa } from './configuration/FileIa'
 import { PanneauEdition, type Edition } from './edition/PanneauEdition'
 import { Aide, Bascule, Message, ModeCouleur, Pastille, Section, Segments, Selecteur } from './ds'
 import { CarteCarrefours } from './map/CarteCarrefours'
@@ -58,9 +60,12 @@ function App() {
     heure: new Date().getHours(),
   }))
   const [edition, setEdition] = useState<Edition | null>(null)
-  const [configuration, setConfiguration] = useState<{ carrefour: CarrefourResume; position: [number, number] } | null>(
-    null,
-  )
+  const [configuration, setConfiguration] = useState<{
+    carrefour: CarrefourResume
+    position: [number, number]
+    /** Proposition IA à charger à l'ouverture (bouton « Ouvrir » d'une notification). */
+    ouvrirAnalyseIa?: { id: string }
+  } | null>(null)
   const [affichageConfiguration, setAffichageConfiguration] = useState<AffichageConfiguration>({
     branches: [],
     connexions: [],
@@ -80,6 +85,14 @@ function App() {
     [],
   )
 
+
+  // File des propositions OSM + IA : suivie partout, notifiée à la fin de chaque analyse.
+  const analysesIa = useAnalysesIa()
+  const ouvrirAnalyseIa = useCallback((analyse: AnalyseIa) => {
+    setEdition(null)
+    setConfiguration({ carrefour: analyse.carrefour, position: analyse.position, ouvrirAnalyseIa: { id: analyse.id } })
+  }, [])
+  useNotificationsIa(analysesIa.data, ouvrirAnalyseIa)
 
   const couchesTram: CouchesTram =
     mode === 'carte' ? { lignes: trams, arrets: trams, zones: trams, rames: trams } : brut
@@ -291,11 +304,14 @@ function App() {
           <ModeCouleur />
         </HStack>
 
+        {analysesIa.data && <FileIa analyses={analysesIa.data} onOuvrir={ouvrirAnalyseIa} />}
+
         {configuration ? (
           <PanneauConfiguration
             key={configuration.carrefour.id}
             carrefour={configuration.carrefour}
             feuxCarrefour={feux.data?.features.filter((f) => f.properties.carrefour_id === configuration.carrefour.id)}
+            ouvrirAnalyseIa={configuration.ouvrirAnalyseIa ?? null}
             ref={panneauConfiguration}
             onAffichage={setAffichageConfiguration}
             onFermer={() => setConfiguration(null)}

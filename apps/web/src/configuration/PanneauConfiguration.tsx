@@ -15,18 +15,21 @@ import {
   type BranchesCarrefour,
   type CarrefourResume,
   type Connexion,
+  type AnalyseIa,
   type DetectionBranchesIa,
   type FeuResume,
   type FeuxGeoJson,
   type PlanSaisi,
   type SourceBranche,
 } from '@voirie/schema'
-import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
 import { api } from '../api'
-import { Aide, Message } from '../ds'
+import { Aide, Message, notifications } from '../ds'
 import type { ModeEdition } from './calque/CalqueCarrefour'
 import type { EtatFeu } from './calque/elements'
 import { basculerConnexion, deplacerPoignee, type Brouillon, type Poignee } from './modele'
+import { demanderNotificationsSysteme, enFile, useAnalysesIa } from './analysesIa'
+import { Chrono } from './FileIa'
 import { OngletBranches } from './OngletBranches'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
 import { OngletGraphe, type Scenario } from './OngletGraphe'
@@ -75,11 +78,13 @@ interface Props {
   carrefour: CarrefourResume
   /** Feux du carrefour (pour compter ceux posés sur leur mât). */
   feuxCarrefour: FeuxGeoJson['features'] | undefined
+  /** Proposition IA à charger à l'ouverture (clic sur « Ouvrir » d'une notification). Un nouvel objet la recharge. */
+  ouvrirAnalyseIa?: { id: string } | null
   onAffichage: (affichage: AffichageConfiguration) => void
   onFermer: () => void
 }
 
-export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichage, onFermer }: Props) {
+export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, ouvrirAnalyseIa, onAffichage, onFermer }: Props) {
   const queryClient = useQueryClient()
   const [onglet, setOnglet] = useState<Onglet>('branches')
 
@@ -109,14 +114,56 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
       setAnalyseIa(null)
     },
   })
-  const detectionIa = useMutation({
-    mutationFn: () => api.detecterBranchesIa(carrefour.id),
-    onSuccess: (proposition) => {
+  // ── Proposition OSM + IA : mise en file, suivie, puis chargée quand elle est prête ──
+  const analyses = useAnalysesIa()
+  /** Dernière analyse de ce carrefour (la liste est triée de la plus récente à la plus ancienne). */
+  const analyseCarrefour = analyses.data?.find((a) => a.carrefour.id === carrefour.id)
+  const demandeIa = useMutation({
+    mutationFn: () => api.demanderAnalyseIa(carrefour.id),
+    onMutate: demanderNotificationsSysteme,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['analyses-ia'] })
+      notifications.create({
+        type: 'info',
+        title: 'Ajouté à la file IA',
+        description: `${carrefour.nom} : vous serez prévenu quand la proposition sera prête. Vous pouvez continuer ailleurs.`,
+      })
+    },
+  })
+  const brouillonActuel = useRef(brouillonBranches)
+  useEffect(() => {
+    brouillonActuel.current = brouillonBranches
+  }, [brouillonBranches])
+  const chargementIa = useMutation({
+    mutationFn: async (id: string) => {
+      const analyse = await api.analyseIa(id)
+      if (!analyse.resultat) throw new Error('Proposition IA indisponible')
+      await api.consulterAnalyseIa(id)
+      return analyse.resultat
+    },
+    onSuccess: async (proposition) => {
       setBrouillonBranches({ branches: proposition.branches, connexions: proposition.connexions })
       setSources(proposition.sources)
       setAnalyseIa(proposition.ia)
+      setOnglet('branches')
+      await queryClient.invalidateQueries({ queryKey: ['analyses-ia'] })
     },
   })
+  const chargerIa = chargementIa.mutate
+  const chargerAnalyse = useCallback(
+    (id: string) => {
+      if (
+        brouillonActuel.current === null ||
+        window.confirm('Remplacer les modifications non enregistrées par la proposition IA ?')
+      ) {
+        chargerIa(id)
+      }
+    },
+    [chargerIa],
+  )
+  useEffect(() => {
+    if (ouvrirAnalyseIa) chargerAnalyse(ouvrirAnalyseIa.id)
+  }, [ouvrirAnalyseIa, chargerAnalyse])
   /** Import d'un JSON `ConfigurationBranches` (celui d'un `PUT /branches`), validé par le même schéma. */
   const importJson = useMutation({
     mutationFn: async (fichier: File) => {
@@ -138,7 +185,7 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
       setAnalyseIa(null)
     },
   })
-  const propositionEnCours = detection.isPending || detectionIa.isPending || importJson.isPending
+  const propositionEnCours = detection.isPending || chargementIa.isPending || importJson.isPending
   const remplacer = (source: string) =>
     branches.length === 0 || window.confirm(`Remplacer les branches actuelles par ${source} ?`)
   const enregistrementBranches = useMutation({
@@ -319,7 +366,7 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
 
   const feuxPlaces = feuxCarrefour?.filter((f) => f.properties.position_manuelle).length ?? 0
   const modifie = brouillonBranches !== null || brouillonLignes !== null || brouillonProgramme !== null
-  const erreur = [detection, detectionIa, importJson, enregistrementBranches, enregistrementLignes, enregistrementProgramme].find((m) => m.error)?.error
+  const erreur = [detection, demandeIa, chargementIa, importJson, enregistrementBranches, enregistrementLignes, enregistrementProgramme].find((m) => m.error)?.error
 
   const changerOnglet = (suivant: Onglet) => {
     setOnglet(suivant)
@@ -354,11 +401,10 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
               Détecter depuis OSM
             </Button>
             <Button
-              onClick={() => remplacer('la proposition OSM + IA') && detectionIa.mutate()}
-              disabled={propositionEnCours && !detectionIa.isPending}
-              loading={detectionIa.isPending}
-              loadingText="Analyse…"
-              title="La détection OSM, corrigée par Claude d’après la photo aérienne IGN (1 à 3 min)"
+              onClick={() => demandeIa.mutate()}
+              disabled={(analyseCarrefour !== undefined && enFile(analyseCarrefour)) || chargementIa.isPending}
+              loading={demandeIa.isPending}
+              title="La détection OSM, corrigée par Claude d’après la photo aérienne IGN (~1 min, en file d’attente)"
             >
               ✦ Générer avec OSM + IA
             </Button>
@@ -390,8 +436,10 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
               Enregistrer les branches
             </Button>
           </HStack>
-          {detectionIa.isPending && <AnalyseEnCours />}
-          {analyseIa && !detectionIa.isPending && (
+          {analyseCarrefour && !(analyseCarrefour.statut === 'terminee' && analyseCarrefour.consultee_le) && (
+            <SuiviAnalyse analyse={analyseCarrefour} chargement={chargementIa.isPending} onCharger={() => chargerAnalyse(analyseCarrefour.id)} />
+          )}
+          {analyseIa && (
             <Stack gap="1" borderWidth="1px" borderColor="border.muted" rounded="l2" p="2.5">
               <Aide>
                 ✦ Proposition lue sur la photo par {analyseIa.modele} en {analyseIa.duree_s} s
@@ -564,21 +612,29 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
   )
 }
 
-/** Pendant l'analyse par l'IA : ce qui se passe et depuis combien de temps. */
-function AnalyseEnCours() {
-  const [secondes, setSecondes] = useState(0)
-  useEffect(() => {
-    const debut = Date.now()
-    const minuterie = window.setInterval(() => setSecondes(Math.round((Date.now() - debut) / 1000)), 1000)
-    return () => window.clearInterval(minuterie)
-  }, [])
+/** Où en est la proposition IA de ce carrefour : en file, en cours, prête à charger, en échec. */
+function SuiviAnalyse({ analyse, chargement, onCharger }: { analyse: AnalyseIa; chargement: boolean; onCharger: () => void }) {
   return (
     <HStack gap="2.5" borderWidth="1px" borderColor="border.muted" rounded="l2" p="2.5" aria-live="polite">
-      <Spinner size="sm" color="fg.muted" />
-      <Stack gap="0">
-        <Aide color="fg">Claude lit la photo aérienne IGN et corrige la proposition OSM… {secondes} s</Aide>
-        <Aide>Compter 1 à 3 minutes. Les voies arriveront directement sur la carte, à vérifier avant d’enregistrer.</Aide>
+      {analyse.statut === 'en_cours' && <Spinner size="sm" color="fg.muted" />}
+      <Stack gap="0" flex="1">
+        {analyse.statut === 'en_attente' && (
+          <Aide color="fg">✦ En file d’attente{analyse.rang ? ` (n° ${analyse.rang})` : ''}.</Aide>
+        )}
+        {analyse.statut === 'en_cours' && (
+          <Aide color="fg">
+            ✦ Claude lit la photo aérienne IGN… {analyse.commencee_le && <Chrono depuis={analyse.commencee_le} />}
+          </Aide>
+        )}
+        {enFile(analyse) && <Aide>Vous pouvez fermer ce panneau : une notification vous préviendra.</Aide>}
+        {analyse.statut === 'terminee' && <Aide color="fg">✦ Proposition IA prête.</Aide>}
+        {analyse.statut === 'echec' && <Message ton="erreur">Analyse IA en échec : {analyse.erreur}</Message>}
       </Stack>
+      {analyse.statut === 'terminee' && (
+        <Button size="xs" variant="solid" onClick={onCharger} loading={chargement}>
+          Charger
+        </Button>
+      )}
     </HStack>
   )
 }

@@ -7,13 +7,15 @@ import '@fontsource/ibm-plex-sans/600.css'
 import { ThemeProvider } from 'next-themes'
 import type { ReactNode } from 'react'
 import { system } from '../theme'
+import { Notifications } from './Notifications'
 
-/** Thème Chakra et mode clair / sombre (celui du système par défaut). */
+/** Thème Chakra, mode clair / sombre (celui du système par défaut) et notifications. */
 export function Fournisseur({ children }: { children: ReactNode }) {
   return (
     <ChakraProvider value={system}>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
         {children}
+        <Notifications />
       </ThemeProvider>
     </ChakraProvider>
   )

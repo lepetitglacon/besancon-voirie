@@ -287,3 +287,26 @@ export const tramTronconObserve = pgView('tram_troncon_observe', {
   heure: smallint('heure').notNull(),
   typeJour: text('type_jour').notNull(),
 }).existing();
+
+/** File des propositions « OSM + IA » : une analyse de l'orthophoto par Claude, par demande. */
+export const statutAnalyseIa = pgEnum('statut_analyse_ia', ['en_attente', 'en_cours', 'terminee', 'echec']);
+
+export const analyseIa = pgTable(
+  'analyse_ia',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    carrefourId: uuid('carrefour_id')
+      .notNull()
+      .references(() => carrefour.id, { onDelete: 'cascade' }),
+    statut: statutAnalyseIa('statut').notNull().default('en_attente'),
+    /** Proposition (DetectionBranchesIa), une fois terminée. */
+    resultat: jsonb('resultat'),
+    erreur: text('erreur'),
+    demandeeLe: timestamp('demandee_le', { withTimezone: true }).notNull().defaultNow(),
+    commenceeLe: timestamp('commencee_le', { withTimezone: true }),
+    finieLe: timestamp('finie_le', { withTimezone: true }),
+    /** Proposition chargée dans l'éditeur : la notification ne s'affiche plus. */
+    consulteeLe: timestamp('consultee_le', { withTimezone: true }),
+  },
+  (t) => [index('analyse_ia_statut_idx').on(t.statut, t.demandeeLe), index('analyse_ia_carrefour_idx').on(t.carrefourId)],
+);

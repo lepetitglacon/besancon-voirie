@@ -1,5 +1,7 @@
 import type { LonLat } from '@voirie/engine'
 import type {
+  AnalyseIa,
+  AnalyseIaDetail,
   Bbox,
   BranchesCarrefour,
   CarrefourResume,
@@ -9,7 +11,6 @@ import type {
   ConfigurationProgramme,
   CreerCarrefour,
   DetectionBranches,
-  DetectionBranchesIa,
   EtatHistoriqueTram,
   FeuxGeoJson,
   HistoriqueTroncons,
@@ -63,9 +64,13 @@ export const api = {
   branches: (carrefourId: string) => requete<BranchesCarrefour>(`/api/carrefours/${carrefourId}/branches`),
   detecterBranches: (carrefourId: string) =>
     requete<DetectionBranches>(`/api/carrefours/${carrefourId}/branches/detection`),
-  /** Proposition OSM corrigée par l'IA d'après l'orthophoto IGN (1 à 3 min). */
-  detecterBranchesIa: (carrefourId: string) =>
-    requete<DetectionBranchesIa>(`/api/carrefours/${carrefourId}/branches/detection-ia`, { method: 'POST' }),
+  /** Met le carrefour dans la file des propositions OSM + IA (~1 min par analyse). */
+  demanderAnalyseIa: (carrefourId: string) =>
+    requete<AnalyseIa>(`/api/carrefours/${carrefourId}/branches/detection-ia`, { method: 'POST' }),
+  analysesIa: () => requete<AnalyseIa[]>('/api/analyses-ia'),
+  analyseIa: (id: string) => requete<AnalyseIaDetail>(`/api/analyses-ia/${id}`),
+  consulterAnalyseIa: (id: string) => requete<AnalyseIa>(`/api/analyses-ia/${id}/consultee`, { method: 'PUT' }),
+  retirerAnalyseIa: (id: string) => requete<void>(`/api/analyses-ia/${id}`, { method: 'DELETE' }),
   enregistrerBranches: (carrefourId: string, configuration: ConfigurationBranches) =>
     requete<BranchesCarrefour>(`/api/carrefours/${carrefourId}/branches`, {
       method: 'PUT',

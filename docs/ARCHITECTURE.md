@@ -264,6 +264,21 @@ CREATE TABLE releve (
 );
 CREATE INDEX ON releve (statut, cree_le);
 
+-- File des propositions « OSM + IA » (docs/CONFIGURATION.md §3)
+CREATE TYPE statut_analyse_ia AS ENUM ('en_attente', 'en_cours', 'terminee', 'echec');
+CREATE TABLE analyse_ia (
+  id            uuid PRIMARY KEY,
+  carrefour_id  uuid NOT NULL REFERENCES carrefour ON DELETE CASCADE,
+  statut        statut_analyse_ia NOT NULL DEFAULT 'en_attente',
+  resultat      jsonb,                         -- DetectionBranchesIa, une fois terminée
+  erreur        text,
+  demandee_le   timestamptz NOT NULL DEFAULT now(),
+  commencee_le  timestamptz,
+  finie_le      timestamptz,
+  consultee_le  timestamptz                    -- chargée dans l'éditeur : plus de notification
+);
+CREATE INDEX ON analyse_ia (statut, demandee_le);
+
 CREATE TABLE corridor (
   id               uuid PRIMARY KEY,
   slug             text UNIQUE NOT NULL,

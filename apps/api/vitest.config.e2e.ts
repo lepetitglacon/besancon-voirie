@@ -18,8 +18,9 @@ export default defineConfig({
     include: ['**/*.e2e-spec.ts'],
     globalSetup: ['./test/global-setup.ts'],
     // Prioritaire sur le .env chargé par ConfigModule : l'API testée pointe sur la base de test,
-    // édition autorisée, sans collecte tram (elle interrogerait Ginko en continu).
-    env: { DATABASE_URL: databaseUrlTest, EDITION_LOCALE: 'true', TRAM_COLLECTE: 'false' },
+    // édition autorisée, sans collecte tram (elle interrogerait Ginko en continu) ni analyse IA
+    // (la file reste en attente : pas de Claude ni d'orthophoto pendant les tests).
+    env: { DATABASE_URL: databaseUrlTest, EDITION_LOCALE: 'true', TRAM_COLLECTE: 'false', IA_PARALLELE: '0' },
     fileParallelism: false,
   },
 });

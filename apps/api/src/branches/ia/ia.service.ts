@@ -30,13 +30,12 @@ const FICHIER_PHOTO = 'orthophoto.jpg';
 
 /**
  * Proposition « OSM + IA » : la détection OSM, corrigée par Claude d'après l'orthophoto IGN.
- * Rien n'est enregistré : la proposition arrive dans l'éditeur comme celle d'OSM.
+ * Rien n'est enregistré dans les branches : la proposition arrive dans l'éditeur comme celle
+ * d'OSM. Lancée par la file d'attente (`FileIaService`), jamais directement par une requête.
  */
 @Injectable()
 export class IaService {
   private readonly logger = new Logger(IaService.name);
-  /** Une seule analyse à la fois par carrefour : un second clic attend la première. */
-  private readonly enCours = new Map<string, Promise<DetectionBranchesIa>>();
 
   constructor(
     @Inject(DRIZZLE) private readonly db: Db,
@@ -44,15 +43,7 @@ export class IaService {
     private readonly config: ConfigService,
   ) {}
 
-  detecter(carrefourId: string): Promise<DetectionBranchesIa> {
-    const existante = this.enCours.get(carrefourId);
-    if (existante) return existante;
-    const analyse = this.analyser(carrefourId).finally(() => this.enCours.delete(carrefourId));
-    this.enCours.set(carrefourId, analyse);
-    return analyse;
-  }
-
-  private async analyser(carrefourId: string): Promise<DetectionBranchesIa> {
+  async analyser(carrefourId: string): Promise<DetectionBranchesIa> {
     const detection = await this.branches.detecter(carrefourId); // 404 si le carrefour n'existe pas
     const centre = detection.centre as LonLat;
     const cote = Math.min(COTE_MAX_M, Math.max(COTE_MIN_M, Math.round(2 * (detection.rayon_m + MARGE_PHOTO_M))));
