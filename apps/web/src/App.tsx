@@ -80,6 +80,11 @@ function App() {
   const queryClient = useQueryClient()
   const [bbox, setBbox] = useState<Bbox>()
   const [zoom, setZoom] = useState(0)
+  // Stable : la carte relit l'emprise à chaque changement de ce rappel.
+  const changerEmprise = useCallback((emprise: Bbox, niveau: number) => {
+    setBbox(emprise)
+    setZoom(niveau)
+  }, [])
   const [modeReseau, setModeReseau] = useState(false)
   const reseau = useModeReseau({ actif: modeReseau, bbox, zoom })
   const [mode, setMode] = usePreference<Mode>('mode', 'carte')
@@ -371,10 +376,7 @@ function App() {
                 modeRectangle: edition.modeRectangle,
               }
             }
-            onEmprise={(emprise, niveau) => {
-              setBbox(emprise)
-              setZoom(niveau)
-            }}
+            onEmprise={changerEmprise}
             reseauActif={modeReseau && !configuration}
             curseur={modeReseau && reseau.outil === 'tracer' ? 'crosshair' : undefined}
             onBasculerFeu={basculerFeu}
