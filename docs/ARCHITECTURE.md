@@ -628,9 +628,9 @@ du temps, ni la fiabilité réelle des estimations. L'API enregistre donc chaque
 - **Fond de carte** : satellite par défaut, avec les orthophotos IGN de la Géoplateforme
   (Licence Ouverte, sans clé, ~20 cm/pixel). On garde par-dessus les libellés du plan OpenFreeMap,
   et on masque ses surfaces et ses routes. Le plan seul reste disponible.
-- **Réseau** (outil ⌇, touche <kbd>R</kbd>) : tous les tronçons de la vue à la largeur de leurs
-  voies, corrigeables (voies par sens, vitesse, sens), et un outil pour tracer ceux qui manquent
-  ([RESEAU.md](RESEAU.md) §7).
+- **Voies** (outil ≡, touche <kbd>R</kbd>) : l'éditeur des voies de toute la ville. Rues et
+  carrefours voie par voie, mêmes outils partout (sélection, tracé, liaisons voie à voie) ; un
+  clic sur un carrefour l'y ouvre ([RESEAU.md](RESEAU.md) §7).
 - **Carte graphique** : les bâtiments sont masqués par défaut, et la 3D (bâtiments en relief,
   carte inclinable) est désactivée par défaut. Sans 3D, les bâtiments restent à plat et
   l'inclinaison est bloquée. La boucle d'animation des rames n'envoie de données à MapLibre

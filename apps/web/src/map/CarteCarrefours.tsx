@@ -2,7 +2,7 @@ import { Badge, Box, Button } from '@chakra-ui/react'
 import type { LonLat } from '@voirie/engine'
 import type { Bbox, CarrefourResume, CarrefoursGeoJson, EmpriseIa, FeuResume, FeuxGeoJson } from '@voirie/schema'
 import { AttributionControl, type Map as CarteMapLibre, type MapGeoJSONFeature } from 'maplibre-gl'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import Map, {
   Layer,
   Source,
@@ -12,6 +12,7 @@ import Map, {
   type MapRef,
 } from 'react-map-gl/maplibre'
 import { CalqueCarrefour, type ApercuFeu, type ClicCalque, type FeuPlacable } from '../configuration/calque/CalqueCarrefour'
+import { CalqueRues } from '../reseau/CalqueRues'
 import type { Poignee } from '../configuration/modele'
 import type { AffichageConfiguration } from '../configuration/ConfigurationCarrefour'
 import { Aide, BarreOutils, ControleZoom, PopupCarte, PopupSurCarte } from '../ds'
@@ -70,8 +71,13 @@ interface Props {
   /** null hors édition ; en édition, les feux sélectionnés et le carrefour modifié (null si nouveau). */
   edition: { selection: string[]; carrefourId: string | null; modeRectangle: boolean } | null
   onEmprise: (bbox: Bbox, zoom: number) => void
-  /** Mode réseau : la couche réseau gère les clics, les bulles des carrefours et des feux sont coupées. */
+  /**
+   * Éditeur des voies sans carrefour ouvert : la couche du réseau gère les clics, sauf sur un
+   * carrefour ou ses feux, qui l'ouvrent ; pas de bulle de feu.
+   */
   reseauActif?: boolean
+  /** Voies des rues et des carrefours de la vue (éditeur des voies, zoom ≥ 16). */
+  rues?: ComponentProps<typeof CalqueRues> | null
   /** Curseur imposé (tracé d'un tronçon). */
   curseur?: string
   onBasculerFeu: (feu: FeuResume) => void
@@ -95,8 +101,6 @@ interface Props {
   /** Glisser-déposer dans l'éditeur de configuration. */
   onDeplacerPoignee: (poignee: Poignee, position: LonLat) => void
   onConnecter: (de: string, vers: string) => void
-  /** Lien voie à voie entre un tronçon raccordé et une branche : ajouté, ou retiré s'il existe. */
-  onBasculerLien: (cle: string, sens: 'entree' | 'sortie', paire: [number, number]) => void
   /** Voie tracée à la main dans le carrefour configuré : [bout côté carrefour, bout éloigné]. */
   onTracerVoie: (geom: [LonLat, LonLat]) => void
   /** Zone de la photo IA tracée sur la carte : [ouest, sud, est, nord]. */
@@ -241,10 +245,13 @@ export function CarteCarrefours(props: Props) {
   }
 
   const cliquer = (evenement: MapLayerMouseEvent) => {
-    if (props.reseauActif) return
     const objet = evenement.features?.[0]
     const { lng: longitude, lat: latitude } = evenement.lngLat
     const vise = carrefourVise(objet)
+    if (props.reseauActif) {
+      if (vise) props.onOuvrir(vise)
+      return
+    }
     if (configuration) {
       setBulle(undefined)
       // Un autre carrefour remplace celui qu'on configure (ses brouillons sont conservés),
@@ -325,6 +332,7 @@ export function CarteCarrefours(props: Props) {
           />
         </Source>
       )}
+      {props.rues && <CalqueRues {...props.rues} />}
       {configuration && (
         <CalqueCarrefour
           branches={configuration.branches}
@@ -337,8 +345,6 @@ export function CarteCarrefours(props: Props) {
           onDeplacer={props.onDeplacerPoignee}
           onConnecter={props.onConnecter}
           onTracer={props.onTracerVoie}
-          raccordements={configuration.raccordements}
-          onBasculerLien={props.onBasculerLien}
           feuxPlacables={feuxPlacables}
           onPlacerFeu={props.onPlacerFeu}
           onApercuFeu={setApercuFeu}

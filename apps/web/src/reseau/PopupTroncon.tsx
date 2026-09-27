@@ -132,7 +132,7 @@ export function PopupTroncon({ troncon, nomCarrefour, enregistrement, onModifier
                 {nomCarrefour(b.carrefour)} · {b.branche ? `branche ${b.branche}` : <Text as="span" color="fg.error">aucune branche</Text>}
               </Text>
               <Button variant="lien" size="xs" onClick={() => onConfigurer(b.carrefour)}>
-                Configurer
+                Ouvrir
               </Button>
             </HStack>
           ))}

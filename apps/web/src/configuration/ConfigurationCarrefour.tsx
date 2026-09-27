@@ -44,7 +44,7 @@ import { OngletGraphe, type Scenario } from './OngletGraphe'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
 import { OngletProgramme } from './OngletProgramme'
 import { OUTILS, RACCOURCIS, type ActionConfiguration, type OutilCarte } from './actions'
-import { PopupBranche, PopupFeu, PopupLiaison, PopupRaccordement, PopupVoie, ReglageAnneau } from './PopupsConfiguration'
+import { PopupBranche, PopupFeu, PopupLiaison, PopupVoie, ReglageAnneau } from './PopupsConfiguration'
 import {
   basculerLien,
   editer,
@@ -107,20 +107,23 @@ type Popup =
   | { type: 'voie'; cle: string; position: LonLat }
   | { type: 'connexion'; de: string; vers: string; position: LonLat }
   | { type: 'branche'; code: string; position: LonLat }
-  | { type: 'raccordement'; cle: string; position: LonLat }
   | { type: 'feu'; feu: FeuResume; position: LonLat }
 
 const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>> = {
   ajuster: { titre: 'Caler les voies', aides: ['Glisser les extrémités des voies et des passages sur le marquage de la photo'] },
   connecter: {
     titre: 'Relier les voies',
-    aides: ['Glisser d’une voie entrante vers une voie sortante', 'Tronçons (rose) : glisser vers une voie de leur branche', 'Clic sur une liaison : la retirer'],
+    aides: [
+      'Glisser d’une voie entrante vers une voie sortante',
+      'Rues : du bout d’une voie (bleu) vers une voie de branche, ou d’une sortante (gris) vers une rue',
+      'Clic sur une liaison : la retirer',
+    ],
   },
   feux: { titre: 'Poser les feux', aides: ['Glisser chaque feu jusqu’à son mât', 'Clic sur le point creux : position OSM'] },
   pieton: { titre: 'Passages piétons', aides: ['Clic sur une voie ou un code de branche : ajouter ou retirer son passage'] },
   tracer: {
     titre: 'Tracer une voie',
-    aides: ['Glisser de la ligne d’arrêt vers l’amont', 'Elle rejoint la branche la plus proche, ou en ouvre une', 'Molette : zoomer'],
+    aides: ['Glisser de la ligne d’arrêt vers l’amont : une voie du carrefour', 'Cliquer : les points d’une rue, Entrée pour finir', 'Molette : zoomer'],
   },
 }
 
@@ -157,7 +160,8 @@ export interface ConfigurationCarrefourHandle {
   deplacerPoignee: (poignee: Poignee, position: LonLat) => void
   connecter: (de: string, vers: string) => void
   tracerVoie: (geom: [LonLat, LonLat]) => void
-  basculerLien: (cle: string, sens: 'entree' | 'sortie', paire: [number, number]) => void
+  /** Lien entre une voie de rue et une voie de branche ; une autre branche que celle du tronçon l'y raccorde. */
+  basculerLien: (cle: string, sens: 'entree' | 'sortie', paire: [number, number], branche: string) => void
   dessinerZoneIa: (emprise: EmpriseIa) => void
   executer: (action: ActionConfiguration) => void
 }
@@ -180,6 +184,8 @@ interface Props {
   onSupprimer: () => void
   /** Quitte la configuration ; les modifications non enregistrées restent dans la liste des brouillons. */
   onFermer: () => void
+  /** Outil actif à l'ouverture : celui de l'éditeur des voies, quand on y ouvre le carrefour. */
+  outilInitial?: OutilCarte
 }
 
 /** Le focus est dans un champ : les raccourcis d'une lettre ne doivent pas s'y déclencher. */
@@ -192,10 +198,23 @@ const focusLibre = () => {
   return !actif || actif === document.body || actif.classList.contains('maplibregl-canvas')
 }
 
-export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneauBas, onModifierFeux, onSupprimer, onFermer }: Props) {
+export function ConfigurationCarrefour({
+  ref,
+  carrefour,
+  position,
+  ciblePopup,
+  onAffichage,
+  onPlacerFeu,
+  ouvrirAnalyseIa,
+  onPanneauBas,
+  onModifierFeux,
+  onSupprimer,
+  onFermer,
+  outilInitial = 'selection',
+}: Props) {
   const queryClient = useQueryClient()
   const { carte } = useMap()
-  const [outil, setOutil] = useState<OutilCarte>('selection')
+  const [outil, setOutil] = useState<OutilCarte>(outilInitial)
   const [popup, setPopup] = useState<Popup | null>(null)
   const [panneauOuvert, setPanneauOuvert] = useState(false)
   const [ongletBas, setOngletBas] = useState<Onglet>('programme')
@@ -480,7 +499,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   // Ce que la carte doit montrer.
   const choixFeux = onglet === 'lignes' && ligneActive !== null
   const cleSelection =
-    popup?.type === 'voie' || popup?.type === 'raccordement'
+    popup?.type === 'voie'
       ? popup.cle
       : popup?.type === 'connexion'
         ? `${popup.de}>${popup.vers}`
@@ -662,9 +681,12 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   useImperativeHandle(ref, () => ({
     deplacerPoignee: (poignee, position) => setBrouillonBranches(deplacerPoignee(configuration, poignee, position)),
     connecter: (de, vers) => setBrouillonBranches(basculerConnexion(configuration, de, vers)),
-    basculerLien: (cle, sens, paire) => {
+    basculerLien: (cle, sens, paire, branche) => {
       const r = raccordements.find((x) => x.cle === cle)
-      if (r) setBrouillonRaccordements(editer(brouillonRaccordements, r, { liens: basculerLien(r.liens, sens, paire) }))
+      if (!r) return
+      // Relier une rue à une autre branche la raccorde à celle-ci, avec les liens proposés.
+      const changement = branche !== r.branche ? { branche, liens: null } : { liens: basculerLien(r.liens, sens, paire) }
+      setBrouillonRaccordements(editer(brouillonRaccordements, r, changement))
     },
     tracerVoie: (geom) => {
       const trace = tracerVoie(configuration, geom, centre)
@@ -758,17 +780,6 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         onRenommer={(code) => setPopup({ ...popup, code })}
         onFermer={fermerPopup}
       />
-    ) : popup?.type === 'raccordement' ? (
-      <PopupRaccordement
-        raccordement={raccordements.find((r) => r.cle === popup.cle)}
-        branches={branches}
-        onChanger={(changement) => {
-          const r = raccordements.find((x) => x.cle === popup.cle)
-          if (r) setBrouillonRaccordements(editer(brouillonRaccordements, r, changement))
-        }}
-        onOutil={choisirOutil}
-        onFermer={fermerPopup}
-      />
     ) : popup?.type === 'feu' ? (
       <PopupFeu
         feu={popup.feu}
@@ -791,9 +802,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         ? `liaison ${popup.de} → ${popup.vers}`
         : popup?.type === 'branche'
           ? `branche ${popup.code}`
-          : popup?.type === 'raccordement'
-            ? `tronçon ${raccordements.find((r) => r.cle === popup.cle)?.nom ?? ''}`
-            : popup?.type === 'feu'
+          : popup?.type === 'feu'
             ? 'feu'
             : null
   const consigne = cadrage
@@ -826,8 +835,8 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
               </Badge>
             )}
             {sansBranche > 0 && (
-              <Badge colorPalette="orange" title="Changer sa branche : clic sur le tronçon (rose)">
-                {sansBranche} tronçon{sansBranche > 1 ? 's' : ''} sans branche
+              <Badge colorPalette="orange" title="Outil Liaison : relier une voie de cette rue à une voie de la branche qui la prolonge">
+                {sansBranche} rue{sansBranche > 1 ? 's' : ''} non reliée{sansBranche > 1 ? 's' : ''}
               </Badge>
             )}
             {carrefour.nature === 'giratoire' && !configuration.anneau && branchesEnregistrees.isSuccess && (

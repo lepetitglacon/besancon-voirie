@@ -20,7 +20,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import type { Anneau, ArcGraphe, Controleur, Etape, IntervalleVert, LiensRaccordement, Plage } from '@voirie/schema';
+import type { Anneau, ArcGraphe, Controleur, Etape, IntervalleVert, Liaison, LiensRaccordement, Plage } from '@voirie/schema';
 
 // Tables du projet — voir docs/ARCHITECTURE.md §4.
 // Les tables issues d'OpenStreetMap (osm_*) sont gérées par l'import, pas par Drizzle.
@@ -338,6 +338,8 @@ export const noeud = pgTable(
       .unique()
       .references(() => carrefour.id, { onDelete: 'set null' }),
     geom: geometry('geom', { type: 'point', mode: 'xy', srid: 4326 }).notNull(),
+    /** Liaisons voie à voie saisies à ce nœud ; null : celles proposées par défaut. */
+    liaisons: jsonb('liaisons').$type<Liaison[]>(),
     creeLe: creeLe(),
   },
   (t) => [index('noeud_geom_idx').using('gist', t.geom)],

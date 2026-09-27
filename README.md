@@ -534,7 +534,7 @@ métropole. Un simple mail au service Mobilité peut les obtenir, facultatif. Le
 - [ ] Rapport actuel vs optimisé sur l'axe pilote.
 
 ### Phase 2 — SUMO
-- [x] Réseau routier de toute la ville : tronçons générés depuis OSM, corrigés et complétés à la main, raccordés voie à voie aux carrefours configurés ; export SUMO plain XML pour netconvert — voir [docs/RESEAU.md](docs/RESEAU.md).
+- [x] Réseau routier de toute la ville dans le même éditeur que les carrefours : rues générées depuis OSM, corrigées et complétées à la main, voies reliées une à une à chaque intersection et au bord des carrefours ; export SUMO plain XML pour netconvert — voir [docs/RESEAU.md](docs/RESEAU.md).
 - [ ] Réseau SUMO de l'axe pilote (netconvert sur l'export), puis corrections.
 - [ ] Convertisseur plan de feux → `tlLogic` (+ offsets, WAUT), association lignes ↔ liens.
 - [ ] Demande plausible, puis calée sur des comptages.

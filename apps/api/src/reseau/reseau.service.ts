@@ -1,13 +1,24 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { configurationNetconvert, exporterSumo, type LonLat, type RaccordementSumo, type ReseauSumo } from '@voirie/engine';
+import {
+  boutsAuNoeud,
+  configurationNetconvert,
+  exporterSumo,
+  liaisonsRetenues,
+  type LonLat,
+  type RaccordementSumo,
+  type ReseauSumo,
+} from '@voirie/engine';
 import type {
   Accroche,
   Bbox,
+  CarrefourReseau,
   FichierSumo,
+  Liaison,
   LiensRaccordement,
   ModificationTroncon,
   NouveauTroncon,
   ReseauGeoJson,
+  SaisieLiaisons,
   TronconResume,
 } from '@voirie/schema';
 import { sql, type SQL } from 'drizzle-orm';
@@ -15,10 +26,12 @@ import { lireBranches } from '../branches/branches.service.js';
 import { DRIZZLE, type Db } from '../db/db.module.js';
 import type { Executeur } from '../db/sql.js';
 import { genererReseau, type BilanReseau } from './generation.js';
-import { marquerModifie, raccorderCarrefour } from './raccordement.js';
+import { lireRaccordements, marquerModifie, raccorderCarrefour } from './raccordement.js';
 
 /** Au-delà, la carte ne reçoit qu'une partie des tronçons de l'emprise (`tronque`). */
 const LIMITE_TRONCONS = 6000;
+/** Carrefours configurés renvoyés avec le réseau d'une emprise, au plus. */
+const LIMITE_CARREFOURS = 40;
 /** Un tronçon accroché à moins de cette distance (m) du bout d'un autre s'accroche à son nœud. */
 const TOLERANCE_BOUT_M = 1.5;
 
@@ -61,8 +74,9 @@ export class ReseauService {
       carrefour_id: string | null;
       osm_node_id: number | null;
       degre: number;
+      liaisons: Liaison[] | null;
     }>(sql`
-      SELECT n.id, ST_AsGeoJSON(n.geom)::json AS geometry, n.carrefour_id, n.osm_node_id::float8 AS osm_node_id,
+      SELECT n.id, ST_AsGeoJSON(n.geom)::json AS geometry, n.carrefour_id, n.osm_node_id::float8 AS osm_node_id, n.liaisons,
              (SELECT count(*)::int FROM troncon t WHERE NOT t.supprime AND (t.noeud_de = n.id OR t.noeud_vers = n.id)) AS degre
       FROM noeud n WHERE n.geom && ${enveloppe(bbox)}
       LIMIT ${LIMITE_TRONCONS * 2}
@@ -75,8 +89,64 @@ export class ReseauService {
           .filter((n) => n.degre > 0 || n.carrefour_id !== null)
           .map(({ geometry, ...properties }) => ({ type: 'Feature' as const, id: properties.id, geometry, properties })),
       },
+      carrefours: await this.carrefoursConfigures(bbox),
       tronque: troncons.length > LIMITE_TRONCONS,
     };
+  }
+
+  /** Carrefours de l'emprise qui ont des voies : branches, connexions et raccordements, pour les dessiner avec les rues. */
+  private async carrefoursConfigures(bbox: Bbox): Promise<CarrefourReseau[]> {
+    const { rows } = await this.db.execute<{ id: string; nom: string }>(sql`
+      SELECT c.id, c.nom FROM carrefour c
+      WHERE c.geom && ${enveloppe(bbox)}
+        AND EXISTS (SELECT 1 FROM branche b JOIN voie v ON v.branche_id = b.id WHERE b.carrefour_id = c.id)
+      LIMIT ${LIMITE_CARREFOURS}
+    `);
+    return Promise.all(
+      rows.map(async ({ id, nom }) => {
+        const [config, raccordements] = await Promise.all([lireBranches(this.db, id), lireRaccordements(this.db, id)]);
+        return {
+          id,
+          nom,
+          centre: config.centre,
+          anneau: config.anneau,
+          branches: config.branches,
+          connexions: config.connexions,
+          raccordements: raccordements.raccordements,
+        };
+      }),
+    );
+  }
+
+  /**
+   * Liaisons voie à voie d'un nœud ordinaire. Les tronçons qui le touchent sont marqués corrigés :
+   * la régénération depuis OSM les garde, avec les identifiants auxquels les liaisons renvoient.
+   */
+  async enregistrerLiaisons(noeudId: string, { liaisons }: SaisieLiaisons): Promise<{ liaisons: Liaison[] | null }> {
+    return this.db.transaction(async (tx) => {
+      const { rows: noeuds } = await tx.execute<{ carrefour_id: string | null }>(sql`SELECT carrefour_id FROM noeud WHERE id = ${noeudId}`);
+      if (!noeuds[0]) throw new NotFoundException('Nœud inconnu');
+      if (noeuds[0].carrefour_id) throw new BadRequestException('Nœud d’un carrefour configuré : ses liaisons se font dans ses branches');
+      const { rows: autour } = await tx.execute<{
+        id: string;
+        source: string;
+        noeud_de: string;
+        noeud_vers: string;
+        points: LonLat[];
+        voies_avant: number;
+        voies_arriere: number;
+      }>(sql`
+        SELECT id, source, noeud_de, noeud_vers, (ST_AsGeoJSON(geom)::json)->'coordinates' AS points, voies_avant, voies_arriere
+        FROM troncon WHERE NOT supprime AND (noeud_de = ${noeudId} OR noeud_vers = ${noeudId})
+      `);
+      if (liaisons) {
+        const retenues = liaisonsRetenues(boutsAuNoeud(noeudId, autour), liaisons).liaisons;
+        if (retenues.length !== liaisons.length) throw new BadRequestException('Liaison vers un tronçon ou une voie qui n’arrive pas à ce nœud');
+      }
+      await tx.execute(sql`UPDATE noeud SET liaisons = ${liaisons ? JSON.stringify(liaisons) : null}::jsonb WHERE id = ${noeudId}`);
+      for (const t of autour) if (t.source === 'osm') await marquerModifie(tx, t.id);
+      return { liaisons };
+    });
   }
 
   generer(): Promise<BilanReseau> {
@@ -252,8 +322,15 @@ export async function donneesSumo(db: Executeur, bbox?: Bbox): Promise<ReseauSum
     ORDER BY t.id
   `);
   const idsNoeuds = [...new Set(troncons.flatMap((t) => [t.de, t.vers]))];
-  const { rows: noeuds } = await db.execute<{ id: string; lon: number; lat: number; carrefour_id: string | null; nom: string | null }>(sql`
-    SELECT n.id, ST_X(n.geom) AS lon, ST_Y(n.geom) AS lat, n.carrefour_id, c.nom
+  const { rows: noeuds } = await db.execute<{
+    id: string;
+    lon: number;
+    lat: number;
+    carrefour_id: string | null;
+    nom: string | null;
+    liaisons: Liaison[] | null;
+  }>(sql`
+    SELECT n.id, ST_X(n.geom) AS lon, ST_Y(n.geom) AS lat, n.carrefour_id, c.nom, n.liaisons
     FROM noeud n LEFT JOIN carrefour c ON c.id = n.carrefour_id
     WHERE n.id = ANY (${`{${idsNoeuds.join(',')}}`}::uuid[])
   `);
@@ -281,7 +358,7 @@ export async function donneesSumo(db: Executeur, bbox?: Bbox): Promise<ReseauSum
     }),
   );
   return {
-    noeuds: noeuds.map((n) => ({ id: n.id, position: [n.lon, n.lat] })),
+    noeuds: noeuds.map((n) => ({ id: n.id, position: [n.lon, n.lat], liaisons: n.liaisons })),
     troncons: troncons.map((t) => ({
       id: t.id,
       de: t.de,

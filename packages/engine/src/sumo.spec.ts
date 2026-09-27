@@ -88,6 +88,29 @@ describe('export SUMO plain XML', () => {
     expect(sansSud.nod).toMatch(/id="bk_S" [^>]*type="dead_end"/);
   });
 
+  it('écrit les liaisons d’un nœud ordinaire, saisies ou proposées', () => {
+    // Au nord, le tronçon « nord » se prolonge par « amont » au nœud n1 (1 voie → 2 voies).
+    const avecAmont: ReseauSumo = {
+      ...reseau,
+      noeuds: [...reseau.noeuds, { id: 'n0', position: m(0, 600) }],
+      troncons: [
+        ...reseau.troncons,
+        { id: 'amont', de: 'n0', vers: 'n1', points: [m(0, 600), m(0, 300)], voies_avant: 1, voies_arriere: 1, vitesse_kmh: null, nom: null, highway: null },
+      ],
+    };
+    const proposees = exporterSumo(avecAmont).con;
+    expect(proposees).toContain('<connection from="tamont" to="tnord" fromLane="0" toLane="1"/>');
+    expect(proposees).toContain('<connection from="tamont" to="tnord" fromLane="0" toLane="0"/>');
+    const saisies = exporterSumo({
+      ...avecAmont,
+      noeuds: avecAmont.noeuds.map((n) => (n.id === 'n1' ? { ...n, liaisons: [{ de: 'amont', voie_de: 0, vers: 'nord', voie_vers: 0 }] } : n)),
+    }).con;
+    // Rang 0 (gauche) parmi 2 : index SUMO 1 ; seule la liaison saisie est écrite à ce nœud.
+    expect(saisies).toContain('<connection from="tamont" to="tnord" fromLane="0" toLane="1"/>');
+    expect(saisies).not.toContain('from="tamont" to="tnord" fromLane="0" toLane="0"');
+    expect(saisies).not.toContain('from="-tnord" to="-tamont"');
+  });
+
   it('donne une vitesse par défaut selon le type de voie', () => {
     expect(vitesseParDefaut('residential')).toBe(30);
     expect(vitesseParDefaut(null)).toBe(50);

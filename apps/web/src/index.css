@@ -211,47 +211,46 @@ body {
   stroke-width: 3;
 }
 
-/* Tronçons du réseau raccordés au carrefour (docs/RESEAU.md) : voies roses, liens voie à voie. */
-.calque-bout-troncon .voie {
+/* Voies des rues (docs/RESEAU.md §7), dessinées comme les voies des carrefours, et leurs liaisons. */
+.calque-rue {
   fill: none;
-  stroke: #f472b6;
-  opacity: 0.45;
-  stroke-dasharray: 5 3;
+  stroke-linecap: butt;
+  stroke-linejoin: round;
+  opacity: 0.4;
 }
 
-.calque-raccordements.selection .calque-bout-troncon .voie {
+.calque-rue.interactive {
   pointer-events: stroke;
   cursor: pointer;
 }
 
-.calque-bout-troncon.selectionne .voie,
-.calque-bout-troncon .voie:hover {
+.calque-rue.interactive:hover,
+.calque-rue.selectionnee {
   opacity: 0.85;
 }
 
-.calque-bout-troncon.sans-branche .voie {
-  stroke: var(--chakra-colors-feu-rouge);
-  opacity: 0.8;
+.calque-carrefour-ferme {
+  opacity: 0.7;
 }
 
-.calque-bout-troncon .lien {
+.calque-liens .lien {
   fill: none;
   stroke-width: 2.5;
   stroke-linecap: round;
   opacity: 0.9;
 }
 
-.calque-bout-troncon .lien.auto {
+.calque-liens.auto .lien {
   stroke-dasharray: 4 3;
   opacity: 0.6;
 }
 
-.calque-raccordements.connecter .calque-bout-troncon .lien {
+.calque-liens.modifiables .lien {
   pointer-events: stroke;
   cursor: pointer;
 }
 
-.calque-raccordements.connecter .calque-bout-troncon .lien:hover {
+.calque-liens.modifiables .lien:hover {
   stroke: var(--chakra-colors-feu-rouge);
   stroke-width: 4;
 }

@@ -6,8 +6,8 @@
  * - Un carrefour configuré devient un nœud à feux, au centre de ses branches. Chaque branche y
  *   mène par une arête d'approche à ses propres voies (`<branche>_e` vers le centre, `_s` depuis
  *   le centre), qui démarre au bout du tronçon raccordé (ou au bout des voies, sans tronçon).
- * - Les connexions dessinées dans le carrefour et les liens de raccordement deviennent des
- *   `<connection>`. SUMO numérote les voies de la droite (0) vers la gauche : l'index SUMO d'une
+ * - Les connexions dessinées dans le carrefour, les liens de raccordement et les liaisons de chaque
+ *   nœud (saisies, ou proposées par défaut) deviennent des `<connection>`. SUMO numérote les voies de la droite (0) vers la gauche : l'index SUMO d'une
  *   voie de rang r parmi n (rang 0 = la plus à gauche) est n − 1 − r.
  *
  * Les coordonnées sont écrites en longitude, latitude : netconvert les projette
@@ -15,7 +15,7 @@
  */
 import { lireCleVoie, type Connexion } from './connexions.js';
 import { HIERARCHIE_VOIES } from './nommage.js';
-import { liensParDefaut } from './reseau.js';
+import { boutsAuNoeud, liaisonsRetenues, liensParDefaut, type Liaison } from './reseau.js';
 import type { LonLat, Segment } from './geometrie.js';
 
 export type TypeVoieSumo = 'generale' | 'bus' | 'velo' | 'tram';
@@ -23,6 +23,8 @@ export type TypeVoieSumo = 'generale' | 'bus' | 'velo' | 'tram';
 export interface NoeudSumo {
   id: string;
   position: LonLat;
+  /** Liaisons voie à voie saisies ; null ou absent : celles proposées par défaut. */
+  liaisons?: Liaison[] | null;
 }
 
 export interface TronconSumo {
@@ -284,6 +286,31 @@ export function exporterSumo(reseau: ReseauSumo): ExportSumo {
           );
         }
       }
+    }
+  }
+
+  // ── Liaisons voie à voie aux nœuds ordinaires (ni carrefour, ni cul-de-sac) ──
+  const emises = new Set(aretes.map((a) => a.id));
+  const parNoeud = new Map<string, TronconSumo[]>();
+  for (const t of reseau.troncons) {
+    for (const n of [t.de, t.vers]) parNoeud.set(n, [...(parNoeud.get(n) ?? []), t]);
+  }
+  for (const n of reseau.noeuds) {
+    const autour = parNoeud.get(n.id) ?? [];
+    if (noeudCarrefour.has(n.id) || autour.length < 2) continue;
+    const bouts = boutsAuNoeud(
+      n.id,
+      autour.map((t) => ({ id: t.id, noeud_de: t.de, noeud_vers: t.vers, points: t.points, voies_avant: t.voies_avant, voies_arriere: t.voies_arriere })),
+    );
+    for (const l of liaisonsRetenues(bouts, n.liaisons ?? null).liaisons) {
+      const a = bouts.find((b) => b.troncon === l.de)!;
+      const b = bouts.find((x) => x.troncon === l.vers)!;
+      const depuis = a.extremite === 'vers' ? `t${l.de}` : `-t${l.de}`;
+      const vers = b.extremite === 'de' ? `t${l.vers}` : `-t${l.vers}`;
+      if (!emises.has(depuis) || !emises.has(vers)) continue;
+      connexions.push(
+        `  <connection from="${depuis}" to="${vers}" fromLane="${indexSumo(a.arrivent, l.voie_de)}" toLane="${indexSumo(b.repartent, l.voie_vers)}"/>`,
+      );
     }
   }
 

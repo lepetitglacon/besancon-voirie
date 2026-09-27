@@ -218,12 +218,11 @@ Sur la **photo aérienne** (fond de carte « Satellite »), l'éditeur dessine :
   suivant, connexions comprises. Sa popup s'ouvre aussitôt : sens, branche, usage, puis
   « Relier » pour ses départs et arrivées. Changer de sens ou de branche retire ses liaisons ;
   « Supprimer » retire n'importe quelle voie (les suivantes remontent d'un rang).
-- **Tronçons du réseau** ([RESEAU.md](RESEAU.md)) : les rues hors carrefour arrivent sur le
-  cercle du carrefour, voies en rose pointillé. Avec l'outil Liaison, glisser d'une voie du
-  tronçon qui arrive vers le bout d'une voie entrante de sa branche, ou du bout d'une voie
-  sortante vers une voie du tronçon qui repart (même geste pour retirer). Les liens proposés
-  par défaut sont en pointillé. Un clic sur le tronçon (outil Sélection) change sa branche. Ces
-  liens s'enregistrent avec le reste (Enregistrer).
+- **Rues autour** ([RESEAU.md](RESEAU.md) §7) : l'éditeur du carrefour est celui des voies de
+  toute la ville. Les rues arrivent au bord du carrefour, voie par voie ; avec l'outil Liaison,
+  on glisse d'une voie de rue vers le bout d'une voie entrante, ou du bout d'une voie sortante
+  vers une voie de rue (viser une autre branche y relie la rue). Ces liens s'enregistrent avec
+  le reste (Enregistrer). Un clic dans le vide avec l'outil Tracer pose un point de rue.
 - Survoler une voie met en avant ses connexions. Pendant un ajustement, les voies et courbes
   suivent le pointeur en direct.
 - Dans l'onglet des lignes, les connexions de la ligne active sont mises en avant.

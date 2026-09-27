@@ -136,6 +136,34 @@ describe('Réseau routier, raccordements et export SUMO (e2e)', () => {
     expect(new Set(moities.flatMap((t) => [t.properties.noeud_de, t.properties.noeud_vers]))).toContain(body.properties.noeud_vers);
   });
 
+  it('PUT /reseau/noeuds/:id/liaisons should save lane links at an ordinary node, and refuse impossible ones', async () => {
+    const { body: reseau }: { body: ReseauGeoJson } = await http().get(`/api/reseau?bbox=${BBOX}`).expect(200);
+    const impasse = reseau.troncons.features.find((t) => t.id === manuel)!;
+    const noeud = impasse.properties.noeud_vers;
+    expect(reseau.noeuds.features.find((n) => n.id === noeud)?.properties).toMatchObject({ degre: 3, liaisons: null });
+    const rueC = reseau.troncons.features.filter((t) => t.properties.nom === 'Rue C');
+    const liaisons = [{ de: manuel, voie_de: 0, vers: rueC[0]!.id, voie_vers: 0 }];
+
+    await http().put(`/api/reseau/noeuds/${noeud}/liaisons`).send({ liaisons }).expect(200);
+    const { body: apres }: { body: ReseauGeoJson } = await http().get(`/api/reseau?bbox=${BBOX}`).expect(200);
+    expect(apres.noeuds.features.find((n) => n.id === noeud)?.properties.liaisons).toEqual(liaisons);
+
+    await http()
+      .put(`/api/reseau/noeuds/${noeud}/liaisons`)
+      .send({ liaisons: [{ ...liaisons[0], voie_de: 3 }] })
+      .expect(400);
+    const noeudA = (await client.query('SELECT id FROM noeud WHERE carrefour_id = $1', [carrefourA])).rows[0].id;
+    await http().put(`/api/reseau/noeuds/${noeudA}/liaisons`).send({ liaisons: null }).expect(400);
+  });
+
+  it('GET /reseau should return the configured carrefours with their lanes and attached sections', async () => {
+    const { body }: { body: ReseauGeoJson } = await http().get(`/api/reseau?bbox=${BBOX}`).expect(200);
+    expect(body.carrefours).toHaveLength(1);
+    expect(body.carrefours[0]).toMatchObject({ id: carrefourA, anneau: null });
+    expect(body.carrefours[0]!.branches.map((b) => b.code).sort((a, b) => a.localeCompare(b))).toEqual(['E', 'N', 'O', 'S']);
+    expect(body.carrefours[0]!.raccordements).toHaveLength(4);
+  });
+
   it('PATCH /reseau/troncons/:id should change lanes, reverse, and refuse a section without lanes', async () => {
     const { body } = await http().patch(`/api/reseau/troncons/${manuel}`).send({ voies_avant: 2, voies_arriere: 0 }).expect(200);
     expect(body.properties).toMatchObject({ voies_avant: 2, voies_arriere: 0 });
@@ -180,6 +208,8 @@ describe('Réseau routier, raccordements et export SUMO (e2e)', () => {
     expect(edg).not.toContain(`id="t${manuel}"`);
     expect(con.match(/<connection /g)!.length).toBeGreaterThan(10);
     expect(cfg).toContain('<connection-files value="reseau.con.xml"/>');
+    // Liaison saisie au nœud de l'impasse (le tronçon a depuis été inversé : il arrive par son arête inverse).
+    expect(con).toContain(`<connection from="-t${manuel}"`);
     await http().get('/api/reseau/sumo/autre.xml').expect(400);
   });
 });

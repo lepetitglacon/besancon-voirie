@@ -14,7 +14,15 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { BboxQuery, FichierSumo, ModificationTroncon, NouveauTroncon, SaisieRaccordements, type Bbox } from '@voirie/schema';
+import {
+  BboxQuery,
+  FichierSumo,
+  ModificationTroncon,
+  NouveauTroncon,
+  SaisieLiaisons,
+  SaisieRaccordements,
+  type Bbox,
+} from '@voirie/schema';
 import { EditionGuard } from '../common/edition.guard.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { DRIZZLE, type Db } from '../db/db.module.js';
@@ -56,6 +64,13 @@ export class ReseauController {
   @HttpCode(204)
   supprimer(@Param('id', ParseUUIDPipe) id: string) {
     return this.reseau.supprimer(id);
+  }
+
+  /** PUT /api/reseau/noeuds/:id/liaisons { liaisons: [...] | null } : liaisons voie à voie d'un nœud. */
+  @Put('noeuds/:id/liaisons')
+  @UseGuards(EditionGuard)
+  enregistrerLiaisons(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(SaisieLiaisons)) saisie: SaisieLiaisons) {
+    return this.reseau.enregistrerLiaisons(id, saisie);
   }
 
   /** GET /api/reseau/sumo/reseau.nod.xml (edg, con, netccfg) [?bbox=…] : export SUMO plain XML. */

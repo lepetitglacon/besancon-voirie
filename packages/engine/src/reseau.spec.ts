@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { repereLocal, type LonLat } from './geometrie.js';
-import { horsDuCercle, liensParDefaut, voiesBoutTroncon } from './reseau.js';
+import { boutsAuNoeud, horsDuCercle, liaisonsParDefaut, liaisonsRetenues, liensParDefaut, voiesTroncon } from './reseau.js';
 
 const centre: LonLat = [6.03, 47.25];
 const { versLonLat, versXY } = repereLocal(centre);
@@ -59,19 +59,75 @@ describe('liens proposés entre voies', () => {
   });
 });
 
-describe('voies au bout d’un tronçon', () => {
-  it('place les voies vers le carrefour à gauche de l’axe, vues du carrefour', () => {
-    // Tronçon vers le nord : vues du carrefour, la gauche est à l'ouest.
-    const { entrantes, sortantes } = voiesBoutTroncon(m(0, 30), m(0, 60), 2, 1);
-    const x = (p: LonLat) => versXY(p)[0];
-    expect(entrantes.map((v) => x(v[0]))).toEqual([expect.closeTo(-1.625, 3), expect.closeTo(-4.875, 3)]);
-    expect(x(sortantes[0]![0])).toBeCloseTo(1.625, 3);
-    expect(versXY(entrantes[0]![1])[1]).toBeCloseTo(48, 3);
+describe('voies d’une rue tout du long', () => {
+  const x = (p: LonLat) => versXY(p)[0];
+  const y = (p: LonLat) => versXY(p)[1];
+
+  it('met le sens du tracé à droite de l’axe, rang 0 contre l’axe', () => {
+    // Rue tracée vers le nord : à droite, c'est l'est.
+    const { avant, arriere } = voiesTroncon([m(0, 0), m(0, 100)], 2, 1);
+    expect(avant.map((v) => x(v[0]!))).toEqual([expect.closeTo(1.625, 3), expect.closeTo(4.875, 3)]);
+    expect(x(arriere[0]![0]!)).toBeCloseTo(-1.625, 3);
+    // Les voies inverses sont orientées dans leur sens de circulation : du nord vers le sud.
+    expect(y(arriere[0]![0]!)).toBeCloseTo(100, 3);
+    expect(y(arriere[0]!.at(-1)!)).toBeCloseTo(0, 3);
   });
 
-  it('centre un sens unique sur l’axe, rang 0 à gauche du conducteur', () => {
-    // Vers le carrefour (vers le sud), la gauche du conducteur est à l'est.
-    const { entrantes } = voiesBoutTroncon(m(0, 30), m(0, 60), 2, 0);
-    expect(entrantes.map((v) => versXY(v[0])[0])).toEqual([expect.closeTo(1.625, 3), expect.closeTo(-1.625, 3)]);
+  it('centre un sens unique et recule les bouts', () => {
+    const { avant, arriere } = voiesTroncon([m(0, 0), m(0, 100)], 2, 0, 10, 5);
+    expect(arriere).toEqual([]);
+    expect(avant.map((v) => x(v[0]!))).toEqual([expect.closeTo(-1.625, 3), expect.closeTo(1.625, 3)]);
+    expect(y(avant[0]![0]!)).toBeCloseTo(10, 3);
+    expect(y(avant[0]!.at(-1)!)).toBeCloseTo(95, 3);
+  });
+
+  it('suit les coudes de l’axe', () => {
+    const { avant } = voiesTroncon([m(0, 0), m(0, 50), m(50, 50)], 1, 0);
+    expect(versXY(avant[0]![1]!)).toEqual([expect.closeTo(0, 6), expect.closeTo(50, 6)]);
+    expect(avant[0]).toHaveLength(3);
+  });
+});
+
+describe('liaisons voie à voie à un nœud', () => {
+  // Carrefour en T au nœud « n » : rue ouest-est qui le traverse (deux tronçons), rue au nord.
+  const troncons = [
+    { id: 'ouest', noeud_de: 'a', noeud_vers: 'n', points: [m(-100, 0), m(0, 0)], voies_avant: 2, voies_arriere: 1 },
+    { id: 'est', noeud_de: 'n', noeud_vers: 'b', points: [m(0, 0), m(100, 0)], voies_avant: 1, voies_arriere: 1 },
+    { id: 'nord', noeud_de: 'c', noeud_vers: 'n', points: [m(0, 100), m(0, 0)], voies_avant: 1, voies_arriere: 1 },
+  ];
+
+  it('décrit les tronçons vus du nœud', () => {
+    const bouts = boutsAuNoeud('n', troncons);
+    expect(bouts.map((b) => [b.troncon, b.extremite, Math.round(b.azimut), b.arrivent, b.repartent])).toEqual([
+      ['ouest', 'vers', 270, 2, 1],
+      ['est', 'de', 90, 1, 1],
+      ['nord', 'vers', 0, 1, 1],
+    ]);
+  });
+
+  it('propose tout droit voie à voie, et les tourne-à-gauche et à droite depuis les voies du bord', () => {
+    const liaisons = liaisonsParDefaut(boutsAuNoeud('n', troncons));
+    const depuisOuest = liaisons.filter((l) => l.de === 'ouest').map((l) => [l.voie_de, l.vers, l.voie_vers]);
+    // Venant de l'ouest (vers l'est) : tout droit vers « est » (2 → 1), à gauche vers le nord.
+    expect(depuisOuest).toEqual([
+      [0, 'est', 0],
+      [1, 'est', 0],
+      [0, 'nord', 0],
+    ]);
+    // Venant du nord (vers le sud) : l'est est à gauche, l'ouest à droite.
+    expect(liaisons.filter((l) => l.de === 'nord').map((l) => [l.vers, l.voie_vers])).toEqual([
+      ['ouest', 0],
+      ['est', 0],
+    ]);
+  });
+
+  it('garde les liaisons saisies encore possibles', () => {
+    const bouts = boutsAuNoeud('n', troncons);
+    const saisies = [
+      { de: 'ouest', voie_de: 1, vers: 'nord', voie_vers: 0 },
+      { de: 'ouest', voie_de: 5, vers: 'nord', voie_vers: 0 },
+    ];
+    expect(liaisonsRetenues(bouts, saisies)).toEqual({ liaisons: [saisies[0]], auto: false });
+    expect(liaisonsRetenues(bouts, null).auto).toBe(true);
   });
 });

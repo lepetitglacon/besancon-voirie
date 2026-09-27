@@ -1,8 +1,10 @@
 # Réseau routier
 
 > Toutes les rues de la ville, pas seulement les carrefours à feux : des **tronçons** relient
-> des **nœuds**, et chaque carrefour configuré s'y branche voie par voie, comme le « lane
-> connector » de TM:PE. Le réseau s'exporte au format SUMO pour la simulation (phase 2).
+> des **nœuds**, chacun avec ses voies par sens. Rues et carrefours s'éditent ensemble, voie par
+> voie, et toutes les voies se relient avec le même geste, comme le « lane connector » de
+> TM:PE : à chaque intersection, au bord de chaque carrefour et dans le carrefour. Le réseau
+> s'exporte au format SUMO pour la simulation (phase 2).
 > Complète [ARCHITECTURE.md](ARCHITECTURE.md) ; la configuration d'un carrefour (branches,
 > voies, connexions) est dans [CONFIGURATION.md](CONFIGURATION.md).
 
@@ -48,7 +50,8 @@ CREATE TABLE noeud (
   id            uuid PRIMARY KEY,
   osm_node_id   bigint UNIQUE,                    -- intersection ou bout de voie OSM
   carrefour_id  uuid UNIQUE REFERENCES carrefour ON DELETE SET NULL,  -- le carrefour qu'il représente
-  geom          geometry(Point, 4326) NOT NULL
+  geom          geometry(Point, 4326) NOT NULL,
+  liaisons      jsonb        -- liaisons voie à voie saisies [{de, voie_de, vers, voie_vers}] ; null : proposées
 );
 
 CREATE TABLE troncon (
@@ -76,6 +79,8 @@ CREATE TABLE troncon (
 | Rang d'une voie de tronçon | Comme pour les branches : 0 = la plus à gauche dans son sens de circulation. |
 | Liens d'un bout raccordé | `entree` : `[voie du tronçon qui arrive, voie entrante de la branche]` ; `sortie` : `[voie sortante de la branche, voie du tronçon qui repart]`. |
 | Liens par défaut | `liensParDefaut(n, m)` : chaque voie source mène à sa part des voies cibles, et chaque cible est servie. 1 → 3 : la voie mène aux trois (élargissement) ; 3 → 1 : les trois se rejoignent. |
+| Voies d'une rue | `voiesTroncon` : tout du long de l'axe, `avant` à droite de l'axe et `arriere` à gauche (rang 0 contre l'axe), un sens unique centré. Reculées aux intersections (`retraitAuNoeud` : 3 m entre deux tronçons, 4 m + 0,6 voie par voie au-delà) pour laisser la place aux liaisons, pas au bord d'un carrefour. |
+| Liaisons d'un nœud | D'une voie qui arrive (`de`, `voie_de`) vers une voie qui repart (`vers`, `voie_vers`), rangs dans chaque sens. Proposées par `liaisonsParDefaut` comme les connexions d'un carrefour : tout droit voie à voie, tourne-à-gauche de gauche à gauche, tourne-à-droite de droite à droite, pas de demi-tour ; deux tronçons seuls se prolongent voie à voie. Des liaisons saisies devenues impossibles (voie retirée, tronçon supprimé) sont ignorées. |
 
 ## 3. Génération depuis OSM
 
@@ -117,7 +122,8 @@ chaque génération, et quand on trace ou modifie un tronçon qui touche le carr
 idempotent : un bout déjà raccordé est recoupé au même endroit.
 
 Enregistrer une branche ou des liens à la main marque le tronçon comme corrigé : la régénération
-le garde, avec ses liens.
+le garde, avec ses liens. De même, saisir les liaisons d'un nœud marque corrigés les tronçons qui
+le touchent : leurs identifiants, auxquels les liaisons renvoient, ne changent plus.
 
 ## 5. Export SUMO
 
@@ -140,7 +146,9 @@ et `sumolib` sait revenir en lon/lat (`net.convertXY2LonLat`).
 | Branche sans tronçon | nœud `b<carrefour>_<branche>` en cul-de-sac (alerte) |
 
 - Les **connexions du carrefour** (`S:e0 → O:s1`) deviennent des `<connection>` entre arêtes
-  d'approche ; les **liens de raccordement**, des `<connection>` entre le tronçon et l'approche.
+  d'approche ; les **liens de raccordement**, des `<connection>` entre le tronçon et l'approche ;
+  les **liaisons de chaque nœud** (saisies, ou à défaut proposées), des `<connection>` entre
+  tronçons. Ce qu'on voit dans l'éditeur est donc ce que SUMO simule.
   SUMO numérote les voies de la droite vers la gauche : index = nombre de voies − 1 − rang.
 - Voies bus, vélo, tram d'une branche : `<lane allow="bus|bicycle|tram"/>`.
 - Priorité des arêtes d'après `highway` (les approches d'un carrefour passent en premier).
@@ -151,7 +159,8 @@ et `sumolib` sait revenir en lon/lat (`net.convertXY2LonLat`).
 
 | Méthode | Route | Effet |
 |---|---|---|
-| GET | `/api/reseau?bbox=` | Tronçons (6 000 au plus, `tronque` au-delà) et nœuds de l'emprise |
+| GET | `/api/reseau?bbox=` | Tronçons (6 000 au plus, `tronque` au-delà), nœuds avec leurs liaisons, et carrefours configurés de l'emprise (branches, connexions, raccordements) |
+| PUT | `/api/reseau/noeuds/:id/liaisons` | `{ liaisons: [...] \| null }` : liaisons d'un nœud ordinaire (null : proposées) ; 400 pour une voie qui n'arrive pas au nœud ou un nœud de carrefour (`EditionGuard`) |
 | POST | `/api/reseau/generer` | (Re)génère depuis OSM, garde les corrections (`EditionGuard`) |
 | POST | `/api/reseau/troncons` | `{ points, de, vers, nom, voies_avant, voies_arriere, vitesse_kmh }` ; chaque bout s'accroche à un nœud (`{type:'noeud', id}`), coupe un tronçon (`{type:'troncon', id}`, au point le plus proche, ou sur son bout à moins de 1,5 m) ou crée un nœud (`{type:'libre'}`) (`EditionGuard`) |
 | PATCH | `/api/reseau/troncons/:id` | Nom, voies par sens, vitesse, `inverser` (`EditionGuard`) |
@@ -163,33 +172,32 @@ et `sumolib` sait revenir en lon/lat (`net.convertXY2LonLat`).
 
 ## 7. Interface
 
-### Mode « Réseau » de la carte (⌇, touche <kbd>R</kbd>)
+Un seul éditeur pour les rues et les carrefours : **≡ Voies** sur la carte (touche <kbd>R</kbd>),
+ou un clic sur un carrefour. À partir du zoom 16, les rues sont dessinées voie par voie, à leur
+largeur, comme les voies des carrefours (en gris pour OSM, orange corrigées, vert tracées à la
+main) ; plus loin, une ligne par tronçon. Les carrefours configurés de la vue sont dessinés avec
+leurs voies et leurs connexions ; un clic en ouvre un, sans quitter l'éditeur et **en gardant
+l'outil en cours**. <kbd>Échap</kbd> referme le carrefour (ses modifications restent dans les
+brouillons), puis quitte l'éditeur.
 
-À partir du zoom 14, les tronçons de la vue sont dessinés à la largeur de leurs voies : bleu
-pour OSM, orange pour un tronçon OSM corrigé, vert pour un tronçon tracé à la main. Les nœuds
-apparaissent au zoom 15 (rouge : cul-de-sac, violet : carrefour configuré), avec des chevrons
-dans le sens de circulation des sens uniques.
-
-- **↖ Sélection** (<kbd>V</kbd>) : un clic sur un tronçon ouvre sa popup. Nom, voies dans le
-  sens du tracé et dans l'autre (0 : sens interdit), vitesse (vide : celle du type de voie),
-  « Inverser », « Supprimer ». Chaque changement est enregistré aussitôt. Pour un bout
-  raccordé à un carrefour, « Configurer » ouvre son éditeur.
-- **＋ Tracer** (<kbd>T</kbd>) : cliquer le départ (un nœud, un tronçon, qui sera coupé à cet
-  endroit, ou un point libre), les points de la rue, puis l'arrivée sur un nœud ou un tronçon.
+- **↖ Sélection** (<kbd>V</kbd>) : un clic sur une rue ouvre sa popup. Nom, voies dans le sens du
+  tracé et dans l'autre (0 : sens interdit), vitesse (vide : celle du type de voie),
+  « Inverser », « Supprimer ». Chaque changement est enregistré aussitôt.
+- **＋ Tracer** (<kbd>T</kbd>) : cliquer le départ (un nœud, une rue, qui sera coupée à cet
+  endroit, ou un point libre), les points de la rue, puis l'arrivée sur un nœud ou une rue.
   <kbd>Entrée</kbd> (ou un second clic sur le dernier point) finit sur un point libre ;
-  <kbd>⌫</kbd> retire le dernier point, <kbd>Échap</kbd> annule. Le tronçon est créé avec une
-  voie par sens. Tracé jusqu'au centre d'un carrefour configuré, il s'arrête sur son cercle et se
-  raccorde à la branche de même direction.
-- Carte d'en-tête : légende, **⟳ Générer depuis OSM** (garde les corrections) et liens
-  d'**export SUMO** de la vue ou de toute la ville.
-
-### Dans l'éditeur du carrefour
-
-Les tronçons raccordés arrivent sur le cercle du carrefour, voies en rose pointillé, reliés aux
-voies des branches ([CONFIGURATION.md](CONFIGURATION.md) §3). Outil **Liaison** : glisser d'une
-voie du tronçon qui arrive vers le bout d'une voie entrante de sa branche, ou du bout d'une voie
-sortante vers une voie du tronçon qui repart ; refaire le geste ou cliquer un lien le retire.
-Les liens proposés sont en pointillé, les liens saisis en trait plein. Un clic sur le tronçon
-(outil Sélection) ouvre sa popup : branche (ou aucune), retour aux liens proposés. Le badge
-« tronçon sans branche » signale un bout qu'aucune branche ne prolonge. Tout s'enregistre avec
-le reste de la configuration (Enregistrer).
+  <kbd>⌫</kbd> retire le dernier point, <kbd>Échap</kbd> annule. La rue a une voie par sens, à
+  régler ensuite. Tracée jusqu'au centre d'un carrefour, elle s'arrête à son bord et se relie à la
+  branche de même direction. Carrefour ouvert, le même outil trace aussi ses voies : glisser de la
+  ligne d'arrêt vers l'amont donne une voie du carrefour, cliquer pose un point de rue.
+- **↝ Liaison** (<kbd>C</kbd>) : partout le même geste, du bout d'une voie qui arrive (poignée
+  bleue) vers le début d'une voie qui repart (poignée creuse). Les liaisons proposées sont en
+  pointillé, celles saisies en trait plein ; refaire le geste ou cliquer une liaison la retire.
+  - À une intersection : entre les voies des rues, enregistré aussitôt.
+  - Au bord d'un carrefour (ouvert) : d'une voie de rue vers le bout d'une voie entrante, ou du
+    bout d'une voie sortante (poignée grise) vers une voie de rue. Viser une autre branche que
+    celle de la rue l'y relie, avec les liens proposés. Enregistré avec le carrefour.
+  - Dans le carrefour : les connexions entre ses voies, comme avant.
+- Carte d'en-tête (aucun carrefour ouvert) : aide de l'outil, légende, **⟳ Générer depuis OSM**
+  (garde les corrections) et liens d'**export SUMO** de la vue ou de toute la ville. Carrefour
+  ouvert, le badge « rue non reliée » signale une rue qu'aucune branche ne prolonge.

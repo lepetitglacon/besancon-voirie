@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { LonLat } from './branches.js';
+import { LonLat, type Anneau, type BrancheLue, type Connexion } from './branches.js';
 
 /**
  * Réseau routier hors carrefours — docs/RESEAU.md. Des tronçons relient des nœuds
@@ -41,12 +41,38 @@ export interface TronconResume {
   branche_vers: string | null;
 }
 
+/** Liaison, à un nœud, d'une voie qui y arrive vers une voie qui en repart (rangs dans chaque sens). */
+export const Liaison = z.object({
+  de: z.uuid(),
+  voie_de: NombreVoies,
+  vers: z.uuid(),
+  voie_vers: NombreVoies,
+});
+export type Liaison = z.infer<typeof Liaison>;
+
+/** PUT /api/reseau/noeuds/:id/liaisons : liaisons du nœud ; null revient à celles proposées par défaut. */
+export const SaisieLiaisons = z.object({ liaisons: z.array(Liaison).max(400).nullable() });
+export type SaisieLiaisons = z.infer<typeof SaisieLiaisons>;
+
 export interface NoeudResume {
   id: string;
   carrefour_id: string | null;
   osm_node_id: number | null;
   /** Nombre de tronçons qui y arrivent : 1 = cul-de-sac ou bout du réseau. */
   degre: number;
+  /** Liaisons saisies ; null : celles proposées par défaut. */
+  liaisons: Liaison[] | null;
+}
+
+/** Carrefour configuré de l'emprise, pour le dessiner avec les rues : voies, connexions, raccordements. */
+export interface CarrefourReseau {
+  id: string;
+  nom: string;
+  centre: Position;
+  anneau: Anneau | null;
+  branches: BrancheLue[];
+  connexions: Connexion[];
+  raccordements: Raccordement[];
 }
 
 export interface ReseauGeoJson {
@@ -58,6 +84,8 @@ export interface ReseauGeoJson {
     type: 'FeatureCollection';
     features: Array<{ type: 'Feature'; id: string; geometry: { type: 'Point'; coordinates: Position }; properties: NoeudResume }>;
   };
+  /** Carrefours configurés de l'emprise. */
+  carrefours: CarrefourReseau[];
   /** Vrai si l'emprise contenait plus de tronçons que la limite : la carte n'en montre qu'une partie. */
   tronque: boolean;
 }

@@ -12,7 +12,8 @@ import { PopupSurCarte } from '../ds'
 import { COULEURS_RESEAU } from './couleurs'
 import type { Cible, Trace } from './trace'
 
-export type OutilReseau = 'selection' | 'tracer'
+/** Outils de l'éditeur des voies quand aucun carrefour n'est ouvert. */
+export type OutilReseau = 'selection' | 'tracer' | 'connecter'
 
 /** Distance (px) à laquelle un clic accroche un nœud ou un tronçon. */
 const TOLERANCE_PX = 8
@@ -39,6 +40,8 @@ const largeur = (minimum: number, marge = 0): ExpressionSpecification => [
   18, ['+', ['max', minimum, ['*', total, 5.4]], marge],
   21, ['+', ['max', minimum, ['*', total, 43]], marge],
 ]
+/** Opacité qui s'efface quand les voies sont dessinées une à une (zoom 16), sans disparaître des requêtes. */
+const auZoomDesVoies = (opacite: number): ExpressionSpecification => ['interpolate', ['linear'], ['zoom'], 15.5, opacite, 16, 0.02]
 const sensUnique: ExpressionSpecification = ['any', ['==', ['get', 'voies_avant'], 0], ['==', ['get', 'voies_arriere'], 0]]
 
 export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }: Props) {
@@ -111,7 +114,7 @@ export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }
               type="line"
               filter={estSelection}
               layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-              paint={{ 'line-color': COULEURS_RESEAU.selection, 'line-width': largeur(1.5, 6), 'line-opacity': 0.9 }}
+              paint={{ 'line-color': COULEURS_RESEAU.selection, 'line-width': largeur(1.5, 6), 'line-opacity': auZoomDesVoies(0.9) }}
             />
             <Layer
               id="reseau-troncons"
@@ -125,7 +128,8 @@ export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }
                   COULEURS_RESEAU.osm,
                 ],
                 'line-width': largeur(1.5),
-                'line-opacity': 0.75,
+                // Au zoom des voies, le calque SVG les dessine une à une : la ligne reste pour les clics.
+                'line-opacity': auZoomDesVoies(0.75),
               }}
             />
             {/* Sens de circulation des sens uniques, et sens du tracé du tronçon sélectionné. */}

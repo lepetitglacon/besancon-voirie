@@ -13,7 +13,6 @@ import {
 } from '@voirie/engine'
 import {
   typeLigne,
-  type Branche,
   type BranchesCarrefour,
   type ConfianceIa,
   type FeuResume,
@@ -57,7 +56,6 @@ import {
   type Brouillon,
 } from './modele'
 import type { OutilCarte } from './actions'
-import type { RaccordementAffiche, RaccordementEdite } from './raccordements'
 import type { BrouillonLignes } from './OngletLignes'
 import { geometrieEnregistree } from './programme'
 
@@ -322,66 +320,6 @@ export function PopupLiaison({ de, vers, brouillon, enregistree, lignes, onChang
           )}
         </Section>
       )}
-    </PopupCarte>
-  )
-}
-
-// ── Bout de tronçon raccordé ──
-
-interface PropsRaccordement {
-  raccordement: RaccordementAffiche | undefined
-  branches: Branche[]
-  onChanger: (changement: Partial<Pick<RaccordementEdite, 'branche' | 'liens'>>) => void
-  onOutil: (outil: OutilCarte) => void
-  onFermer: () => void
-}
-
-export function PopupRaccordement({ raccordement: r, branches, onChanger, onOutil, onFermer }: PropsRaccordement) {
-  if (!r) return null
-  const liens = r.liens.entree.length + r.liens.sortie.length
-  return (
-    <PopupCarte
-      icone={<Pastille couleur="#f472b6" w="3" h="3" />}
-      titre={r.nom ?? 'Tronçon sans nom'}
-      soustitre={`Tronçon du réseau · ${r.voies_vers_carrefour} voie(s) vers le carrefour, ${r.voies_depuis_carrefour} en repartant`}
-      onFermer={onFermer}
-      pied={
-        <>
-          <BarreOutils.Espace />
-          <Button variant="solid" onClick={() => onOutil('connecter')}>
-            Relier voie à voie (C)
-          </Button>
-        </>
-      }
-    >
-      <Section libelle="Branche">
-        <Selecteur
-          width="full"
-          aria-label="Branche du tronçon"
-          valeur={r.branche ?? ''}
-          onChange={(code) => onChanger({ branche: code || null, liens: null })}
-        >
-          <option value="">Aucune (non raccordé)</option>
-          {branches.map((b) => (
-            <option key={b.code} value={b.code}>
-              {b.code}
-              {b.nom ? ` · ${b.nom}` : ''} ({Math.round(b.azimut)}°)
-            </option>
-          ))}
-        </Selecteur>
-        <Aide>Proposée d’après la direction du tronçon ({Math.round(r.azimut)}°). En changer revient aux liens proposés.</Aide>
-      </Section>
-      <Section libelle={`Liens voie à voie (${liens})`}>
-        <HStack justify="space-between">
-          {r.liens_auto ? <Badge colorPalette="gray">Proposés</Badge> : <Badge colorPalette="brand">Saisis</Badge>}
-          {!r.liens_auto && (
-            <Button variant="lien" size="xs" onClick={() => onChanger({ liens: null })}>
-              Revenir aux liens proposés
-            </Button>
-          )}
-        </HStack>
-        <Aide>Chaque voie du tronçon mène à sa part des voies de la branche. L’outil Liaison les modifie une à une.</Aide>
-      </Section>
     </PopupCarte>
   )
 }

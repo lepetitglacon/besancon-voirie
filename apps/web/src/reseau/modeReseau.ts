@@ -1,10 +1,11 @@
 /**
- * Mode « Réseau » de la carte : outil actif, tronçon sélectionné, tracé en cours, données de
- * l'emprise et enregistrements (chaque changement part aussitôt à l'API).
+ * Éditeur des voies (docs/RESEAU.md §7) : outil actif quand aucun carrefour n'est ouvert, tronçon
+ * sélectionné, tracé en cours, données de l'emprise et enregistrements des rues (chaque
+ * changement part aussitôt à l'API ; ceux d'un carrefour attendent son « Enregistrer »).
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { LonLat } from '@voirie/engine'
-import type { Bbox, ModificationTroncon } from '@voirie/schema'
+import { boutsAuNoeud, liaisonsRetenues, type Liaison, type LonLat } from '@voirie/engine'
+import type { Bbox, ModificationTroncon, ReseauGeoJson } from '@voirie/schema'
 import { useRef, useState } from 'react'
 import { api } from '../api'
 import { notifications } from '../ds'
@@ -13,6 +14,8 @@ import { cliquer, retirerDernier, versNouveauTroncon, type Cible, type Trace } f
 
 /** En dessous, l'emprise contient trop de tronçons : on ne les charge pas. */
 export const ZOOM_MIN_RESEAU = 14
+/** À partir de ce zoom, les rues sont dessinées voie par voie, comme les carrefours. */
+export const ZOOM_VOIES = 16
 
 /** Valeurs d'un tronçon tracé : une voie par sens, vitesse du type de voie ; à corriger ensuite. */
 const PAR_DEFAUT = { nom: null, voies_avant: 1, voies_arriere: 1, vitesse_kmh: null }
@@ -58,6 +61,39 @@ export function useModeReseau({ actif, bbox, zoom }: { actif: boolean; bbox: Bbo
       await rafraichir()
     },
   })
+  const liaisons = useMutation({
+    mutationFn: ({ noeud, liaisons }: { noeud: string; liaisons: Liaison[] | null }) => api.enregistrerLiaisons(noeud, { liaisons }),
+    // Affichée tout de suite ; la réponse de l'API la confirme.
+    onMutate: ({ noeud, liaisons }) =>
+      queryClient.setQueriesData<ReseauGeoJson>({ queryKey: ['reseau'] }, (reseau) =>
+        reseau && {
+          ...reseau,
+          noeuds: {
+            ...reseau.noeuds,
+            features: reseau.noeuds.features.map((n) => (n.id === noeud ? { ...n, properties: { ...n.properties, liaisons } } : n)),
+          },
+        },
+      ),
+    // Les tronçons du nœud sont désormais « corrigés » : la carte suit.
+    onSuccess: rafraichir,
+    onError: async (erreur) => {
+      await rafraichir()
+      notifications.create({ type: 'error', title: 'Liaison non enregistrée', description: erreur.message })
+    },
+  })
+
+  /** Ajoute la liaison au nœud, ou la retire ; les liaisons proposées deviennent saisies. */
+  const basculerLiaison = (noeud: string, liaison: Liaison) => {
+    const reseau = donnees.data
+    if (!reseau) return
+    const troncons = reseau.troncons.features
+      .filter((t) => t.properties.noeud_de === noeud || t.properties.noeud_vers === noeud)
+      .map((t) => ({ ...t.properties, points: t.geometry.coordinates }))
+    const actuelles = liaisonsRetenues(boutsAuNoeud(noeud, troncons), reseau.noeuds.features.find((n) => n.id === noeud)?.properties.liaisons ?? null).liaisons
+    const meme = (l: Liaison) => l.de === liaison.de && l.voie_de === liaison.voie_de && l.vers === liaison.vers && l.voie_vers === liaison.voie_vers
+    liaisons.mutate({ noeud, liaisons: actuelles.some(meme) ? actuelles.filter((l) => !meme(l)) : [...actuelles, liaison] })
+  }
+
   const generation = useMutation({
     mutationFn: api.genererReseau,
     onSuccess: async (bilan) => {
@@ -76,8 +112,10 @@ export function useModeReseau({ actif, bbox, zoom }: { actif: boolean; bbox: Bbo
     if (nouveau && !creation.isPending) creation.mutate(nouveau)
   }
 
-  const clic = (position: LonLat, cible: Cible, memePoint: (a: LonLat, b: LonLat) => boolean) => {
-    if (outil === 'selection') {
+  /** Clic sur la carte ; `outilActif` : celui du carrefour ouvert, s'il y en a un. */
+  const clic = (position: LonLat, cible: Cible, memePoint: (a: LonLat, b: LonLat) => boolean, outilActif: OutilReseau | 'autre' = outil) => {
+    if (outilActif === 'connecter' || outilActif === 'autre') return
+    if (outilActif === 'selection') {
       modification.reset()
       return setSelection(cible?.type === 'troncon' ? { id: cible.id, position } : null)
     }
@@ -106,6 +144,7 @@ export function useModeReseau({ actif, bbox, zoom }: { actif: boolean; bbox: Bbo
     if (e.key === 'Backspace' && traceActuel.current.length > 0) return (changerTrace(retirerDernier(traceActuel.current)), true)
     if (lettre === 'v') return (choisirOutil('selection'), true)
     if (lettre === 't') return (choisirOutil('tracer'), true)
+    if (lettre === 'c') return (choisirOutil('connecter'), true)
     return true
   }
 
@@ -116,6 +155,11 @@ export function useModeReseau({ actif, bbox, zoom }: { actif: boolean; bbox: Bbo
     choisirOutil,
     selection,
     fermerSelection: () => setSelection(null),
+    selectionner: (id: string, position: LonLat) => {
+      modification.reset()
+      setSelection({ id, position })
+    },
+    basculerLiaison,
     troncon,
     trace,
     clic,

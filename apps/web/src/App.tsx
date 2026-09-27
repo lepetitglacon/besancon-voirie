@@ -37,9 +37,10 @@ import { CoucheTrams, type CouchesTram } from './map/CoucheTrams'
 import type { OptionsFond } from './map/FondDeCarte'
 import { usePreference } from './preferences'
 import { PALIERS_PERTE } from './tram/pertes'
-import { CoucheReseau } from './reseau/CoucheReseau'
+import type { OutilVoies } from './reseau/CalqueRues'
+import { CoucheReseau, type OutilReseau } from './reseau/CoucheReseau'
 import { EnTeteReseau } from './reseau/EnTeteReseau'
-import { useModeReseau } from './reseau/modeReseau'
+import { useModeReseau, ZOOM_VOIES } from './reseau/modeReseau'
 import { PopupTroncon } from './reseau/PopupTroncon'
 
 /** Le flux Ginko est mis en cache 10 s par l'API. */
@@ -85,8 +86,8 @@ function App() {
     setBbox(emprise)
     setZoom(niveau)
   }, [])
+  /** Éditeur des voies ouvert sans carrefour (outil Voies) ; avec un carrefour ouvert, on y est aussi. */
   const [modeReseau, setModeReseau] = useState(false)
-  const reseau = useModeReseau({ actif: modeReseau, bbox, zoom })
   const [mode, setMode] = usePreference<Mode>('mode', 'carte')
   const [fond, setFond] = usePreference<OptionsFond>('fond', FOND_DEFAUT)
   const [trams, setTrams] = usePreference<boolean>('trams', true)
@@ -99,7 +100,12 @@ function App() {
   const [configuration, setConfiguration] = useState<(CarrefourChoisi & {
     /** Proposition IA à charger à l'ouverture (« Ouvrir » d'une notification). */
     ouvrirAnalyseIa?: { id: string }
+    /** Outil de l'éditeur des voies au moment d'ouvrir le carrefour : il reste actif. */
+    outilInitial?: OutilReseau
   }) | null>(null)
+  // Un seul éditeur des voies : rues et carrefours, avec ou sans carrefour ouvert.
+  const editeur = modeReseau || configuration !== null
+  const reseau = useModeReseau({ actif: editeur, bbox, zoom })
   const [panneauBasOuvert, setPanneauBasOuvert] = useState(false)
   const brouillons = useBrouillons()
   const [affichageConfiguration, setAffichageConfiguration] = useState<AffichageConfiguration>({
@@ -131,9 +137,21 @@ function App() {
     [],
   )
   const basculerLien = useCallback<ConfigurationCarrefourHandle['basculerLien']>(
-    (cle, sens, paire) => panneauConfiguration.current?.basculerLien(cle, sens, paire),
+    (cle, sens, paire, branche) => panneauConfiguration.current?.basculerLien(cle, sens, paire, branche),
     [],
   )
+  // Outil actif de l'éditeur : celui du carrefour ouvert (ses outils propres comptent pour « autre »), sinon celui des rues.
+  const modeCarrefour = affichageConfiguration.mode
+  const outilEditeur: OutilVoies | null = !editeur
+    ? null
+    : !configuration
+      ? reseau.outil
+      : modeCarrefour === null
+        ? null
+        : modeCarrefour === 'selection' || modeCarrefour === 'tracer' || modeCarrefour === 'connecter'
+          ? modeCarrefour
+          : 'autre'
+  const outilPartage: OutilReseau | undefined = outilEditeur === 'autre' || outilEditeur === null ? undefined : outilEditeur
   const tracerVoie = useCallback<ConfigurationCarrefourHandle['tracerVoie']>(
     (geom) => panneauConfiguration.current?.tracerVoie(geom),
     [],
@@ -246,10 +264,16 @@ function App() {
     ? (carrefours.data?.features.find((f) => f.id === configuration.carrefour.id)?.properties ?? configuration.carrefour)
     : null
 
-  /** Un clic sur un carrefour l'ouvre en édition, à la place de celui qui l'était. */
+  /** Un clic sur un carrefour l'ouvre en édition, à la place de celui qui l'était, avec l'outil en cours. */
   const configurer = (choix: CarrefourChoisi) => {
     setEdition(null)
-    setConfiguration(choix)
+    setConfiguration({ ...choix, outilInitial: outilPartage })
+  }
+  /** Ferme le carrefour ouvert : on reste dans l'éditeur des voies, avec le même outil. */
+  const fermerCarrefour = () => {
+    setConfiguration(null)
+    setModeReseau(true)
+    if (outilPartage) reseau.choisirOutil(outilPartage)
   }
   const reprendre = (b: BrouillonsCarrefour) => configurer({ carrefour: b.carrefour, position: b.position })
 
@@ -311,12 +335,10 @@ function App() {
     demarrer({ carrefourId: null, selection: [], nature: 'carrefour', nomSaisi: null, modeRectangle: true })
   }
 
-  /** Ouvre la configuration d'un carrefour de la vue (depuis un tronçon qui y est raccordé). */
+  /** Ouvre un carrefour de la vue dans l'éditeur (clic sur ses voies, ou depuis une rue qui y est raccordée). */
   const configurerCarrefour = (carrefourId: string) => {
     const objet = carrefours.data?.features.find((f) => f.id === carrefourId)
-    if (!objet) return
-    setModeReseau(false)
-    setConfiguration({ carrefour: objet.properties, position: objet.geometry.coordinates })
+    if (objet) configurer({ carrefour: objet.properties, position: objet.geometry.coordinates })
   }
 
   // Raccourcis hors configuration (la configuration gère les siens).
@@ -339,6 +361,19 @@ function App() {
   useEffect(() => {
     window.addEventListener('keydown', touche)
     return () => window.removeEventListener('keydown', touche)
+  }, [])
+  // Rue en cours de tracé, même carrefour ouvert : Entrée la finit, ⌫ retire un point, Échap l'annule,
+  // avant les raccourcis de la configuration (écoute en phase de capture).
+  const toucheTrace = useEffectEvent((e: KeyboardEvent) => {
+    if (reseau.trace.length === 0 || !['Enter', 'Backspace', 'Escape'].includes(e.key)) return
+    if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+    reseau.clavier(e)
+    e.preventDefault()
+    e.stopImmediatePropagation()
+  })
+  useEffect(() => {
+    window.addEventListener('keydown', toucheTrace, { capture: true })
+    return () => window.removeEventListener('keydown', toucheTrace, { capture: true })
   }, [])
 
   const entreesMenu: EntreeMenu[] = [
@@ -378,7 +413,28 @@ function App() {
             }
             onEmprise={changerEmprise}
             reseauActif={modeReseau && !configuration}
-            curseur={modeReseau && reseau.outil === 'tracer' ? 'crosshair' : undefined}
+            curseur={modeReseau && !configuration && reseau.outil === 'tracer' ? 'crosshair' : undefined}
+            rues={
+              editeur && zoom >= ZOOM_VOIES && reseau.donnees.data
+                ? {
+                    reseau: reseau.donnees.data,
+                    outil: outilEditeur,
+                    focus: configuration && {
+                      carrefourId: configuration.carrefour.id,
+                      branches: affichageConfiguration.branches,
+                      raccordements: affichageConfiguration.raccordements,
+                    },
+                    selection: reseau.selection?.id ?? null,
+                    onClicTroncon: (id, position) => {
+                      panneauConfiguration.current?.clicCarte()
+                      reseau.selectionner(id, position)
+                    },
+                    onClicCarrefour: configurerCarrefour,
+                    onBasculerLiaison: reseau.basculerLiaison,
+                    onLienCarrefour: basculerLien,
+                  }
+                : null
+            }
             onBasculerFeu={basculerFeu}
             onAjouterFeux={ajouterFeux}
             onComposerDepuis={(feu) =>
@@ -406,7 +462,6 @@ function App() {
             onDeplacerPoignee={deplacerPoignee}
             onConnecter={connecter}
             onTracerVoie={tracerVoie}
-            onBasculerLien={basculerLien}
             onDessinerZoneIa={dessinerZoneIa}
             onPlacerFeu={placerFeu}
           >
@@ -416,15 +471,15 @@ function App() {
             {tramAffiche && reseauTram.data && (
               <CoucheTrams reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
             )}
-            {modeReseau && !configuration && (
+            {editeur && (
               <CoucheReseau
                 donnees={reseau.visible ? reseau.donnees.data : undefined}
-                outil={reseau.outil}
+                outil={outilEditeur === 'tracer' ? 'tracer' : 'selection'}
                 selection={reseau.selection?.id ?? null}
                 trace={reseau.trace}
-                onClic={reseau.clic}
+                onClic={(position, cible, memePoint) => reseau.clic(position, cible, memePoint, outilEditeur ?? 'autre')}
                 popup={
-                  reseau.outil === 'selection' && reseau.selection && reseau.troncon
+                  outilEditeur === 'selection' && reseau.selection && reseau.troncon
                     ? {
                         position: reseau.selection.position,
                         contenu: (
@@ -461,10 +516,12 @@ function App() {
           onPanneauBas={setPanneauBasOuvert}
           onModifierFeux={() => {
             setConfiguration(null)
+            setModeReseau(false)
             modifier(configuration.carrefour)
           }}
           onSupprimer={() => confirmerSuppression(configuration.carrefour)}
-          onFermer={() => setConfiguration(null)}
+          onFermer={fermerCarrefour}
+          outilInitial={configuration.outilInitial}
         />
       ) : (
         <>
@@ -482,7 +539,7 @@ function App() {
                   ? 'Modifier le carrefour'
                   : 'Composer un carrefour'
                 : modeReseau
-                  ? 'Réseau routier'
+                  ? 'Édition des voies'
                   : 'Inventaire citoyen des feux tricolores'
             }
             badges={
@@ -568,6 +625,13 @@ function App() {
                   actif={reseau.outil === 'tracer'}
                   onClick={() => reseau.choisirOutil('tracer')}
                 />
+                <BarreOutils.Outil
+                  glyphe="↝"
+                  libelle="Liaison"
+                  raccourci="C"
+                  actif={reseau.outil === 'connecter'}
+                  onClick={() => reseau.choisirOutil('connecter')}
+                />
                 <BarreOutils.Separateur />
                 <BarreOutils.Outil glyphe="×" libelle="Quitter" raccourci="Échap" onClick={() => setModeReseau(false)} />
               </>
@@ -575,7 +639,7 @@ function App() {
               <>
                 <BarreOutils.Outil glyphe="↖" libelle="Sélection" raccourci="V" actif />
                 <BarreOutils.Outil glyphe="⌖" libelle="Carrefour" raccourci="N" onClick={composer} />
-                <BarreOutils.Outil glyphe="⌇" libelle="Réseau" raccourci="R" onClick={() => setModeReseau(true)} />
+                <BarreOutils.Outil glyphe="≡" libelle="Voies" raccourci="R" onClick={() => setModeReseau(true)} />
               </>
             )}
           </BarreOutils.Root>

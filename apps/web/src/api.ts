@@ -25,6 +25,7 @@ import type {
   RaccordementsCarrefour,
   ReseauGeoJson,
   ReseauTram,
+  SaisieLiaisons,
   SaisieRaccordements,
   TramsTempsReel,
   TypeJour,
@@ -119,6 +120,8 @@ export const api = {
   modifierTroncon: (id: string, modification: ModificationTroncon) =>
     requete<Troncon>(`/api/reseau/troncons/${id}`, { method: 'PATCH', body: JSON.stringify(modification) }),
   supprimerTroncon: (id: string) => requete<void>(`/api/reseau/troncons/${id}`, { method: 'DELETE' }),
+  enregistrerLiaisons: (noeudId: string, saisie: SaisieLiaisons) =>
+    requete<SaisieLiaisons>(`/api/reseau/noeuds/${noeudId}/liaisons`, { method: 'PUT', body: JSON.stringify(saisie) }),
   /** Lien de téléchargement d'un fichier de l'export SUMO (de l'emprise, ou de toute la ville). */
   urlSumo: (fichier: string, bbox?: Bbox) => `/api/reseau/sumo/${fichier}${bbox ? `?bbox=${parametreBbox(bbox)}` : ''}`,
   raccordements: (carrefourId: string) => requete<RaccordementsCarrefour>(`/api/carrefours/${carrefourId}/raccordements`),
