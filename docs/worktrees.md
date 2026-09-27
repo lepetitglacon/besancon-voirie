@@ -50,7 +50,7 @@ Déclaré le 2026-09-27 (outil `create_project` du manager), worktrees rangés s
     "app": {
       "label": "API + web (pnpm)",
       "path": "/home/esteban/PhpstormProjects/besancon-voirie",
-      "cmd": "pnpm install --frozen-lockfile && pnpm db:up && pnpm db:prepare && API_PORT=$((PORT-2000)) pnpm dev",
+      "cmd": "pnpm install --frozen-lockfile && pnpm db:up && pnpm db:prepare && API_PORT=$((WEB_PORT-2000)) pnpm dev",
       "portEnv": "WEB_PORT",
       "portBase": 5400,
       "copyEnv": [".env"],
@@ -62,20 +62,22 @@ Déclaré le 2026-09-27 (outil `create_project` du manager), worktrees rangés s
         "VOIRIE_WORKTREE_SANDBOX": "{SANDBOX}"
       }
     }
-  },
-  "seed": {
-    "copy": [
-      { "from": "/home/esteban/PhpstormProjects/besancon-voirie/data/osm", "to": "{WT}/app/data/osm" }
-    ]
   }
 }
 ```
+
+Le manager est installé sous `/usr/lib/nevven-worktree-manager` ; ses projets sont dans
+`~/.config/nevven-wtm/projects/`.
 
 **Résultat attendu** : `list_projects` affiche `besancon-voirie` avec la target `app`.
 
 > 💡 `linkNodeModules: false` : un `node_modules` lié pointerait les packages `@voirie/*` du
 > workspace vers le dépôt principal. Le bouton « réinstaller » du manager lance `npm install` :
 > ne pas l'utiliser ici, relancer le worktree (la commande fait `pnpm install`).
+
+> 💡 Dans `cmd`, seul `WEB_PORT` existe dans l'environnement du shell (`portEnv`) : `$PORT`
+> y est vide. Avec `$((PORT-2000))`, l'API recevait le port `-2000` et Vite plantait au premier
+> appel `/api` (`ERR_INVALID_URL … localhost:-2000`).
 
 > 💡 **Appels extérieurs coupés par défaut dans les worktrees.** Au premier `db:prepare` d'un
 > worktree (son `.env` copié vise encore `voirie`), [prepare-db.ts](../apps/api/scripts/prepare-db.ts)
@@ -98,9 +100,21 @@ Déclaré le 2026-09-27 (outil `create_project` du manager), worktrees rangés s
 
 ### Étape 2 — Créer un worktree
 
-Par l'outil `create_worktree` du manager (branche partie de `main`), puis `start`.
+Par l'outil `create_worktree` du manager (branche partie de `main`). Avant `start`, copier le
+cache OSM du dépôt principal : la version installée du manager ignore le bloc `seed` qui
+devait le faire. Remplacer `mon-wt` par le nom du worktree :
 
-**Résultat attendu** : dans les logs, `Worktree « <nom> » : bases voirie_wt_<nom> et voirie_wt_<nom>_test`, puis `Local:` de Vite.
+```bash
+mkdir -p ~/worktrees/besancon-voirie/mon-wt/app/data && cp -r ~/PhpstormProjects/besancon-voirie/data/osm ~/worktrees/besancon-voirie/mon-wt/app/data/
+```
+
+Puis `start` dans le manager.
+
+**Résultat attendu** : dans les logs, `Worktree « <nom> » : TRAM_COLLECTE=false, IA_PARALLELE=0`,
+`bases voirie_wt_<nom> et voirie_wt_<nom>_test`, `migrations applied successfully!`, puis
+`Local:` de Vite et `Nest application successfully started`. Web sur `5400 + slot`, API sur
+`3400 + slot` ; `curl http://localhost:<port web>/api/tram/historique/etat` renvoie
+`"collecteActive":false`.
 
 ### Étape 3 — Remplir la base du worktree
 
@@ -234,3 +248,4 @@ supprimées avec le worktree).
 - 2026-09-27 — création
 - 2026-09-27 — inventaire des appels extérieurs (étape 1), file IA copiée avec les données (étape 3)
 - 2026-09-27 — projet créé dans le manager ; collecte tram et file IA coupées par défaut dans les worktrees
+- 2026-09-27 — premier worktree `essai-wtm` testé : port de l'API corrigé (`WEB_PORT`), copie manuelle du cache OSM (`seed` non géré)

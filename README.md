@@ -51,7 +51,9 @@ Résultat attendu :
 
 Le projet est déclaré dans le manager sous l'id `besancon-voirie` : un seul target `app`
 pour tout le monorepo. Au démarrage d'un worktree, le manager lance
-`pnpm install`, `pnpm db:up`, `pnpm db:prepare` puis `pnpm dev`.
+`pnpm install`, `pnpm db:up`, `pnpm db:prepare` puis `pnpm dev`. Au premier démarrage d'un
+worktree, `db:prepare` y coupe la collecte tram et la file IA (`TRAM_COLLECTE=false`,
+`IA_PARALLELE=0` dans son `.env`) : c'est main qui les fait tourner.
 
 - **Ports** : web sur `5400 + slot`, API sur `3400 + slot` (le port du web moins 2000).
 - **Un conteneur PostgreSQL partagé** par tous les checkouts (nom de projet Compose fixe),
