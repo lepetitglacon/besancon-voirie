@@ -89,6 +89,24 @@ export function Courbe({ entree, sortie, couleur, etat, feu, titre, onSurvol, on
   )
 }
 
+/**
+ * Cadre de la photo envoyée à l'IA : le reste de la carte est assombri. `coins` : haut gauche,
+ * haut droite, bas droite, bas gauche.
+ */
+export function CadrePhoto({ coins, libelle }: { coins: [XY, XY, XY, XY]; libelle: string }) {
+  const carre = `${d(coins)} Z`
+  const [x, y] = coins[0]
+  return (
+    <g className="calque-cadre-photo">
+      <path className="masque" d={`M-1e5,-1e5 H1e5 V1e5 H-1e5 Z ${carre}`} fillRule="evenodd" />
+      <path className="bord" d={carre} />
+      <text className="libelle" x={x + 8} y={y + 8} dominantBaseline="hanging">
+        {libelle}
+      </text>
+    </g>
+  )
+}
+
 export function Elastique({ depart, arrivee, valide }: { depart: XY; arrivee: XY; valide: boolean }) {
   return <path className={classes('calque-elastique', valide && 'valide')} d={d([depart, arrivee])} />
 }

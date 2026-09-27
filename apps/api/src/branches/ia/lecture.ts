@@ -129,7 +129,7 @@ export function consigne(contexte: ContexteIa, fichier: string): string {
   return `Configure les voies du carrefour à feux photographié.
 
 ## Image (outil Read)
-${fichier} : orthophoto IGN, ${cadre.taille_px}×${cadre.taille_px} px, nord en haut, ${cadre.metres_par_px.toFixed(3)} m/pixel (${cadre.cote_m} m de côté). Origine des pixels en haut à gauche, x vers la droite, y vers le bas. Le centre du carrefour est au centre de l'image.
+${fichier} : orthophoto IGN, ${cadre.largeur_px}×${cadre.hauteur_px} px, nord en haut, ${cadre.metres_par_px.toFixed(3)} m/pixel (${Math.round(cadre.largeur_m)}×${Math.round(cadre.hauteur_m)} m). Origine des pixels en haut à gauche, x vers la droite, y vers le bas. Le cadre couvre le carrefour et les rues qui y mènent ; des données OSM peuvent tomber hors de l'image (coordonnées négatives ou au-delà de sa taille).
 
 Lis le marquage au sol avec attention : lignes d'arrêt, lignes de voie, flèches, passages piétons, îlots, marquages bus ou vélo.
 

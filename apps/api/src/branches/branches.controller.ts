@@ -1,15 +1,17 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, UseGuards } from '@nestjs/common';
-import { ConfigurationBranches } from '@voirie/schema';
+import { ConfigurationBranches, DemandeAnalyseIa } from '@voirie/schema';
 import { EditionGuard } from '../common/edition.guard.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { BranchesService } from './branches.service.js';
 import { FileIaService } from './ia/file-ia.service.js';
+import { IaService } from './ia/ia.service.js';
 
 @Controller('carrefours/:id/branches')
 export class BranchesController {
   constructor(
     private readonly branches: BranchesService,
     private readonly fileIa: FileIaService,
+    private readonly ia: IaService,
   ) {}
 
   @Get()
@@ -30,8 +32,17 @@ export class BranchesController {
   @Post('detection-ia')
   @HttpCode(202)
   @UseGuards(EditionGuard)
-  demanderDetectionIa(@Param('id', ParseUUIDPipe) id: string) {
-    return this.fileIa.demander(id);
+  demanderDetectionIa(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(DemandeAnalyseIa)) demande: DemandeAnalyseIa,
+  ) {
+    return this.fileIa.demander(id, demande?.emprise);
+  }
+
+  /** Cadre automatique de la photo envoyée à l'IA (d'après les feux), à montrer avant de lancer. */
+  @Get('detection-ia/cadre')
+  cadreIa(@Param('id', ParseUUIDPipe) id: string) {
+    return this.ia.cadre(id);
   }
 
   @Put()

@@ -42,7 +42,7 @@ describe('File des propositions OSM + IA (e2e)', () => {
   it('POST /branches/detection-ia should queue the junction and answer at once', async () => {
     const { body } = await http().post(`/api/carrefours/${carrefourA}/branches/detection-ia`).expect(202);
     analyse = body;
-    expect(body).toMatchObject({ statut: 'en_attente', rang: 1, erreur: null, consultee_le: null });
+    expect(body).toMatchObject({ statut: 'en_attente', rang: 1, emprise: null, erreur: null, consultee_le: null });
     expect(body.carrefour).toMatchObject({ id: carrefourA, nb_feux: FEUX_A.length });
     expect(body.position).toHaveLength(2);
   });
@@ -78,6 +78,28 @@ describe('File des propositions OSM + IA (e2e)', () => {
     await client.query(`UPDATE analyse_ia SET statut = 'echec' WHERE id = $1`, [analyse.id]);
     await http().delete(`/api/analyses-ia/${analyse.id}`).expect(204);
     await http().get(`/api/analyses-ia/${analyse.id}`).expect(404);
+  });
+
+  it('GET /branches/detection-ia/cadre should frame a square photo around the signals', async () => {
+    const { body } = await http().get(`/api/carrefours/${carrefourA}/branches/detection-ia/cadre`).expect(200);
+    expect(body.largeur_m).toBeGreaterThanOrEqual(99.9);
+    expect(body.largeur_m).toBeLessThanOrEqual(180.1);
+    expect(body.hauteur_m).toBeCloseTo(body.largeur_m, 3);
+    expect(body).toMatchObject({ largeur_px: 1024, hauteur_px: 1024 });
+    expect(body.emprise).toHaveLength(4);
+    expect(body.bbox).toBeUndefined();
+  });
+
+  it('should keep the zone drawn by hand, if it holds the junction centre', async () => {
+    const url = `/api/carrefours/${carrefourA}/branches/detection-ia`;
+    const { body: auto } = await http().get(`${url}/cadre`).expect(200);
+    const [ouest, sud, est, nord] = auto.emprise as number[];
+    const decalee = [est! + 0.001, sud, est! + 0.002, nord];
+    await http().post(url).send({ emprise: [est, sud, ouest, nord] }).expect(400);
+    await http().post(url).send({ emprise: decalee }).expect(400);
+    const { body } = await http().post(url).send({ emprise: auto.emprise }).expect(202);
+    expect(body).toMatchObject({ statut: 'en_attente', emprise: auto.emprise });
+    await http().delete(`/api/analyses-ia/${body.id}`).expect(204);
   });
 
   it('should answer 404 for an unknown junction', async () => {

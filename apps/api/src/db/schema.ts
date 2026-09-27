@@ -302,6 +302,8 @@ export const analyseIa = pgTable(
     /** Proposition (DetectionBranchesIa), une fois terminée. */
     resultat: jsonb('resultat'),
     erreur: text('erreur'),
+    /** Zone de la photo dessinée sur la carte, [ouest, sud, est, nord] ; null : cadre calculé d'après les feux. */
+    emprise: jsonb('emprise').$type<[number, number, number, number]>(),
     demandeeLe: timestamp('demandee_le', { withTimezone: true }).notNull().defaultNow(),
     commenceeLe: timestamp('commencee_le', { withTimezone: true }),
     finieLe: timestamp('finie_le', { withTimezone: true }),

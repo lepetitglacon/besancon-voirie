@@ -11,21 +11,28 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { LonLat } from '@voirie/engine';
-import type { DetectionBranchesIa, SourceBranche, TypeFeu } from '@voirie/schema';
+import type { CadrePhotoIa, DetectionBranches, DetectionBranchesIa, EmpriseIa, SourceBranche, TypeFeu } from '@voirie/schema';
 import { sql } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../../db/db.module.js';
 import { tableExiste } from '../../db/sql.js';
 import { BranchesService, deduire } from '../branches.service.js';
 import { ErreurClaude, lancerClaude } from './claude.js';
 import { configurationDepuisLecture, consigne, LectureIa, schemaJsonLecture, SYSTEME, type ContexteIa } from './lecture.js';
-import { cadrePhoto, urlOrthophoto } from './photo.js';
+import { cadreEmprise, cadrePhoto, cadrePourClient, urlOrthophoto, type CadrePhoto } from './photo.js';
 
-/** Côté de l'image envoyée (px) : ~10 à 18 cm/pixel selon la taille du carrefour. */
-const TAILLE_PX = 1024;
-/** Marge autour du cercle de détection, pour voir les voies en amont des lignes d'arrêt (m). */
+/** Plus grand côté de l'image envoyée (px) : ~10 à 18 cm/pixel pour un cadre automatique. */
+export const TAILLE_PHOTO_PX = 1024;
+/** Cadre automatique : marge autour du cercle des feux, pour voir les voies en amont des lignes d'arrêt (m). */
 const MARGE_PHOTO_M = 35;
 const COTE_MIN_M = 100;
 const COTE_MAX_M = 180;
+
+/** Cadre de la photo : zone dessinée sur la carte, sinon un carré autour du cercle des feux (`rayon_m`). */
+function cadreDe(detection: DetectionBranches, emprise?: EmpriseIa | null): CadrePhoto {
+  if (emprise) return cadreEmprise(emprise, TAILLE_PHOTO_PX);
+  const cote = Math.min(COTE_MAX_M, Math.max(COTE_MIN_M, Math.round(2 * (detection.rayon_m + MARGE_PHOTO_M))));
+  return cadrePhoto(detection.centre as LonLat, cote, TAILLE_PHOTO_PX);
+}
 const FICHIER_PHOTO = 'orthophoto.jpg';
 
 /**
@@ -43,16 +50,20 @@ export class IaService {
     private readonly config: ConfigService,
   ) {}
 
-  async analyser(carrefourId: string): Promise<DetectionBranchesIa> {
+  /** Cadre automatique de la photo, montré sur la carte avant qu'on dessine la zone. */
+  async cadre(carrefourId: string): Promise<CadrePhotoIa> {
+    return cadrePourClient(cadreDe(await this.branches.detecter(carrefourId)));
+  }
+
+  /** `emprise` : zone de la photo dessinée sur la carte, sinon calculée d'après les feux. */
+  async analyser(carrefourId: string, emprise?: EmpriseIa | null): Promise<DetectionBranchesIa> {
     const detection = await this.branches.detecter(carrefourId); // 404 si le carrefour n'existe pas
-    const centre = detection.centre as LonLat;
-    const cote = Math.min(COTE_MAX_M, Math.max(COTE_MIN_M, Math.round(2 * (detection.rayon_m + MARGE_PHOTO_M))));
-    const cadre = cadrePhoto(centre, cote, TAILLE_PX);
+    const cadre = cadreDe(detection, emprise);
     const contexte: ContexteIa = {
       cadre,
       detection,
       feux: await this.feux(carrefourId),
-      voiesOsm: await this.voiesOsm(centre, cote / 2),
+      voiesOsm: await this.voiesOsm(cadre),
     };
 
     const dossier = await mkdtemp(join(tmpdir(), 'voirie-ia-'));
@@ -125,11 +136,11 @@ export class IaService {
   }
 
   /** Voies OSM circulables (et voies de tram) dans le cadre de la photo, découpées au cadre. */
-  private async voiesOsm([lon, lat]: LonLat, demiCote: number): Promise<ContexteIa['voiesOsm']> {
+  private async voiesOsm({ bbox: [xmin, ymin, xmax, ymax] }: CadrePhoto): Promise<ContexteIa['voiesOsm']> {
     if (!(await tableExiste(this.db, 'osm_way'))) return [];
     const { rows } = await this.db.execute<{ osm_id: string; tags: Record<string, string>; coordonnees: LonLat[] }>(sql`
       WITH cadre AS (
-        SELECT ST_Buffer(ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)::geography, ${demiCote}::float8)::geometry AS g
+        SELECT ST_Transform(ST_MakeEnvelope(${xmin}, ${ymin}, ${xmax}, ${ymax}, 3857), 4326) AS g
       )
       SELECT w.osm_id::text, w.tags,
              (ST_AsGeoJSON(ST_Simplify(ST_Intersection(w.geom, cadre.g), 0.000005))::json)->'coordinates' AS coordonnees

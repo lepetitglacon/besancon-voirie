@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -8,10 +9,11 @@ import {
   type OnApplicationShutdown,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { AnalyseIa, AnalyseIaDetail } from '@voirie/schema';
+import type { AnalyseIa, AnalyseIaDetail, EmpriseIa } from '@voirie/schema';
 import { sql, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../../db/db.module.js';
-import { IaService } from './ia.service.js';
+import { IaService, TAILLE_PHOTO_PX } from './ia.service.js';
+import { cadreEmprise, refusEmprise } from './photo.js';
 
 /** Analyses lancées en même temps (IA_PARALLELE) : chacune est un `claude -p` sur le serveur. */
 const PARALLELE_DEFAUT = 2;
@@ -21,7 +23,7 @@ const GARDER_FINIES = sql`interval '1 hour'`;
 
 /** Dates en ISO 8601 (to_json), lisibles telles quelles par le navigateur. */
 const COLONNES = sql`
-  a.id, a.statut, a.erreur,
+  a.id, a.statut, a.erreur, a.emprise,
   to_json(a.demandee_le) AS demandee_le, to_json(a.commencee_le) AS commencee_le,
   to_json(a.finie_le) AS finie_le, to_json(a.consultee_le) AS consultee_le,
   json_build_object(
@@ -71,16 +73,24 @@ export class FileIaService implements OnApplicationBootstrap, OnApplicationShutd
     clearInterval(this.veille);
   }
 
-  /** Met le carrefour en file, sauf s'il y est déjà (en attente ou en cours). */
-  async demander(carrefourId: string): Promise<AnalyseIa> {
-    const { rows: existe } = await this.db.execute<{ id: string }>(sql`SELECT id FROM carrefour WHERE id = ${carrefourId}`);
-    if (!existe[0]) throw new NotFoundException('Carrefour inconnu');
+  /**
+   * Met le carrefour en file, sauf s'il y est déjà (en attente ou en cours).
+   * `emprise` : zone de la photo dessinée sur la carte, sinon calculée d'après les feux.
+   */
+  async demander(carrefourId: string, emprise?: EmpriseIa): Promise<AnalyseIa> {
+    const { rows: existe } = await this.db.execute<{ lon: number; lat: number }>(
+      sql`SELECT ST_X(geom) AS lon, ST_Y(geom) AS lat FROM carrefour WHERE id = ${carrefourId}`,
+    );
+    const carrefour = existe[0];
+    if (!carrefour) throw new NotFoundException('Carrefour inconnu');
+    const refus = emprise && refusEmprise(cadreEmprise(emprise, TAILLE_PHOTO_PX), [carrefour.lon, carrefour.lat]);
+    if (refus) throw new BadRequestException(refus);
     const { rows: enFile } = await this.db.execute<{ id: string }>(sql`
       SELECT id FROM analyse_ia WHERE carrefour_id = ${carrefourId} AND statut IN ('en_attente', 'en_cours') LIMIT 1
     `);
     const id =
       enFile[0]?.id ??
-      (await this.db.execute<{ id: string }>(sql`INSERT INTO analyse_ia (carrefour_id) VALUES (${carrefourId}) RETURNING id`))
+      (await this.db.execute<{ id: string }>(sql`INSERT INTO analyse_ia (carrefour_id, emprise) VALUES (${carrefourId}, ${emprise ? JSON.stringify(emprise) : null}::jsonb) RETURNING id`))
         .rows[0]!.id;
     this.relancer();
     return this.resume(id);
@@ -149,17 +159,17 @@ export class FileIaService implements OnApplicationBootstrap, OnApplicationShutd
 
   /** Prend la plus ancienne analyse en attente et la mène à son terme. Faux si la file est vide. */
   private async suivante(): Promise<boolean> {
-    const { rows } = await this.db.execute<{ id: string; carrefour_id: string }>(sql`
+    const { rows } = await this.db.execute<{ id: string; carrefour_id: string; emprise: EmpriseIa | null }>(sql`
       UPDATE analyse_ia SET statut = 'en_cours', commencee_le = now()
       WHERE id = (
         SELECT id FROM analyse_ia WHERE statut = 'en_attente' ORDER BY demandee_le LIMIT 1 FOR UPDATE SKIP LOCKED
       )
-      RETURNING id, carrefour_id
+      RETURNING id, carrefour_id, emprise
     `);
     const analyse = rows[0];
     if (!analyse) return false;
     try {
-      const resultat = await this.ia.analyser(analyse.carrefour_id);
+      const resultat = await this.ia.analyser(analyse.carrefour_id, analyse.emprise);
       await this.db.execute(sql`
         UPDATE analyse_ia SET statut = 'terminee', resultat = ${JSON.stringify(resultat)}::jsonb, finie_le = now()
         WHERE id = ${analyse.id}

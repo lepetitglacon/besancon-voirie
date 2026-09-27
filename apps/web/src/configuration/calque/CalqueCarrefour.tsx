@@ -7,12 +7,13 @@
  * relayés au canvas : la carte zoome et se déplace aussi depuis une voie ou une liaison.
  */
 import { cleVoie, flechesParVoie, repereLocal, type LonLat, type XY } from '@voirie/engine'
-import type { Branche, Connexion, TypeFeu } from '@voirie/schema'
+import type { Branche, Connexion, EmpriseIa, TypeFeu } from '@voirie/schema'
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
 import { useMap } from 'react-map-gl/maplibre'
 import { FLECHES } from '../libelles'
 import { couleursVoies, deplacerPoignee, voiesDe, type Poignee as PoigneeModele } from '../modele'
 import {
+  CadrePhoto,
   Courbe,
   EcartOsm,
   Elastique,
@@ -76,6 +77,8 @@ interface Props {
   onClic?: (clic: ClicCalque) => void
   /** Élément sélectionné, mis en avant (clé de voie, « de>vers » ou code de branche). */
   selection?: string | null
+  /** Cadre de la photo envoyée à l'IA, montré avant de lancer l'analyse. */
+  cadrePhoto?: { emprise: EmpriseIa; libelle: string } | null
 }
 
 /** Part de la largeur réelle (3,25 m) occupée par le dessin d'une voie. */
@@ -104,8 +107,21 @@ const cleConnexion = (c: Connexion) => `${c.de}>${c.vers}`
 const symboles = new Map(FLECHES.map((f) => [f.direction, f.symbole]))
 
 export function CalqueCarrefour(props: Props) {
-  const { branches, connexions, mode, surlignees, feux, onDeplacer, onConnecter, feuxPlacables, onPlacerFeu, onApercuFeu, onClic, selection } =
-    props
+  const {
+    branches,
+    connexions,
+    mode,
+    surlignees,
+    feux,
+    onDeplacer,
+    onConnecter,
+    feuxPlacables,
+    onPlacerFeu,
+    onApercuFeu,
+    onClic,
+    selection,
+    cadrePhoto,
+  } = props
   const projection = useProjection()
   const { current: carte } = useMap()
   const refSvg = useRef<SVGSVGElement>(null)
@@ -352,11 +368,20 @@ export function CalqueCarrefour(props: Props) {
     },
   })
 
+  // Cadre de la photo, nord en haut : haut gauche, haut droite, bas droite, bas gauche.
+  const coinsCadre = (() => {
+    if (!cadrePhoto) return null
+    const [ouest, sud, est, nord] = cadrePhoto.emprise
+    return [px([ouest, nord]), px([est, nord]), px([est, sud]), px([ouest, sud])] as [XY, XY, XY, XY]
+  })()
+
   const depart = glisse?.type === 'connexion' ? voies.get(glisse.de) : undefined
   const cible = cibleEnCours ? voies.get(cibleEnCours) : undefined
 
   return (
     <svg ref={refSvg} className={`calque-carrefour ${mode ?? 'lecture'}`} aria-label="Configuration du carrefour">
+      {coinsCadre && cadrePhoto && <CadrePhoto coins={coinsCadre} libelle={cadrePhoto.libelle} />}
+
       {apercu.branches.map(
         (b) => b.traversee && (
             <PassagePieton

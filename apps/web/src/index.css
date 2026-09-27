@@ -423,6 +423,28 @@ svg.graphe-etapes {
 }
 
 
+/* Cadre de la photo envoyée à l'IA, avant de lancer l'analyse. */
+.calque-cadre-photo .masque {
+  fill: rgb(0 0 0 / 0.45);
+}
+
+.calque-cadre-photo .bord {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 2;
+  stroke-dasharray: 8 5;
+}
+
+.calque-cadre-photo .libelle {
+  fill: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: rgb(0 0 0 / 0.6);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
 /* Outils « sélection » et « piéton » : le code de chaque branche est cliquable. */
 .calque-code.interactive {
   pointer-events: all;

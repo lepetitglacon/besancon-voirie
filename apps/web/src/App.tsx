@@ -91,6 +91,7 @@ function App() {
     feux: null,
     selection: null,
     ancre: null,
+    cadreIa: null,
   })
   const [ciblePopup, setCiblePopup] = useState<HTMLElement | null>(null)
   const [pointMenu, setPointMenu] = useState<LonLat | null>(null)
@@ -103,6 +104,10 @@ function App() {
   )
   const connecter = useCallback<ConfigurationCarrefourHandle['connecter']>(
     (de, vers) => panneauConfiguration.current?.connecter(de, vers),
+    [],
+  )
+  const dessinerZoneIa = useCallback<ConfigurationCarrefourHandle['dessinerZoneIa']>(
+    (emprise) => panneauConfiguration.current?.dessinerZoneIa(emprise),
     [],
   )
 
@@ -321,6 +326,7 @@ function App() {
             onMenuContextuel={setPointMenu}
             onDeplacerPoignee={deplacerPoignee}
             onConnecter={connecter}
+            onDessinerZoneIa={dessinerZoneIa}
             onPlacerFeu={placerFeu}
             onSupprimer={(carrefour) => {
               if (window.confirm(`Supprimer « ${carrefour.nom} » ? Ses feux redeviendront libres.`)) {

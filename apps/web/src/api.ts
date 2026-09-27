@@ -4,6 +4,7 @@ import type {
   AnalyseIaDetail,
   Bbox,
   BranchesCarrefour,
+  CadrePhotoIa,
   CarrefourResume,
   CarrefoursGeoJson,
   ConfigurationBranches,
@@ -11,6 +12,7 @@ import type {
   ConfigurationProgramme,
   CreerCarrefour,
   DetectionBranches,
+  EmpriseIa,
   EtatHistoriqueTram,
   FeuxGeoJson,
   HistoriqueTroncons,
@@ -64,9 +66,14 @@ export const api = {
   branches: (carrefourId: string) => requete<BranchesCarrefour>(`/api/carrefours/${carrefourId}/branches`),
   detecterBranches: (carrefourId: string) =>
     requete<DetectionBranches>(`/api/carrefours/${carrefourId}/branches/detection`),
-  /** Met le carrefour dans la file des propositions OSM + IA (~1 min par analyse). */
-  demanderAnalyseIa: (carrefourId: string) =>
-    requete<AnalyseIa>(`/api/carrefours/${carrefourId}/branches/detection-ia`, { method: 'POST' }),
+  /**
+   * Met le carrefour dans la file des propositions OSM + IA (~1 min par analyse).
+   * `emprise` : zone de la photo dessinée sur la carte, sinon calculée d'après les feux.
+   */
+  demanderAnalyseIa: (carrefourId: string, emprise?: EmpriseIa) =>
+    requete<AnalyseIa>(`/api/carrefours/${carrefourId}/branches/detection-ia`, { method: 'POST', body: JSON.stringify({ emprise }) }),
+  /** Cadre automatique de la photo envoyée à l'IA, montré avant qu'on dessine la zone. */
+  cadreIa: (carrefourId: string) => requete<CadrePhotoIa>(`/api/carrefours/${carrefourId}/branches/detection-ia/cadre`),
   analysesIa: () => requete<AnalyseIa[]>('/api/analyses-ia'),
   analyseIa: (id: string) => requete<AnalyseIaDetail>(`/api/analyses-ia/${id}`),
   consulterAnalyseIa: (id: string) => requete<AnalyseIa>(`/api/analyses-ia/${id}/consultee`, { method: 'PUT' }),

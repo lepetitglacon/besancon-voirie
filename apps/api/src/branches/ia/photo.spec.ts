@@ -1,4 +1,4 @@
-import { cadrePhoto, urlOrthophoto, versLonLat, versPixel } from './photo.js';
+import { cadreEmprise, cadrePhoto, refusEmprise, urlOrthophoto, versLonLat, versPixel } from './photo.js';
 
 const centre: [number, number] = [6.0235472, 47.2450654];
 
@@ -40,5 +40,34 @@ describe('cadrePhoto', () => {
     expect(url.searchParams.get('LAYERS')).toBe('HR.ORTHOIMAGERY.ORTHOPHOTOS');
     const [xmin, ymin, xmax, ymax] = url.searchParams.get('BBOX')!.split(',').map(Number);
     expect(xmax! - xmin!).toBeCloseTo(ymax! - ymin!, 6);
+  });
+});
+
+describe('cadreEmprise', () => {
+  // Zone dessinée : ~150 m d'est en ouest, ~75 m du sud au nord.
+  const cadre = cadreEmprise([6.0225, 47.2447, 6.0245, 47.24537], 1024);
+
+  it('should keep square pixels, the longest side at full size', () => {
+    expect(cadre.largeur_m).toBeCloseTo(151, 0);
+    expect(cadre.hauteur_m).toBeCloseTo(74.5, 0);
+    expect(cadre.largeur_px).toBe(1024);
+    expect(cadre.hauteur_px).toBe(Math.round(cadre.hauteur_m / cadre.metres_par_px));
+    const url = new URL(urlOrthophoto(cadre));
+    expect([url.searchParams.get('WIDTH'), url.searchParams.get('HEIGHT')]).toEqual(['1024', String(cadre.hauteur_px)]);
+  });
+
+  it('should map its corners to the image corners', () => {
+    const coin = versPixel(cadre, [6.0245, 47.2447]);
+    expect(coin.x).toBeCloseTo(cadre.largeur_px, 6);
+    expect(coin.y).toBeCloseTo(cadre.hauteur_px, 6);
+    const retour = versLonLat(cadre, { x: 0, y: 0 });
+    expect(retour).toEqual([6.0225, 47.24537]);
+  });
+
+  it('should refuse a zone too small, too large, or without the junction centre', () => {
+    expect(refusEmprise(cadre, [6.0235, 47.245])).toBeNull();
+    expect(refusEmprise(cadre, [6.03, 47.245])).toMatch(/centre du carrefour/);
+    expect(refusEmprise(cadreEmprise([6.0234, 47.2449, 6.0236, 47.2451], 1024), [6.0235, 47.245])).toMatch(/trop petite/);
+    expect(refusEmprise(cadreEmprise([6.018, 47.242, 6.029, 47.248], 1024), [6.0235, 47.245])).toMatch(/trop grande/);
   });
 });

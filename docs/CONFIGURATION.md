@@ -107,11 +107,16 @@ connexions (`flechesParVoie`, `mouvementsDepuisConnexions`), côté API comme c�
 contextuel) part de la détection OSM et la fait corriger par Claude d'après la photo aérienne
 (`apps/api/src/branches/ia/`) :
 
-1. **Photo** : orthophoto IGN demandée au WMS de la Géoplateforme en Web Mercator, carré de
-   1024 px centré sur le carrefour, de 100 à 180 m de côté selon sa taille (10 à 18 cm/pixel).
+0. **Zone de la photo** : avant la mise en file, la carte montre le cadre de la photo, le reste
+   assombri. Par défaut, un carré centré sur le carrefour, de 100 à 180 m de côté d'après
+   l'éloignement des feux (`GET /branches/detection-ia/cadre`) ; un glisser sur la carte dessine
+   une autre zone (40 à 400 m de côté, contenant le centre du carrefour), envoyée avec la demande
+   (`emprise` : [ouest, sud, est, nord]). <kbd>Entrée</kbd> lance, <kbd>Échap</kbd> annule.
+1. **Photo** : orthophoto IGN de la zone, demandée au WMS de la Géoplateforme en Web Mercator,
+   1024 px sur le plus grand côté (pixels carrés) : ~15 cm/pixel à 150 m, ~39 cm/pixel à 400 m.
    Nord en haut ; le passage lon/lat ↔ pixel est exact (`photo.ts`).
 2. **Consigne** (`lecture.ts`) : la photo brute (rien n'est dessiné dessus), et en texte, en
-   pixels de l'image : les feux OSM du carrefour, les voies OSM du cadre avec leurs tags utiles
+   pixels de l'image : les feux OSM du carrefour, les voies OSM découpées au cadre avec leurs tags utiles
    (`lanes`, `turn:lanes`, `oneway`, bus, vélo, tram) et la proposition OSM au format attendu en
    réponse. Claude n'a qu'à la corriger d'après le marquage au sol.
 3. **Claude Code sur le serveur** (`claude.ts`) : `claude -p` avec `--json-schema` (schéma zod

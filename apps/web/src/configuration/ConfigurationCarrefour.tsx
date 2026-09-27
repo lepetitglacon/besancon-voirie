@@ -6,11 +6,14 @@ import {
   contexteProgramme,
   degagementsRetenus,
   etatLigne,
+  repereLocal,
   simulerGraphe,
   validerGraphe,
   type LonLat,
 } from '@voirie/engine'
 import {
+  COTE_PHOTO_IA_MAX_M,
+  COTE_PHOTO_IA_MIN_M,
   ConfigurationBranches,
   type AnalyseIa,
   type Branche,
@@ -18,6 +21,7 @@ import {
   type CarrefourResume,
   type Connexion,
   type DetectionBranchesIa,
+  type EmpriseIa,
   type FeuResume,
   type PlanSaisi,
   type SourceBranche,
@@ -69,6 +73,8 @@ export interface AffichageConfiguration {
   selection: string | null
   /** Où ancrer la popup ouverte ; null : aucune popup. */
   ancre: LonLat | null
+  /** Zone de la photo envoyée à l'IA, pendant qu'on la dessine ; null : aucune. */
+  cadreIa: { emprise: EmpriseIa; libelle: string } | null
 }
 
 /** Onglets du panneau bas « Plan de feux ». */
@@ -92,6 +98,25 @@ const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>>
 const HAUTEUR_PANNEAU_VH = 44
 const hauteurPanneau = `${HAUTEUR_PANNEAU_VH}vh`
 
+/** Plus grand côté de l'image envoyée à l'IA (px) : la résolution baisse quand la zone grandit. */
+const TAILLE_PHOTO_IA_PX = 1024
+
+/** Dimensions au sol (m) d'une zone [ouest, sud, est, nord]. */
+function dimensionsZone([ouest, sud, est, nord]: EmpriseIa) {
+  const { versXY } = repereLocal([(ouest + est) / 2, (sud + nord) / 2])
+  const [x0, y0] = versXY([ouest, sud])
+  const [x1, y1] = versXY([est, nord])
+  const largeur_m = x1 - x0
+  const hauteur_m = y1 - y0
+  const cotes = [largeur_m, hauteur_m]
+  const refus = cotes.some((c) => c < COTE_PHOTO_IA_MIN_M)
+    ? `Zone trop petite : ${COTE_PHOTO_IA_MIN_M} m de côté au moins`
+    : cotes.some((c) => c > COTE_PHOTO_IA_MAX_M)
+      ? `Zone trop grande : ${COTE_PHOTO_IA_MAX_M} m de côté au plus`
+      : null
+  return { largeur_m, hauteur_m, cm_par_px: (Math.max(...cotes) / TAILLE_PHOTO_IA_PX) * 100, refus }
+}
+
 const LAMPES: Record<EtatFeu, EtatLampe | null> = { vert: 'vert', jaune: 'orange', rouge: 'rouge', libre: null }
 
 /** Ce que le parent relaie depuis la carte et le menu contextuel. */
@@ -101,6 +126,7 @@ export interface ConfigurationCarrefourHandle {
   clicCarte: (cible: 'centre' | 'vide', position: LonLat) => void
   deplacerPoignee: (poignee: Poignee, position: LonLat) => void
   connecter: (de: string, vers: string) => void
+  dessinerZoneIa: (emprise: EmpriseIa) => void
   executer: (action: ActionConfiguration) => void
 }
 
@@ -167,10 +193,20 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
   /** Dernière analyse de ce carrefour (la liste va de la plus récente à la plus ancienne). */
   const analyseCarrefour = analyses.data?.find((a) => a.carrefour.id === carrefour.id)
   const iaEnFile = analyseCarrefour !== undefined && enFile(analyseCarrefour)
+  // Avant la mise en file, on dessine la zone de la photo (null : cadre automatique d'après les feux).
+  const [cadrage, setCadrage] = useState<{ emprise: EmpriseIa | null } | null>(null)
+  const cadreAuto = useQuery({
+    queryKey: ['cadre-ia', carrefour.id],
+    queryFn: () => api.cadreIa(carrefour.id),
+    enabled: cadrage !== null,
+  })
+  const zoneIa = cadrage ? (cadrage.emprise ?? cadreAuto.data?.emprise ?? null) : null
+  const dimensionsIa = useMemo(() => (zoneIa ? dimensionsZone(zoneIa) : null), [zoneIa])
   const demandeIa = useMutation({
-    mutationFn: () => api.demanderAnalyseIa(carrefour.id),
+    mutationFn: (emprise?: EmpriseIa) => api.demanderAnalyseIa(carrefour.id, emprise),
     onMutate: demanderNotificationsSysteme,
     onSuccess: async () => {
+      setCadrage(null)
       await queryClient.invalidateQueries({ queryKey: ['analyses-ia'] })
       notifications.create({
         type: 'info',
@@ -180,7 +216,14 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     },
   })
   const genererIa = () => {
-    if (!iaEnFile && !demandeIa.isPending) demandeIa.mutate()
+    if (iaEnFile || demandeIa.isPending) return
+    setPopup(null)
+    demandeIa.reset()
+    setCadrage({ emprise: null })
+  }
+  const lancerIa = () => {
+    if (!cadrage || !zoneIa || dimensionsIa?.refus || demandeIa.isPending) return
+    demandeIa.mutate(cadrage.emprise ?? undefined)
   }
   const brouillonActuel = useRef(brouillonBranches)
   useEffect(() => {
@@ -385,22 +428,37 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     return feuxDesLignes(new Map(lignesFeux.map((l, i) => [l.code, etats[i]!])), lignesFeux, connexionsEnregistrees)
   }, [etatsLignes, lignesFeux, connexionsEnregistrees])
 
+  const libelleZoneIa = dimensionsIa && `Photo IA · ${Math.round(dimensionsIa.largeur_m)} × ${Math.round(dimensionsIa.hauteur_m)} m`
   useEffect(
     () =>
       onAffichage({
         branches,
         connexions: configuration.connexions,
-        mode: outil,
+        mode: cadrage ? null : outil,
         feuxSurlignes,
         connexionsSurlignees,
         feux,
         selection: cleSelection,
         ancre: popup?.position ?? null,
+        cadreIa: zoneIa && libelleZoneIa ? { emprise: zoneIa, libelle: libelleZoneIa } : null,
       }),
-    [branches, configuration.connexions, outil, feuxSurlignes, connexionsSurlignees, feux, cleSelection, popup?.position, onAffichage],
+    [
+      branches,
+      configuration.connexions,
+      outil,
+      cadrage,
+      feuxSurlignes,
+      connexionsSurlignees,
+      feux,
+      cleSelection,
+      popup?.position,
+      zoneIa,
+      libelleZoneIa,
+      onAffichage,
+    ],
   )
 
-  const erreur = [detection, demandeIa, chargementIa, importJson, enregistrementBranches, enregistrementLignes, enregistrementProgramme].find((m) => m.error)?.error
+  const erreur = [detection, cadreAuto, demandeIa, chargementIa, importJson, enregistrementBranches, enregistrementLignes, enregistrementProgramme].find((m) => m.error)?.error
 
   const modifications = [brouillonBranches, brouillonLignes, brouillonProgramme].filter((b) => b !== null).length
   const enregistrementEnCours = [enregistrementBranches, enregistrementLignes, enregistrementProgramme].some((m) => m.isPending)
@@ -449,8 +507,9 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     choisirOutil(action)
   }
 
-  /** Échap défait une chose à la fois : popup, choix des feux d'une ligne, outil, puis la configuration. */
+  /** Échap défait une chose à la fois : cadrage IA, popup, choix des feux d'une ligne, outil, puis la configuration. */
   const echap = () => {
+    if (cadrage) return setCadrage(null)
     if (popup) return setPopup(null)
     if (ligneActive) return setLigneActive(null)
     if (outil !== 'selection') return setOutil('selection')
@@ -465,6 +524,10 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     }
     if (e.ctrlKey || e.metaKey || e.altKey || dansUnChamp(e.target)) return
     if (e.key === 'Escape') return echap()
+    if (e.key === 'Enter' && cadrage && focusLibre()) {
+      e.preventDefault()
+      return lancerIa()
+    }
     if (e.key === 'Tab' && !e.shiftKey && focusLibre()) {
       e.preventDefault()
       return executer('plan')
@@ -481,6 +544,11 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
   useImperativeHandle(ref, () => ({
     deplacerPoignee: (poignee, position) => setBrouillonBranches(deplacerPoignee(configuration, poignee, position)),
     connecter: (de, vers) => setBrouillonBranches(basculerConnexion(configuration, de, vers)),
+    dessinerZoneIa: (emprise) => {
+      if (!cadrage) return
+      demandeIa.reset()
+      setCadrage({ emprise })
+    },
     clicFeu: (feu, position) => {
       if (feu.carrefour_id !== carrefour.id) return
       if (onglet === 'lignes' && ligneActive) {
@@ -595,8 +663,9 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
             : popup?.type === 'carrefour'
               ? 'carrefour'
               : null
-  const consigne =
-    onglet === 'lignes' && ligneActive
+  const consigne = cadrage
+    ? { titre: 'Zone de la photo IA', aides: ['Glisser sur la carte pour dessiner la zone : l’IA ne voit rien en dehors', 'Entrée : lancer'] }
+    : onglet === 'lignes' && ligneActive
       ? { titre: `Feux de ${ligneActive}`, aides: ['Clic sur un feu du carrefour : l’ajouter ou le retirer'] }
       : CONSIGNES[outil]
 
@@ -644,6 +713,16 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
           <Indice mt="2">
             Aucune branche : <Kbd>O</Kbd> pour les détecter depuis OSM
           </Indice>
+        )}
+        {cadrage && (
+          <CadrageIa
+            dimensions={dimensionsIa}
+            auto={cadrage.emprise === null}
+            envoi={demandeIa.isPending}
+            onAuto={() => setCadrage({ emprise: null })}
+            onAnnuler={() => setCadrage(null)}
+            onLancer={lancerIa}
+          />
         )}
         {analyseCarrefour && !(analyseCarrefour.statut === 'terminee' && analyseCarrefour.consultee_le) && (
           <SuiviAnalyse analyse={analyseCarrefour} chargement={chargementIa.isPending} onCharger={() => chargerAnalyse(analyseCarrefour.id)} />
@@ -715,7 +794,7 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
           libelle="IA"
           raccourci="I"
           disabled={iaEnFile || demandeIa.isPending}
-          title="Générer avec OSM + IA : la détection OSM corrigée par Claude d’après la photo IGN (~1 min, en file)"
+          title="Générer avec OSM + IA : régler le cadre de la photo IGN, puis la détection OSM corrigée par Claude (~1 min, en file)"
           onClick={genererIa}
         />
         <BarreOutils.Outil glyphe="⇪" libelle="JSON" title="Importer un JSON { branches, connexions }" onClick={() => champImport.current?.click()} />
@@ -872,6 +951,47 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
 }
 
 /** Où en est la proposition IA de ce carrefour : en file, en cours, prête à charger, en échec. */
+interface PropsCadrage {
+  /** null tant que le cadre automatique n'est pas connu. */
+  dimensions: ReturnType<typeof dimensionsZone> | null
+  /** Cadre automatique (d'après les feux), pas encore redessiné. */
+  auto: boolean
+  envoi: boolean
+  onAuto: () => void
+  onAnnuler: () => void
+  onLancer: () => void
+}
+
+/** Zone de la photo, dessinée sur la carte avant de mettre l'analyse IA en file. */
+function CadrageIa({ dimensions, auto, envoi, onAuto, onAnnuler, onLancer }: PropsCadrage) {
+  return (
+    <Stack gap="2" mt="2" pt="2" borderTopWidth="1px" borderColor="border.muted">
+      <Aide color="fg">
+        ✦ Zone de la photo {auto ? '(automatique, d’après les feux)' : '(dessinée)'} : glissez sur la carte pour la redessiner.
+      </Aide>
+      {dimensions && (
+        <Aide>
+          {Math.round(dimensions.largeur_m)} × {Math.round(dimensions.hauteur_m)} m · {Math.round(dimensions.cm_par_px)} cm/pixel
+        </Aide>
+      )}
+      {dimensions?.refus && <Message ton="erreur">{dimensions.refus}</Message>}
+      <HStack gap="2" justify="flex-end">
+        {!auto && (
+          <Button size="xs" variant="ghost" onClick={onAuto}>
+            Automatique
+          </Button>
+        )}
+        <Button size="xs" variant="outline" onClick={onAnnuler}>
+          Annuler
+        </Button>
+        <Button size="xs" variant="solid" disabled={!dimensions || dimensions.refus !== null} loading={envoi} onClick={onLancer}>
+          Lancer l’analyse (Entrée)
+        </Button>
+      </HStack>
+    </Stack>
+  )
+}
+
 function SuiviAnalyse({ analyse, chargement, onCharger }: { analyse: AnalyseIa; chargement: boolean; onCharger: () => void }) {
   return (
     <HStack gap="2" mt="2" pt="2" borderTopWidth="1px" borderColor="border.muted" aria-live="polite">

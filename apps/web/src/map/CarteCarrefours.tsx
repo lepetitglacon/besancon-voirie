@@ -1,6 +1,6 @@
 import { Badge, Box, Button, Text } from '@chakra-ui/react'
 import type { LonLat } from '@voirie/engine'
-import type { Bbox, CarrefourResume, CarrefoursGeoJson, FeuResume, FeuxGeoJson } from '@voirie/schema'
+import type { Bbox, CarrefourResume, CarrefoursGeoJson, EmpriseIa, FeuResume, FeuxGeoJson } from '@voirie/schema'
 import type { Map as CarteMapLibre } from 'maplibre-gl'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Map, {
@@ -105,6 +105,8 @@ interface Props {
   /** Glisser-déposer dans l'éditeur de configuration. */
   onDeplacerPoignee: (poignee: Poignee, position: LonLat) => void
   onConnecter: (de: string, vers: string) => void
+  /** Zone de la photo IA tracée sur la carte : [ouest, sud, est, nord]. */
+  onDessinerZoneIa: (emprise: EmpriseIa) => void
   /** Pose un feu sur son mât, ou le remet à sa position OSM (null). */
   onPlacerFeu: (id: string, position: LonLat | null) => Promise<void>
 }
@@ -157,7 +159,9 @@ export function CarteCarrefours(props: Props) {
   const [rectangle, setRectangle] = useState<Rectangle | null>(null)
   const depart = useRef<{ x: number; y: number } | null>(null)
   const majEnfoncee = useMajEnfoncee()
-  const traceActif = edition !== null && (edition.modeRectangle || majEnfoncee)
+  // Rectangle tracé à la souris : feux à ajouter au carrefour composé, ou zone de la photo IA.
+  const zoneIa = configuration?.cadreIa != null
+  const traceActif = zoneIa || (edition !== null && (edition.modeRectangle || majEnfoncee))
 
   const commencerTrace = (evenement: MapMouseEvent) => {
     if (!traceActif) return
@@ -177,6 +181,11 @@ export function CarteCarrefours(props: Props) {
     if (!debut) return
     const { x, y } = evenement.point
     if (Math.abs(x - debut.x) < TAILLE_MIN_RECTANGLE && Math.abs(y - debut.y) < TAILLE_MIN_RECTANGLE) return
+    if (zoneIa) {
+      const sudOuest = evenement.target.unproject([Math.min(debut.x, x), Math.max(debut.y, y)])
+      const nordEst = evenement.target.unproject([Math.max(debut.x, x), Math.min(debut.y, y)])
+      return props.onDessinerZoneIa([sudOuest.lng, sudOuest.lat, nordEst.lng, nordEst.lat])
+    }
     const couverts = evenement.target.queryRenderedFeatures(
       [
         [Math.min(debut.x, x), Math.min(debut.y, y)],
@@ -287,6 +296,7 @@ export function CarteCarrefours(props: Props) {
           onApercuFeu={setApercuFeu}
           onClic={props.onClicCalque}
           selection={configuration.selection}
+          cadrePhoto={configuration.cadreIa}
         />
       )}
       {configuration?.ancre && (
