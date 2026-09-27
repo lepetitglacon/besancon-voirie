@@ -9,6 +9,9 @@ import {
   lireCleVoie,
   matriceConflits,
   mouvementsDepuisConnexions,
+  NOEUDS_CONSEILLES,
+  NOEUDS_MIN,
+  noeudDeVoie,
   type LonLat,
 } from '@voirie/engine'
 import {
@@ -17,7 +20,6 @@ import {
   type ConfianceIa,
   type FeuResume,
   type PrioriteEntree,
-  type SensVoie,
   type SourceBranche,
   type TypeVoie,
 } from '@voirie/schema'
@@ -25,6 +27,7 @@ import {
   Aide,
   BarreOutils,
   Bascule,
+  Case,
   Compteur,
   LigneConflit,
   Pastille,
@@ -42,16 +45,16 @@ import {
   basculerTraversee,
   changerPrioriteEntree,
   changerTypeVoie,
-  changerVoiesAnneau,
+  changerVoiesTroncon,
   couleursVoies,
-  creerAnneau,
-  deplacerVoie,
   regenererVoies,
   renommerBranche,
+  raccorderBranche,
+  reproposerLiaisons,
   retirerAnneau,
+  supprimerNoeud,
   retirerVoie,
   supprimerBranche,
-  supprimerVoie,
   voiesDe,
   type Brouillon,
 } from './modele'
@@ -84,24 +87,16 @@ const nomBranche = (brouillon: Brouillon, code: string) => brouillon.branches.fi
 
 // ── Voie ──
 
-const SENS: Array<{ valeur: SensVoie; libelle: string }> = [
-  { valeur: 'entrante', libelle: 'Entrante' },
-  { valeur: 'sortante', libelle: 'Sortante' },
-]
-
 interface PropsVoie {
   cle: string
   brouillon: Brouillon
-  centre: LonLat
   onChanger: (brouillon: Brouillon) => void
-  /** La voie a changé de clé (autre sens, autre branche, rang recalculé). */
-  onCle: (cle: string) => void
   onOutil: (outil: OutilCarte) => void
   onBranche: (code: string) => void
   onFermer: () => void
 }
 
-export function PopupVoie({ cle, brouillon, centre, onChanger, onCle, onOutil, onBranche, onFermer }: PropsVoie) {
+export function PopupVoie({ cle, brouillon, onChanger, onOutil, onBranche, onFermer }: PropsVoie) {
   const lue = lireCleVoie(cle)
   const branche = lue && brouillon.branches.find((b) => b.code === lue.branche)
   const voie = branche?.voies.find((v) => v.sens === lue!.sens && v.rang === lue!.rang)
@@ -109,12 +104,6 @@ export function PopupVoie({ cle, brouillon, centre, onChanger, onCle, onOutil, o
   const entrante = voie.sens === 'entrante'
   const directions = entrante ? (flechesParVoie(brouillon.branches, brouillon.connexions)[cle] ?? []) : []
   const liaisons = brouillon.connexions.filter((c) => c.de === cle || c.vers === cle)
-  const deplacer = (cible: { branche: string; sens: SensVoie }) => {
-    const resultat = deplacerVoie(brouillon, cle, cible, centre)
-    if (!resultat) return
-    onChanger(resultat.brouillon)
-    onCle(resultat.cle)
-  }
 
   return (
     <PopupCarte
@@ -124,16 +113,8 @@ export function PopupVoie({ cle, brouillon, centre, onChanger, onCle, onOutil, o
       onFermer={onFermer}
       pied={
         <>
-          <Button
-            variant="plain"
-            colorPalette="red"
-            px="2"
-            onClick={() => {
-              onChanger(supprimerVoie(brouillon, cle))
-              onFermer()
-            }}
-          >
-            Supprimer
+          <Button variant="lien" size="xs" onClick={() => onBranche(branche.code)}>
+            Branche {branche.code}
           </Button>
           <BarreOutils.Espace />
           <Button onClick={() => onOutil('ajuster')}>Caler (L)</Button>
@@ -145,32 +126,6 @@ export function PopupVoie({ cle, brouillon, centre, onChanger, onCle, onOutil, o
         </>
       }
     >
-      <Section libelle="Sens et branche">
-        <HStack gap="2">
-          <Segments
-            flex="1"
-            fitted
-            aria-label="Sens de la voie"
-            valeur={voie.sens}
-            onChange={(sens) => deplacer({ branche: branche.code, sens })}
-            options={SENS}
-          />
-          <Selecteur aria-label="Branche de la voie" valeur={branche.code} onChange={(code) => deplacer({ branche: code, sens: voie.sens })}>
-            {brouillon.branches.map((b) => (
-              <option key={b.code} value={b.code}>
-                {b.code}
-                {b.nom ? ` · ${b.nom}` : ''}
-              </option>
-            ))}
-          </Selecteur>
-        </HStack>
-        <Aide>
-          Changer de sens ou de branche retire les liaisons de la voie.{' '}
-          <Button variant="lien" size="xs" onClick={() => onBranche(branche.code)}>
-            Branche {branche.code}
-          </Button>
-        </Aide>
-      </Section>
       <Section libelle="Usage">
         <Segments
           fitted
@@ -475,6 +430,23 @@ export function PopupBranche({ code, brouillon, centre, source, ia, onChanger, o
         ))}
       </Section>
       {brouillon.anneau && (
+        <Section libelle="Nœud de raccordement">
+          <Selecteur
+            width="full"
+            aria-label="Nœud de raccordement"
+            valeur={branche.noeud ?? ''}
+            onChange={(valeur) => onChanger(raccorderBranche(brouillon, code, valeur || null))}
+          >
+            <option value="">Aucun (tram ou bus qui traverse l’îlot)</option>
+            {brouillon.anneau.noeuds.map((n) => (
+              <option key={n.code} value={n.code}>
+                Nœud {n.code}
+              </option>
+            ))}
+          </Selecteur>
+        </Section>
+      )}
+      {brouillon.anneau && (
         <Section libelle="Entrée sur l’anneau (hors feux)">
           <Segments
             fitted
@@ -520,46 +492,123 @@ const CONFIANCES: Record<ConfianceIa, string> = { haute: 'green', moyenne: 'oran
 
 interface PropsAnneau {
   brouillon: Brouillon
-  centre: LonLat
   onChanger: (brouillon: Brouillon) => void
   onOutil: (outil: OutilCarte) => void
 }
 
-/** Anneau d'un giratoire : le dessiner, régler ses voies, le caler sur la photo ou le retirer. */
-export function ReglageAnneau({ brouillon, centre, onChanger, onOutil }: PropsAnneau) {
-  const { anneau } = brouillon
+/** Anneau d'un giratoire : ses nœuds, posés avec l'outil Nœud ; le retirer. */
+export function ReglageAnneau({ brouillon, onChanger, onOutil }: PropsAnneau) {
+  const noeuds = brouillon.anneau?.noeuds.length ?? 0
+  // Le tram ou un bus en site propre qui traverse l'îlot n'a pas à être raccordé.
+  const sitePropre = (b: Brouillon['branches'][number]) => b.voies.length > 0 && b.voies.every((v) => v.type === 'tram' || v.type === 'bus')
+  const rues = brouillon.branches.filter((b) => !b.troncon && !sitePropre(b))
+  const raccordees = rues.filter((b) => b.noeud).length
   return (
     <Section libelle="Anneau">
-      {anneau ? (
-        <>
-          <HStack justify="space-between">
-            <Text>Voies sur l’anneau</Text>
-            <Compteur
-              taille="xs"
-              aria-label="Voies sur l’anneau"
-              min={1}
-              max={4}
-              valeur={anneau.voies}
-              onChange={(n) => onChanger(changerVoiesAnneau(brouillon, n ?? 1))}
-            />
-          </HStack>
-          <HStack justify="space-between">
-            <Aide>Rayon extérieur : {anneau.rayon_m} m</Aide>
-            <HStack gap="1">
-              <Button variant="lien" size="xs" onClick={() => onOutil('ajuster')}>
-                Caler (L)
-              </Button>
-              <Button variant="lien" size="xs" colorPalette="red" onClick={() => onChanger(retirerAnneau(brouillon))}>
-                Retirer
-              </Button>
-            </HStack>
-          </HStack>
-        </>
+      <HStack justify="space-between">
+        <Text>
+          {noeuds} nœud{noeuds > 1 ? 's' : ''} · {raccordees}/{rues.length} rue{rues.length > 1 ? 's' : ''} raccordée{raccordees > 1 ? 's' : ''}
+        </Text>
+        <HStack gap="1">
+          <Button variant="lien" size="xs" onClick={() => onOutil('noeud')}>
+            Nœuds (N)
+          </Button>
+          {noeuds > 0 && (
+            <Button variant="lien" size="xs" colorPalette="red" onClick={() => onChanger(retirerAnneau(brouillon))}>
+              Retirer
+            </Button>
+          )}
+        </HStack>
+      </HStack>
+      {noeuds < NOEUDS_MIN ? (
+        <Aide>Posez les nœuds là où les rues touchent l’anneau, dans n’importe quel ordre : la boucle se ferme au troisième.</Aide>
       ) : (
-        <Button size="xs" onClick={() => onChanger(creerAnneau(brouillon, centre))}>
-          Dessiner l’anneau
-        </Button>
+        noeuds < NOEUDS_CONSEILLES && <Aide>Quatre nœuds au moins suivent bien la forme de l’anneau.</Aide>
       )}
     </Section>
+  )
+}
+
+// ── Nœud d'anneau ──
+
+interface PropsNoeud {
+  code: string
+  brouillon: Brouillon
+  onChanger: (brouillon: Brouillon) => void
+  onOutil: (outil: OutilCarte) => void
+  onFermer: () => void
+}
+
+/** Nœud d'anneau : les rues qui s'y raccordent, les voies du tronçon qui en part, ses liaisons. */
+export function PopupNoeud({ code, brouillon, onChanger, onOutil, onFermer }: PropsNoeud) {
+  const { anneau } = brouillon
+  if (!anneau?.noeuds.some((n) => n.code === code)) return null
+  const troncon = brouillon.branches.find((b) => b.troncon && b.noeud === code)
+  const rues = brouillon.branches.filter((b) => !b.troncon)
+  const liaisons = brouillon.connexions.filter((c) => noeudDeVoie(c.de, brouillon.branches, anneau) === code)
+  return (
+    <PopupCarte
+      titre={`Nœud ${code}`}
+      soustitre="Mini-carrefour de l’anneau"
+      onFermer={onFermer}
+      pied={
+        <>
+          <Button
+            variant="plain"
+            colorPalette="red"
+            px="2"
+            onClick={() => {
+              onChanger(supprimerNoeud(brouillon, code))
+              onFermer()
+            }}
+          >
+            Supprimer
+          </Button>
+          <BarreOutils.Espace />
+          <Button onClick={() => onOutil('connecter')}>Relier (C)</Button>
+        </>
+      }
+    >
+      <Section libelle="Rues raccordées">
+        {rues.length === 0 ? (
+          <Aide>Aucune rue : détectez les branches depuis OSM (O).</Aide>
+        ) : (
+          <Stack gap="1">
+            {rues.map((b) => (
+              <Case key={b.code} coche={b.noeud === code} onChange={(coche) => onChanger(raccorderBranche(brouillon, b.code, coche ? code : null))}>
+                {b.code} · {b.nom ?? 'sans nom'}
+                {b.noeud && b.noeud !== code && (
+                  <Text as="span" color="fg.muted">
+                    {' '}
+                    (nœud {b.noeud})
+                  </Text>
+                )}
+              </Case>
+            ))}
+          </Stack>
+        )}
+      </Section>
+      {troncon && (
+        <HStack justify="space-between">
+          <Text>Voies du tronçon {troncon.code}</Text>
+          <Compteur
+            taille="xs"
+            aria-label={`Voies du tronçon ${troncon.code}`}
+            min={1}
+            max={4}
+            valeur={voiesDe(troncon, 'sortante').length}
+            onChange={(n) => onChanger(changerVoiesTroncon(brouillon, troncon.code, n ?? 1))}
+          />
+        </HStack>
+      )}
+      <HStack justify="space-between" pt="2.5" borderTopWidth="1px" borderColor="border.muted">
+        <Text>
+          {liaisons.length} liaison{liaisons.length > 1 ? 's' : ''}
+        </Text>
+        <Button variant="lien" size="xs" onClick={() => onChanger(reproposerLiaisons(brouillon, code))} title="Remplacer les liaisons du nœud par celles proposées : continuer, sortir, s’insérer">
+          Proposer les liaisons
+        </Button>
+      </HStack>
+    </PopupCarte>
   )
 }

@@ -1,6 +1,6 @@
 /**
- * Popup d'un tronçon du réseau : nom, voies par sens, vitesse, sens du tracé, raccordements
- * aux carrefours. Chaque changement est enregistré aussitôt.
+ * Popup d'un tronçon du réseau : nom, voies par sens, vitesse, sens du tracé. Chaque changement
+ * est enregistré aussitôt.
  */
 import { Badge, Button, HStack, Input, Stack, Text } from '@chakra-ui/react'
 import { vitesseParDefaut } from '@voirie/engine'
@@ -11,12 +11,9 @@ import { Aide, BarreOutils, Compteur, Message, PopupCarte, Section } from '../ds
 
 interface Props {
   troncon: Troncon
-  /** Nom des carrefours configurés aux bouts du tronçon. */
-  nomCarrefour: (id: string) => string
   enregistrement: { enCours: boolean; erreur: string | null }
   onModifier: (modification: ModificationTroncon) => void
   onSupprimer: () => void
-  onConfigurer: (carrefourId: string) => void
   onFermer: () => void
 }
 
@@ -26,7 +23,7 @@ const ORIGINES = {
   manuel: { libelle: 'Tracé à la main', couleur: 'green' },
 } as const
 
-export function PopupTroncon({ troncon, nomCarrefour, enregistrement, onModifier, onSupprimer, onConfigurer, onFermer }: Props) {
+export function PopupTroncon({ troncon, enregistrement, onModifier, onSupprimer, onFermer }: Props) {
   const t = troncon.properties
   const [nom, setNom] = useState<string | null>(null)
   const origine = ORIGINES[t.source === 'manuel' ? 'manuel' : t.modifie ? 'modifie' : 'osm']
@@ -36,11 +33,6 @@ export function PopupTroncon({ troncon, nomCarrefour, enregistrement, onModifier
     setNom(null)
     if (valeur !== t.nom) onModifier({ nom: valeur })
   }
-  const bouts = (['de', 'vers'] as const).flatMap((extremite) => {
-    const carrefour = extremite === 'de' ? t.carrefour_de : t.carrefour_vers
-    const branche = extremite === 'de' ? t.branche_de : t.branche_vers
-    return carrefour ? [{ extremite, carrefour, branche }] : []
-  })
 
   return (
     <PopupCarte
@@ -124,20 +116,6 @@ export function PopupTroncon({ troncon, nomCarrefour, enregistrement, onModifier
           />
         </HStack>
       </Section>
-      {bouts.length > 0 && (
-        <Section libelle="Raccordé à">
-          {bouts.map((b) => (
-            <HStack key={b.extremite} justify="space-between" textStyle="sm">
-              <Text>
-                {nomCarrefour(b.carrefour)} · {b.branche ? `branche ${b.branche}` : <Text as="span" color="fg.error">aucune branche</Text>}
-              </Text>
-              <Button variant="lien" size="xs" onClick={() => onConfigurer(b.carrefour)}>
-                Ouvrir
-              </Button>
-            </HStack>
-          ))}
-        </Section>
-      )}
       {enregistrement.erreur && <Message ton="erreur">{enregistrement.erreur}</Message>}
     </PopupCarte>
   )

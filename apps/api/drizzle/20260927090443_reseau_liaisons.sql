@@ -1,1 +1,0 @@
-ALTER TABLE "noeud" ADD COLUMN "liaisons" jsonb;

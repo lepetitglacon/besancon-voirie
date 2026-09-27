@@ -3,13 +3,12 @@
  *
  * Les tronçons OSM sont recréés à chaque génération, sauf ceux corrigés ou supprimés à la main
  * (`modifie`, `supprime`), reconnus par leur voie et leurs nœuds OSM d'origine. Les tronçons
- * tracés à la main ne sont jamais touchés. Chaque carrefour configuré est ensuite raccordé.
+ * tracés à la main ne sont jamais touchés.
  */
 import { sql } from 'drizzle-orm';
 import { VOIES_CIRCULABLES } from '../branches/branches.service.js';
 import { tableExiste, type Executeur } from '../db/sql.js';
 import { decouperVoies, type TronconOsm, type VoieOsm } from './osm.js';
-import { raccorderCarrefour } from './raccordement.js';
 
 export interface BilanReseau {
   voies_osm: number;
@@ -17,8 +16,6 @@ export interface BilanReseau {
   troncons: number;
   /** Tronçons OSM corrigés ou supprimés à la main, gardés tels quels. */
   conserves: number;
-  /** Carrefours configurés raccordés au réseau. */
-  carrefours: number;
 }
 
 /** Au-delà, les insertions se font par paquets (taille des paramètres JSON). */
@@ -83,11 +80,6 @@ export async function genererReseau(db: Executeur): Promise<BilanReseau> {
       AND NOT EXISTS (SELECT 1 FROM troncon t WHERE t.noeud_de = n.id OR t.noeud_vers = n.id)
   `);
 
-  const { rows: carrefours } = await db.execute<{ id: string }>(sql`
-    SELECT DISTINCT b.carrefour_id AS id FROM branche b JOIN voie v ON v.branche_id = b.id
-  `);
-  for (const c of carrefours) await raccorderCarrefour(db, c.id);
-
   const { rows: compte } = await db.execute<{ noeuds: number; troncons: number }>(sql`
     SELECT (SELECT count(*)::int FROM noeud) AS noeuds, (SELECT count(*)::int FROM troncon WHERE NOT supprime) AS troncons
   `);
@@ -96,6 +88,5 @@ export async function genererReseau(db: Executeur): Promise<BilanReseau> {
     noeuds: compte[0]!.noeuds,
     troncons: compte[0]!.troncons,
     conserves: gardes.length,
-    carrefours: carrefours.length,
   };
 }

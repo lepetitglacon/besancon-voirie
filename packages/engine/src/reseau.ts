@@ -1,61 +1,12 @@
 /**
- * Réseau routier — docs/RESEAU.md : découpe des tronçons au cercle d'un carrefour configuré,
- * voies d'une rue tout du long, liaisons voie à voie aux nœuds et à leurs valeurs par défaut.
+ * Réseau routier — docs/RESEAU.md : voies d'une rue tout du long, liaisons voie à voie aux nœuds
+ * et leurs valeurs par défaut.
  */
 import { directionMouvement } from './branches.js';
 import { LARGEUR_VOIE_M, repereLocal, type LonLat, type XY } from './geometrie.js';
 
-/** Portion d'une polyligne hors d'un cercle, et si ses bouts ont été coupés sur le cercle. */
-export interface MorceauHorsCercle {
-  points: LonLat[];
-  debutSurCercle: boolean;
-  finSurCercle: boolean;
-}
-
-/** Paramètres t ∈ ]0, 1[ où le segment [a, b] croise le cercle de centre (0, 0), dans l'ordre. */
-function traversees(a: XY, b: XY, rayon: number): number[] {
-  const d: XY = [b[0] - a[0], b[1] - a[1]];
-  const qa = d[0] ** 2 + d[1] ** 2;
-  if (qa === 0) return [];
-  const qb = 2 * (a[0] * d[0] + a[1] * d[1]);
-  const qc = a[0] ** 2 + a[1] ** 2 - rayon ** 2;
-  const discriminant = qb ** 2 - 4 * qa * qc;
-  if (discriminant <= 0) return [];
-  const racine = Math.sqrt(discriminant);
-  return [(-qb - racine) / (2 * qa), (-qb + racine) / (2 * qa)].filter((t) => t > 0 && t < 1);
-}
-
-/**
- * Découpe une polyligne au cercle (centre, rayon en mètres) : renvoie les portions à l'extérieur,
- * dans l'ordre. Une polyligne entièrement dedans ne donne rien ; une polyligne qui traverse le
- * cercle en donne deux.
- */
-export function horsDuCercle(points: readonly LonLat[], centre: LonLat, rayon: number): MorceauHorsCercle[] {
-  const repere = repereLocal(centre);
-  const xy = points.map(repere.versXY);
-  const dehors = (p: XY) => Math.hypot(p[0], p[1]) > rayon;
-  const morceaux: MorceauHorsCercle[] = [];
-  let courant: MorceauHorsCercle | null = dehors(xy[0]!) ? { points: [points[0]!], debutSurCercle: false, finSurCercle: false } : null;
-
-  for (let i = 0; i < xy.length - 1; i++) {
-    const a = xy[i]!;
-    const b = xy[i + 1]!;
-    for (const t of traversees(a, b, rayon)) {
-      const point = repere.versLonLat([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
-      if (courant) {
-        courant.points.push(point);
-        courant.finSurCercle = true;
-        morceaux.push(courant);
-        courant = null;
-      } else {
-        courant = { points: [point], debutSurCercle: true, finSurCercle: false };
-      }
-    }
-    if (courant && dehors(b)) courant.points.push(points[i + 1]!);
-  }
-  if (courant) morceaux.push(courant);
-  return morceaux.filter((m) => m.points.length >= 2);
-}
+/** Type d'une voie : générale, réservée aux bus, aux vélos ou au tram. */
+export type TypeVoieReseau = 'generale' | 'bus' | 'velo' | 'tram';
 
 /**
  * Liens proposés entre `sources` voies et `cibles` voies (rang 0 = la plus à gauche) : chaque
@@ -170,7 +121,16 @@ export interface Liaison {
 /** Tronçons qui touchent le nœud, avec leurs voies et leur direction (mesurée à 10 m). */
 export function boutsAuNoeud(
   noeud: string,
-  troncons: ReadonlyArray<{ id: string; noeud_de: string; noeud_vers: string; points: readonly LonLat[]; voies_avant: number; voies_arriere: number }>,
+  troncons: ReadonlyArray<{
+    id: string;
+    noeud_de: string;
+    noeud_vers: string;
+    points: readonly LonLat[];
+    voies_avant: number;
+    voies_arriere: number;
+    types_avant?: readonly TypeVoieReseau[] | null;
+    types_arriere?: readonly TypeVoieReseau[] | null;
+  }>,
 ): BoutAuNoeud[] {
   return troncons.flatMap((t) =>
     (['de', 'vers'] as const)

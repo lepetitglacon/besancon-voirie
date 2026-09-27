@@ -6,3 +6,4 @@ export * from './programme.js';
 export * from './tram.js';
 export * from './analyses-ia.js';
 export * from './reseau.js';
+export * from './temps-reel.js';

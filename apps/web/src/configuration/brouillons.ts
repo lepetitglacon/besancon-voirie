@@ -2,7 +2,6 @@ import type { CarrefourResume, DetectionBranchesIa, PlanSaisi, SourceBranche } f
 import { useSyncExternalStore } from 'react'
 import type { Brouillon } from './modele'
 import type { BrouillonLignes } from './OngletLignes'
-import type { BrouillonRaccordements } from './raccordements'
 
 /**
  * Modifications non enregistrées d'un carrefour. Elles vivent hors de la configuration :
@@ -15,8 +14,6 @@ export interface BrouillonsCarrefour {
   /** Provenance des branches proposées (OSM, défaut, IA), tant que leur brouillon existe. */
   sources: Record<string, SourceBranche>
   analyseIa: DetectionBranchesIa['ia'] | null
-  /** Branche et liens voie à voie des tronçons du réseau raccordés (docs/RESEAU.md). */
-  raccordements: BrouillonRaccordements | null
   lignes: BrouillonLignes | null
   programme: PlanSaisi[] | null
 }
@@ -36,7 +33,7 @@ const abonner = (abonne: () => void) => {
   return () => abonnes.delete(abonne)
 }
 
-const aucun = (b: BrouillonsCarrefour) => b.branches === null && b.raccordements === null && b.lignes === null && b.programme === null
+const aucun = (b: BrouillonsCarrefour) => b.branches === null && b.lignes === null && b.programme === null
 
 /** Brouillons de tous les carrefours modifiés, dans l'ordre de leur première modification. */
 export function useBrouillons(): ReadonlyMap<string, BrouillonsCarrefour> {
@@ -58,7 +55,6 @@ export function modifierBrouillons(carrefour: CarrefourResume, position: [number
     branches: null,
     sources: {},
     analyseIa: null,
-    raccordements: null,
     lignes: null,
     programme: null,
     ...avant,
@@ -83,7 +79,5 @@ export function abandonnerBrouillons(carrefourId: string) {
 
 /** « branches, lignes » : ce qui attend d'être enregistré. */
 export function libelleBrouillons(b: BrouillonsCarrefour): string {
-  return [b.branches && 'branches', b.raccordements && 'raccordements', b.lignes && 'lignes de feux', b.programme && 'programme']
-    .filter(Boolean)
-    .join(', ')
+  return [b.branches && 'branches', b.lignes && 'lignes de feux', b.programme && 'programme'].filter(Boolean).join(', ')
 }

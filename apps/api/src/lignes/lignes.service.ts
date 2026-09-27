@@ -11,7 +11,6 @@ export const pourConflits = (l: LigneFeux): LigneConflits => ({
   type: typeLigne(l.signal),
   mouvements: l.mouvements,
   traverse: l.traverse,
-  anneau: l.anneau,
 });
 
 /**
@@ -20,7 +19,6 @@ export const pourConflits = (l: LigneFeux): LigneConflits => ({
  */
 function referencesInvalides(
   l: LigneFeux,
-  configuration: BranchesCarrefour,
   cles: Set<string>,
   traversees: Set<string>,
   moment: 'lecture' | 'enregistrement',
@@ -33,16 +31,13 @@ function referencesInvalides(
     ...(l.traverse && !traversees.has(l.traverse)
       ? [`${l.code} : ${lecture ? 'plus de' : 'pas de'} passage piéton sur la branche ${l.traverse}`]
       : []),
-    ...(l.anneau && !configuration.anneau ? [`${l.code} : feu d'anneau, mais le carrefour n'a pas d'anneau`] : []),
-    ...(l.anneau && configuration.anneau && !configuration.branches.some((b) => b.code === l.anneau)
-      ? [`${l.code} : pas de branche ${l.anneau} pour placer le feu d'anneau`]
-      : []),
   ];
 }
 
 /**
- * Mouvements sans ligne de feux. Dans un giratoire, une entrée sans feux cède le passage à
- * l'anneau : seuls comptent les mouvements des entrées dont un autre mouvement a des feux.
+ * Mouvements sans ligne de feux. Dans un giratoire, une entrée sans feux cède le passage et
+ * l'anneau sans feu d'anneau circule librement : seuls comptent les mouvements dont l'origine
+ * (rue ou tronçon d'anneau) a déjà un autre mouvement à feux.
  */
 function nonCommandes(configuration: BranchesCarrefour, lignes: LigneFeux[]): string[] {
   const liste = mouvementsNonCommandes(configuration.mouvements, lignes.map(pourConflits));
@@ -63,7 +58,7 @@ export class LignesService {
     const configuration = await this.branches.lire(carrefourId); // 404 si carrefour inconnu
     const { branches, mouvements } = configuration;
     const { rows: lignes } = await this.db.execute<LigneFeux>(sql`
-      SELECT l.code, l.signal, l.mouvements, l.traverse, l.anneau,
+      SELECT l.code, l.signal, l.mouvements, l.traverse,
              coalesce(array_agg(lf.feu_id ORDER BY lf.feu_id) FILTER (WHERE lf.feu_id IS NOT NULL), '{}') AS feux
       FROM ligne_feux l
       LEFT JOIN ligne_feux_feu lf ON lf.ligne_feux_id = l.id
@@ -78,7 +73,7 @@ export class LignesService {
 
     const cles = new Set(mouvements.map((m) => `${m.origine}>${m.destination}`));
     const traversees = new Set(branches.filter((b) => b.traversee).map((b) => b.code));
-    const alertes = lignes.flatMap((l) => referencesInvalides(l, configuration, cles, traversees, 'lecture'));
+    const alertes = lignes.flatMap((l) => referencesInvalides(l, cles, traversees, 'lecture'));
 
     return {
       lignes,
@@ -99,7 +94,7 @@ export class LignesService {
     const codesLignes = new Set(lignes.map((l) => l.code));
     const feux = [...new Set(lignes.flatMap((l) => l.feux))];
 
-    const erreurs = lignes.flatMap((l) => referencesInvalides(l, configuration, cles, traversees, 'enregistrement'));
+    const erreurs = lignes.flatMap((l) => referencesInvalides(l, cles, traversees, 'enregistrement'));
     if (feux.length > 0) {
       const { rows } = await this.db.execute<{ id: string }>(sql`
         SELECT id FROM feu WHERE id = ANY (${uuids(feux)}) AND carrefour_id = ${carrefourId}
@@ -113,8 +108,8 @@ export class LignesService {
       await tx.execute(sql`DELETE FROM ligne_feux WHERE carrefour_id = ${carrefourId}`);
       for (const ligne of lignes) {
         const { rows } = await tx.execute<{ id: string }>(sql`
-          INSERT INTO ligne_feux (carrefour_id, code, signal, mouvements, traverse, anneau)
-          VALUES (${carrefourId}, ${ligne.code}, ${ligne.signal}, ${`{${ligne.mouvements.join(',')}}`}::text[], ${ligne.traverse}, ${ligne.anneau})
+          INSERT INTO ligne_feux (carrefour_id, code, signal, mouvements, traverse)
+          VALUES (${carrefourId}, ${ligne.code}, ${ligne.signal}, ${`{${ligne.mouvements.join(',')}}`}::text[], ${ligne.traverse})
           RETURNING id
         `);
         if (ligne.feux.length > 0) {

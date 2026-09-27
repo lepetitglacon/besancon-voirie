@@ -20,7 +20,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import type { Anneau, ArcGraphe, Controleur, Etape, IntervalleVert, Liaison, LiensRaccordement, Plage } from '@voirie/schema';
+import type { Anneau, ArcGraphe, Controleur, Etape, IntervalleVert, Liaison, Plage } from '@voirie/schema';
 
 // Tables du projet — voir docs/ARCHITECTURE.md §4.
 // Les tables issues d'OpenStreetMap (osm_*) sont gérées par l'import, pas par Drizzle.
@@ -61,7 +61,7 @@ export const carrefour = pgTable(
     presTram: boolean('pres_tram').notNull().default(false),
     /** Paires de lignes en conflit tolérées (tourne-à-droite avec piétons…). */
     conflitsAdmis: jsonb('conflits_admis').$type<Array<[string, string]>>().notNull().default([]),
-    /** Giratoire : anneau (centre de l'îlot, rayon extérieur, voies) — docs/CONFIGURATION.md §7. */
+    /** Giratoire : nœuds de l'anneau, dans l'ordre de circulation — docs/CONFIGURATION.md §7. */
     anneau: jsonb('anneau').$type<Anneau>(),
     creeLe: creeLe(),
     modifieLe: timestamp('modifie_le', { withTimezone: true })
@@ -125,6 +125,10 @@ export const branche = pgTable(
     /** Passage piéton en travers de la branche, d'un trottoir à l'autre. */
     traversee: ligne('traversee'),
     prioriteEntree: prioriteEntree('priorite_entree'),
+    /** Giratoire : nœud où la rue se raccorde à l'anneau ; pour un tronçon, son nœud de départ. */
+    noeud: text('noeud'),
+    /** Tronçon d'anneau généré (R1, R2…), et non une rue. */
+    troncon: boolean('troncon').notNull().default(false),
   },
   (t) => [unique().on(t.carrefourId, t.code)],
 );
@@ -168,8 +172,7 @@ export const connexion = pgTable(
 
 /**
  * Ligne de feux (signal group) — docs/CONFIGURATION.md §4. `mouvements` : clés « S>O » des
- * mouvements commandés ; `traverse` : branche traversée par une ligne piétonne (R12) ;
- * `anneau` : feu d'anneau d'un giratoire, en amont de cette branche (§7).
+ * mouvements commandés ; `traverse` : branche traversée par une ligne piétonne (R12).
  */
 export const ligneFeux = pgTable(
   'ligne_feux',
@@ -185,7 +188,6 @@ export const ligneFeux = pgTable(
       .notNull()
       .default(sql`'{}'`),
     traverse: text('traverse'),
-    anneau: text('anneau'),
   },
   (t) => [unique().on(t.carrefourId, t.code)],
 );
@@ -247,6 +249,24 @@ export const planFeux = pgTable(
     sourceReleve: uuid('source_releve').references(() => releve.id, { onDelete: 'set null' }),
   },
   (t) => [unique().on(t.carrefourId, t.code)],
+);
+
+/**
+ * Top relevé sur place : instant où une ligne de feux passe au vert. Observation brute : le
+ * plan en vigueur et le décalage s'en déduisent à la lecture (docs/ARCHITECTURE.md §6.1).
+ */
+export const topSynchro = pgTable(
+  'top_synchro',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    carrefourId: uuid('carrefour_id')
+      .notNull()
+      .references(() => carrefour.id, { onDelete: 'cascade' }),
+    ligne: text('ligne').notNull(),
+    instant: timestamp('instant', { withTimezone: true }).notNull(),
+    creeLe: creeLe(),
+  },
+  (t) => [index('top_synchro_carrefour_idx').on(t.carrefourId, t.instant)],
 );
 
 /**
@@ -321,35 +341,32 @@ export const analyseIa = pgTable(
   (t) => [index('analyse_ia_statut_idx').on(t.statut, t.demandeeLe), index('analyse_ia_carrefour_idx').on(t.carrefourId)],
 );
 
-// ── Réseau routier hors carrefours — docs/RESEAU.md ──
+// ── Réseau routier — docs/RESEAU.md ──
 
 export const sourceReseau = pgEnum('source_reseau', ['osm', 'manuel']);
 
 /**
- * Nœud du réseau : intersection ou bout de voie OSM, point posé à la main, ou carrefour
- * configuré (`carrefour_id`) : ses branches remplacent alors les intersections OSM de son emprise.
+ * Nœud du réseau : intersection ou bout de voie OSM, point posé à la main. Un carrefour est un
+ * groupe de nœuds (`carrefour_id`).
  */
 export const noeud = pgTable(
   'noeud',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     osmNodeId: bigint('osm_node_id', { mode: 'number' }).unique(),
-    carrefourId: uuid('carrefour_id')
-      .unique()
-      .references(() => carrefour.id, { onDelete: 'set null' }),
+    carrefourId: uuid('carrefour_id').references(() => carrefour.id, { onDelete: 'set null' }),
     geom: geometry('geom', { type: 'point', mode: 'xy', srid: 4326 }).notNull(),
     /** Liaisons voie à voie saisies à ce nœud ; null : celles proposées par défaut. */
     liaisons: jsonb('liaisons').$type<Liaison[]>(),
     creeLe: creeLe(),
   },
-  (t) => [index('noeud_geom_idx').using('gist', t.geom)],
+  (t) => [index('noeud_geom_idx').using('gist', t.geom), index('noeud_carrefour_idx').on(t.carrefourId)],
 );
 
 /**
  * Tronçon entre deux nœuds, tracé de `noeud_de` vers `noeud_vers`. `voies_avant` circulent dans
- * ce sens, `voies_arriere` dans l'autre (0 : sens interdit). Au bout d'un carrefour configuré, le
- * tronçon s'arrête sur son cercle et se raccorde à une branche (`branche_de`, `branche_vers`),
- * voie par voie (`liens_*`, null : liens proposés par défaut).
+ * ce sens, `voies_arriere` dans l'autre (0 : sens interdit). Au bout qui entre dans un carrefour,
+ * `branche_de` / `branche_vers` garde le code de la branche qu'il forme (N, S…).
  */
 export const troncon = pgTable(
   'troncon',
@@ -365,7 +382,7 @@ export const troncon = pgTable(
     osmWayId: bigint('osm_way_id', { mode: 'number' }),
     /**
      * Nœuds OSM d'origine du tronçon (découpe aux intersections) : ils l'identifient à la
-     * régénération, même après une coupe au cercle d'un carrefour.
+     * régénération, même après une coupe.
      */
     osmDe: bigint('osm_de', { mode: 'number' }),
     osmVers: bigint('osm_vers', { mode: 'number' }),
@@ -381,8 +398,6 @@ export const troncon = pgTable(
     supprime: boolean('supprime').notNull().default(false),
     brancheDe: text('branche_de'),
     brancheVers: text('branche_vers'),
-    liensDe: jsonb('liens_de').$type<LiensRaccordement>(),
-    liensVers: jsonb('liens_vers').$type<LiensRaccordement>(),
     creeLe: creeLe(),
     modifieLe: timestamp('modifie_le', { withTimezone: true })
       .notNull()

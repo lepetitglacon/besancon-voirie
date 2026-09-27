@@ -190,7 +190,7 @@ CREATE TABLE carrefour (
   statut        statut_carrefour NOT NULL DEFAULT 'non_releve',
   controleur    jsonb NOT NULL DEFAULT '{}',   -- mode, priorite_tc, appel_pieton, feu_recompense
   nature        nature_carrefour NOT NULL DEFAULT 'carrefour', -- ou giratoire, traversee_pietonne
-  anneau        jsonb,                           -- giratoire : { centre, rayon_m, voies } (CONFIGURATION.md §7)
+  anneau        jsonb,                           -- giratoire : { noeuds: [{ code, position }] } (CONFIGURATION.md §7)
   pres_tram     boolean NOT NULL DEFAULT false, -- recalculé à chaque composition
   cree_le       timestamptz NOT NULL DEFAULT now(),
   modifie_le    timestamptz NOT NULL DEFAULT now()
@@ -218,6 +218,8 @@ CREATE TABLE branche (
   nom           text,
   osm_way_id    bigint,
   azimut_deg    real,                           -- ST_Azimuth, pour dessiner et ordonner
+  noeud         text,                           -- giratoire : nœud de la rue, ou de départ du tronçon
+  troncon       boolean NOT NULL DEFAULT false, -- giratoire : tronçon d'anneau généré (R1, R2…)
   UNIQUE (carrefour_id, code)
 );
 
@@ -230,7 +232,6 @@ CREATE TABLE ligne_feux (
   mouvements    text[] NOT NULL DEFAULT '{}',   -- tout_droit, droite, gauche
   voies         smallint,
   traverse      text,                           -- piétons : branche traversée
-  anneau        text,                           -- giratoire : feu d'anneau, en amont de cette branche
   geom          geometry(Point, 4326),          -- position de la ligne d'arrêt (optionnelle)
   UNIQUE (carrefour_id, code)
 );
@@ -243,13 +244,23 @@ CREATE TABLE plan_feux (
   plages        jsonb NOT NULL,                 -- [{jours:[…], de:"06:30", a:"20:30"}]
   cycle_s       numeric(5,1),
   jaune_s       numeric(3,1),
-  reference     jsonb,                          -- {ligne:"F1", t0:"2026-10-07T08:02:17.400+02:00"}
+  reference     jsonb,                          -- inutilisé : les tops sont dans top_synchro (§6.1)
   lignes        jsonb,                          -- {"F1":[[0,34]], "F3":[[40,74]], …}
   etapes        jsonb,                          -- [{lignes:["F1","P2"], duree_s:34, appel?:"P1", hors_cycle?:true}, …]
   degagements   jsonb NOT NULL DEFAULT '{}',    -- rouges saisis à la main {"F1>F2": 4}
   arcs          jsonb NOT NULL DEFAULT '[]',    -- graphe des étapes [{de:0, vers:4, demande:"T1", anticipe:true}]
   source_releve uuid,                           -- relevé validé qui a produit ce plan
   UNIQUE (carrefour_id, code)
+);
+
+-- Top : instant où une ligne passe au vert, tapé sur place (§6.1). Observation brute : le plan
+-- en vigueur et le décalage s'en déduisent à la lecture.
+CREATE TABLE top_synchro (
+  id            uuid PRIMARY KEY,
+  carrefour_id  uuid NOT NULL REFERENCES carrefour ON DELETE CASCADE,
+  ligne         text NOT NULL,                  -- F1…
+  instant       timestamptz NOT NULL,
+  cree_le       timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE releve (
@@ -433,6 +444,7 @@ TypeScript pur, **sans effet de bord**, testé unitairement. Toutes les durées 
 | `decalage` | `decalage(planA, planB)` = `(t0B − t0A) mod C` ; `cyclesCompatibles(C1, C2)` (égaux, double, moitié) | corridor |
 | `ondeVerte` | `bandePassante(corridor, sens, decalages, v)` ; `diagrammeEspaceTemps(…)` (segments et bandes à tracer) | corridor |
 | `optimisation` | `optimiserExhaustif(corridor, pas = 1)` (≤ 5 carrefours) ; `optimiserDescente(corridor)` ; fonction objectif `bAller + k·bRetour` avec contraintes (verts piétons) | corridor |
+| `synchro` | `bts(instant)`, `positionCycle(instant, cycle, decalage)`, `synchroniser(tops, cycle)`, `cycleObserve(tops, cycle)`, `planEnVigueur(plans, instant)` — §6.1 | API, mode Temps réel |
 | `sumo` (phase 2) | `versTlLogic(plan, associationLiens)` → phases `G/y/r` + `offset` | worker |
 
 Calcul de la bande passante d'un sens (cœur de la phase 1 bis) :
@@ -444,6 +456,68 @@ Pour chaque carrefour i du corridor (position x_i, décalage o_i, vert [a_i, b_i
   ⇔  t ∈ [o_i + a_i − τ_i , o_i + b_i − τ_i]  (mod C)
 Bande passante = mesure de l'intersection, sur le cercle [0, C), de ces intervalles pour tous les i.
 ```
+
+### 6.1 Caler les plans sur l'heure réelle
+
+Le mode Temps réel doit savoir où en est chaque cycle à l'instant présent. Un contrôleur
+coordonné ne fait pas tourner son cycle depuis sa mise sous tension, et on ne le remet pas à
+zéro à une heure choisie par nous : il suit une **base de temps de synchronisation (BTS)**
+calculée à partir de l'heure légale, commune à tous les contrôleurs (remis à l'heure par le
+poste central, DCF77 ou GPS). D'après la page Wikipédia « Carrefour à feux », la BTS vaut en
+général 0 à 3 h du matin et se prend modulo la durée du cycle en cours. D'où :
+
+```text
+BTS(t)       = secondes écoulées depuis 03:00, heure légale de Paris   (∈ [0, 86 400))
+position(t)  = (BTS(t) − décalage) mod cycle
+```
+
+Le décalage est propre au carrefour et au plan. Il ne dépend ni du jour ni de l'heure de
+début du plan, parce que la BTS est la même pour tous les plans.
+
+**Mesure.** Un « top » est l'instant où une ligne passe au vert, tapé sur place (onglet
+Programme, panneau Heure réelle). Chaque top donne un décalage :
+`(BTS(top) − début de vert de la ligne) mod cycle`. Le plan retenu est celui en vigueur à
+l'instant du top ; une ligne verte deux fois par cycle est comptée à son premier vert. Les
+tops sont gardés bruts (`top_synchro`) : si l'hypothèse change, on recalcule sans rien perdre.
+Le décalage du plan est la moyenne circulaire des décalages de ses tops.
+
+| Confiance | Condition |
+|---|---|
+| `inconnue` | aucun top : la carte montre le programme, pas la phase |
+| `estimee` | tops d'un seul jour d'exploitation (qui commence à 3 h) |
+| `synchronisee` | tops de deux jours ou plus, tous à moins de 2 s du décalage retenu |
+| `incoherente` | un top à plus de 2 s : carrefour pas calé sur l'heure, ou cycle faux |
+
+Des tops de jours différents qui concordent **valident le modèle** pour ce carrefour. Un
+cycle faux de 0,3 s décale de 12 s par heure : le panneau affiche le cycle observé sur la
+série de tops (durée ÷ nombre de cycles) pour corriger les étapes.
+
+**Limites.** Beaucoup de carrefours ne sont pas calés sur l'heure. C'est le cas des carrefours
+isolés à cycle non prédéfini, de ceux qui sont micro-régulés (verts allongés à la demande) et
+de ceux qui ont une priorité tram ou bus : le cycle est décalé à chaque passage. D'après la
+notice des Chronolignes du Mans, la coordination à cycle fixe « est généralement à proscrire »
+quand on favorise les transports en commun. Sur ces carrefours (contrôleur `actue` ou
+`semi_actue`, `priorite_tc`, `pres_tram`), l'état affiché reste **indicatif**. Le choix du plan
+peut aussi dépendre du trafic (« arbre de décision » du poste central) et pas seulement de
+l'heure.
+
+**Priorité tram.** Elle vaut par défaut pour tous les carrefours où passe le tram : `pres_tram`
+(à moins de 25 m d'une voie de tram OSM), ou carrefour à moins de 30 m d'un tracé GTFS. Elle ne
+s'applique pas si le contrôleur est saisi avec `priorite_tc` `aucune` ou `bus`. Chaque carrefour
+est projeté sur les tracés GTFS qui le croisent. Une rame estimée (§8.1) sur l'un de ces
+parcours demande la priorité quand elle arrive à moins de 150 m du carrefour, et la garde
+jusqu'à 40 m après. Une rame à quai ne la demande qu'à moins de 10 s de son départ. Pendant la
+priorité :
+
+- si le plan a une **étape tram** (étape qui met au vert une ligne R17 ou R18, de préférence
+  hors cycle), ses lignes sont au vert et toutes les autres au rouge ;
+- sinon, les lignes R17/R18 sont au vert, et les lignes qui **coupent la voie de tram** sont au
+  rouge (`coupe_tram` : une connexion, prise comme la corde entre les bouts côté carrefour de
+  ses voies, ou la traversée piétonne, croise une voie `osm_tram` à moins de 80 m). Les autres
+  lignes suivent le cycle.
+
+La carte entoure le carrefour d'un anneau à la couleur de la ligne, avec le temps estimé avant
+le passage. Le retour au cycle après le passage (recoordination) n'est pas modélisé.
 
 ---
 
@@ -479,6 +553,8 @@ Public :
 | GET | `/api/carrefours/:id/branches/detection` | Proposition de branches depuis OSM, non enregistrée |
 | GET | `/api/carrefours/:id/lignes` | Lignes de feux, matrice des conflits, mouvements non commandés ([CONFIGURATION.md](CONFIGURATION.md) §4) |
 | GET | `/api/carrefours/:id/programme` | Plans de feux par étapes, rouges de dégagement calculés ([CONFIGURATION.md](CONFIGURATION.md) §5) |
+| GET | `/api/carrefours/:id/tops` | Tops relevés, avec le plan et le décalage de chacun, et la synchronisation de chaque plan (§6.1) |
+| GET | `/api/temps-reel/feux?bbox=…` | Carrefours programmés : position, lignes (où les dessiner, R17/R18, coupe la voie de tram), plans, diagrammes de feux, étape tram, décalages (§6.1) |
 | GET | `/api/carrefours/:slug` | Carrefour complet : branches, lignes, plans, synthèse des relevés validés |
 | GET | `/api/corridors` | Liste + géométrie |
 | GET | `/api/corridors/:slug` | Corridor, carrefours ordonnés, distances, plans, décalages actuels |
@@ -507,7 +583,7 @@ Admin (cookie de session, un seul compte) :
 | PUT | `/api/carrefours/:id/lignes` | Remplace lignes de feux, feux physiques et conflits admis (`EDITION_LOCALE`) |
 | PUT | `/api/carrefours/:id/programme` | Remplace les plans ; cycle et diagramme calculés depuis les étapes (`EDITION_LOCALE`) |
 | POST / PATCH / DELETE | `/api/reseau/generer`, `/api/reseau/troncons[/:id]` | Génère le réseau depuis OSM, trace, corrige ou supprime un tronçon (`EDITION_LOCALE`) |
-| PUT | `/api/carrefours/:id/raccordements` | Branche et liens voie à voie des tronçons raccordés (`EDITION_LOCALE`) |
+| POST / DELETE | `/api/carrefours/:id/tops[/:top]` | Ajoute une série de tops `{ ligne, instants }`, ou en retire un (`EDITION_LOCALE`) |
 | PUT | `/api/admin/corridors/:id` | Création/édition, recalcul des distances |
 | POST | `/api/admin/simulations` | Phase 2 : met un job en file |
 
@@ -621,7 +697,18 @@ du temps, ni la fiabilité réelle des estimations. L'API enregistre donc chaque
 
 ### 8.3 Modes d'affichage et fond de carte
 
-- **Carte** : la vue grand public (carrefours, trams en temps réel).
+- **Temps réel** (par défaut) : la vue grand public, en lecture seule. Les feux des carrefours
+  programmés sont rejoués sur l'heure légale (§6.1), avec les trams. Chaque ligne est dessinée
+  sur ses feux physiques ; à défaut, au bout des voies entrantes qu'elle commande, ou au milieu
+  de la traversée pour les piétons. L'opacité suit la confiance (synchronisé, estimé, indicatif,
+  phase inconnue). La priorité tram (§6.1) arrête les lignes qui coupent la voie quand une rame
+  approche : les rames sont suivies même quand leur affichage est désactivé. Un clic sur un
+  carrefour ouvre sa fiche : plan en vigueur, position dans le cycle, tête de feu de chaque
+  ligne, rame prioritaire. Passer en Temps réel ferme l'édition en cours (les
+  brouillons restent).
+- **Édition** : composition et configuration des carrefours (§5.3,
+  [CONFIGURATION.md](CONFIGURATION.md)). L'onglet Programme reçoit les tops (§6.1) et peut
+  caler son diagramme sur l'heure réelle, pour comparer sur place.
 - **Données brutes** : toutes les couches, activables une par une (carrefours, lignes, arrêts,
   rames, zones probables, temps perdu par tronçon avec son créneau), plus le volume de
   l'historique. Le mode et les couches sont mémorisés dans le navigateur (`localStorage`).

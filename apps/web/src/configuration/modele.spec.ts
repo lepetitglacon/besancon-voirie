@@ -1,4 +1,4 @@
-import { distanceArretGiratoire, genererVoies, repereLocal, type LonLat, type Segment } from '@voirie/engine'
+import { liaisonsHorsNoeud, repereLocal, genererVoies, type LonLat } from '@voirie/engine'
 import type { Branche } from '@voirie/schema'
 import { describe, expect, it } from 'vitest'
 import {
@@ -6,16 +6,16 @@ import {
   basculerConnexion,
   basculerTraversee,
   changerPrioriteEntree,
-  creerAnneau,
+  changerVoiesTroncon,
   deplacerPoignee,
-  deplacerVoie,
+  poserNoeud,
+  raccorderBranche,
   regenererVoies,
   retirerAnneau,
+  supprimerNoeud,
   renommerBranche,
   retirerVoie,
   supprimerBranche,
-  supprimerVoie,
-  tracerVoie,
   voiesDe,
   type Brouillon,
 } from './modele'
@@ -36,6 +36,8 @@ function branche(code: string, azimut: number, entrantes: number, sortantes: num
     ],
     traversee: g.traversee,
     priorite_entree: null,
+    noeud: null,
+    troncon: false,
   }
 }
 
@@ -100,83 +102,64 @@ describe('opérations du brouillon', () => {
   })
 })
 
-describe('voies tracées à la main', () => {
-  const { versLonLat } = repereLocal(centre)
-  /** Segment en mètres autour du centre : x vers l'est, y vers le nord. */
-  const trait = (a: [number, number], b: [number, number]): Segment => [versLonLat(a), versLonLat(b)]
+describe('giratoire par nœuds', () => {
+  const repere = repereLocal(centre)
+  const point = (azimut: number, rayon = 15): LonLat =>
+    repere.versLonLat([rayon * Math.sin((azimut * Math.PI) / 180), rayon * Math.cos((azimut * Math.PI) / 180)])
+  // Quatre nœuds : nord, ouest, sud, puis est (posé en dernier, entre le sud et le nord).
+  const quatre = [0, 270, 180, 90].reduce((b, azimut) => poserNoeud(b, point(azimut)), { ...depart, connexions: [] } as Brouillon)
+  const troncons = (b: Brouillon) => b.branches.filter((x) => x.troncon).map((x) => x.code).sort()
+  const valides = (b: Brouillon) => liaisonsHorsNoeud(b.branches, b.connexions, b.anneau!)
 
-  it('rejoint la branche la plus proche, au rang que donne sa position', () => {
-    // Branche S (azimut 180) : l'entrante e0 est à 1,6 m à l'est de l'axe ; la nouvelle, entre l'axe
-    // et e0, est la plus à gauche du conducteur qui remonte vers le nord.
-    const resultat = tracerVoie(depart, trait([0.4, -15], [0.4, -40]), centre)!
-    expect(resultat.cle).toBe('S:e0')
-    expect(voiesDe(resultat.brouillon.branches[0]!, 'entrante')).toHaveLength(2)
-    expect(resultat.brouillon.connexions).toEqual([
-      { de: 'S:e1', vers: 'N:s0' },
-      { de: 'N:e0', vers: 'S:s0' },
-    ])
+  it('ferme la boucle au troisième nœud et génère un tronçon par nœud', () => {
+    const deux = [0, 270].reduce((b, azimut) => poserNoeud(b, point(azimut)), depart)
+    expect(troncons(deux)).toEqual([])
+    expect(troncons(quatre)).toEqual(['R1', 'R2', 'R3', 'R4'])
+    // Chaque nœud a sa liaison « on continue » ; aucune ne relie deux nœuds.
+    expect(quatre.connexions).toHaveLength(4)
+    expect(valides(quatre)).toEqual([])
   })
 
-  it('déduit le sens de son côté de l’axe', () => {
-    expect(tracerVoie(depart, trait([-5, -15], [-5, -40]), centre)!.cle).toBe('S:s1')
-    expect(tracerVoie(depart, trait([5, -15], [5, -40]), centre)!.cle).toBe('S:e1')
+  it('coupe un tronçon en deux en posant un nœud, sans liaison entre deux nœuds', () => {
+    const cinq = poserNoeud(quatre, point(45))
+    expect(troncons(cinq)).toEqual(['R1', 'R2', 'R3', 'R4', 'R5'])
+    expect(cinq.connexions).toHaveLength(5)
+    expect(valides(cinq)).toEqual([])
   })
 
-  it('ouvre une nouvelle branche loin des autres', () => {
-    const resultat = tracerVoie(depart, trait([15, 1], [40, 1]), centre)!
-    expect(resultat.cle).toBe('E:e0')
-    expect(resultat.brouillon.branches.at(-1)).toMatchObject({ code: 'E', nom: null, traversee: null })
-    expect(resultat.brouillon.branches.at(-1)!.azimut).toBeCloseTo(88.6, 0)
+  it('recoud la boucle en retirant un nœud', () => {
+    const trois = supprimerNoeud(quatre, '2')
+    expect(troncons(trois)).toEqual(['R1', 'R3', 'R4'])
+    expect(trois.connexions).toHaveLength(3)
+    expect(valides(trois)).toEqual([])
   })
 
-  it('ignore un trait trop court', () => {
-    expect(tracerVoie(depart, trait([0, -15], [0, -16]), centre)).toBeNull()
+  it('raccorde une rue à un nœud avec ses liaisons, et replace ses voies depuis le nœud', () => {
+    const raccordee = raccorderBranche(quatre, 'S', '3')
+    const sud = raccordee.branches.find((b) => b.code === 'S')!
+    expect(sud.noeud).toBe('3')
+    expect(raccordee.connexions.filter((c) => c.de.startsWith('S:') || c.vers.startsWith('S:'))).toHaveLength(2)
+    expect(valides(raccordee)).toEqual([])
+    const replacee = regenererVoies(raccordee, 'S', centre)
+    const [bout] = voiesDe(replacee.branches.find((b) => b.code === 'S')!, 'entrante')[0]!.geom
+    // La ligne d'arrêt est à une demi-voie d'anneau plus 2 m du nœud.
+    expect(Math.hypot(...repereLocal(point(180)).versXY(bout))).toBeGreaterThan(3)
+    expect(Math.hypot(...repereLocal(point(180)).versXY(bout))).toBeLessThan(5)
   })
 
-  it('supprime une voie quelconque et fait remonter les suivantes', () => {
-    const avec = tracerVoie(depart, trait([0.4, -15], [0.4, -40]), centre)!.brouillon
-    const sans = supprimerVoie(avec, 'S:e0')
-    expect(voiesDe(sans.branches[0]!, 'entrante').map((v) => v.rang)).toEqual([0])
-    expect(sans.connexions).toEqual(depart.connexions)
-  })
-
-  it('change une voie de sens en retirant ses connexions', () => {
-    const resultat = deplacerVoie(depart, 'S:e0', { branche: 'S', sens: 'sortante' }, centre)!
-    expect(resultat.cle).toBe('S:s0')
-    expect(voiesDe(resultat.brouillon.branches[0]!, 'entrante')).toEqual([])
-    expect(voiesDe(resultat.brouillon.branches[0]!, 'sortante').map((v) => v.rang)).toEqual([0, 1])
-    expect(resultat.brouillon.connexions).toEqual([{ de: 'N:e0', vers: 'S:s1' }])
-  })
-})
-
-describe('giratoire', () => {
-  const giratoire = creerAnneau(depart, centre)
-  const distance = (a: LonLat, b: LonLat) => Math.hypot(...repereLocal(a).versXY(b))
-
-  it('replace les voies au bord de l’anneau, depuis le centre de l’îlot', () => {
-    const decale = deplacerPoignee(giratoire, { role: 'anneau', point: 'centre' }, [6.0301, 47.2501])
-    const replace = regenererVoies(decale, 'S', centre)
-    const entree = voiesDe(replace.branches[0]!, 'entrante')[0]!
-    expect(distance(decale.anneau!.centre, entree.geom[0])).toBeGreaterThan(distanceArretGiratoire(decale.anneau!) - 0.01)
-    expect(distance(decale.anneau!.centre, entree.geom[0])).toBeLessThan(distanceArretGiratoire(decale.anneau!) + 2)
-  })
-
-  it('règle le rayon en tirant le bord de l’anneau, dans les bornes du schéma', () => {
-    const [x, y] = [20, 0]
-    const bord = repereLocal(centre).versLonLat([x, y])
-    expect(deplacerPoignee(giratoire, { role: 'anneau', point: 'bord' }, bord).anneau!.rayon_m).toBe(20)
-    expect(deplacerPoignee(giratoire, { role: 'anneau', point: 'bord' }, centre).anneau!.rayon_m).toBe(4)
+  it('suit un nœud déplacé et garde le nombre de voies des tronçons', () => {
+    const deuxVoies = changerVoiesTroncon(quatre, 'R1', 2)
+    const deplace = deplacerPoignee(deuxVoies, { role: 'noeud', code: '1' }, point(0, 18))
+    expect(voiesDe(deplace.branches.find((b) => b.code === 'R1')!, 'sortante')).toHaveLength(2)
+    expect(deplace.anneau!.noeuds.find((n) => n.code === '1')!.position).toEqual(point(0, 18))
   })
 
   it('enregistre le cédez-le-passage comme règle par défaut, et l’oublie sans anneau', () => {
-    const stop = changerPrioriteEntree(giratoire, 'S', 'stop')
-    expect(stop.branches[0]!.priorite_entree).toBe('stop')
-    expect(changerPrioriteEntree(stop, 'S', 'cedez_le_passage').branches[0]!.priorite_entree).toBeNull()
-    expect(retirerAnneau(stop).branches[0]!.priorite_entree).toBeNull()
-  })
-
-  it('garde l’anneau quand on renomme ou supprime une branche', () => {
-    expect(renommerBranche(giratoire, 'S', 'S2').anneau).toEqual(giratoire.anneau)
-    expect(supprimerBranche(giratoire, 'S').anneau).toEqual(giratoire.anneau)
+    const stop = changerPrioriteEntree(quatre, 'S', 'stop')
+    expect(stop.branches.find((b) => b.code === 'S')!.priorite_entree).toBe('stop')
+    expect(changerPrioriteEntree(stop, 'S', 'cedez_le_passage').branches.find((b) => b.code === 'S')!.priorite_entree).toBeNull()
+    const sansAnneau = retirerAnneau(stop)
+    expect(sansAnneau.branches.find((b) => b.code === 'S')!.priorite_entree).toBeNull()
+    expect(troncons(sansAnneau)).toEqual([])
   })
 })

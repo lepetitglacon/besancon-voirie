@@ -23,9 +23,19 @@ cp .env.example .env
 pnpm install
 pnpm db:up          # PostgreSQL 17 + PostGIS 3.5 + pgRouting 4.0 (port 5433)
 pnpm db:prepare     # bases voirie + voirie_test, extensions, migrations
+pnpm build:packages # compile @voirie/schema et @voirie/engine, requis par osm:import
 pnpm osm:import     # feux, voies et tram depuis OpenStreetMap (Overpass, mis en cache)
 pnpm dev            # packages en watch + API :3000 + web :5173
 ```
+
+Résultat attendu :
+
+- `pnpm db:prepare` se termine par `migrations applied successfully!` ; `pnpm db:verifier`
+  indique alors `0 en attente`. La base `voirie_test` est créée vide, les tests e2e la migrent.
+- `pnpm osm:import` affiche le décompte des signaux, voies, trams et feux importés, et écrit
+  le cache `data/osm/besancon.json` (hors git). Les imports suivants relisent ce cache
+  (`--refresh` pour retélécharger) ; le manager le copie dans chaque nouveau worktree.
+- Aucun carrefour n'existe encore : ils se composent à la main sur la carte.
 
 | Commande | Effet |
 |---|---|
@@ -41,7 +51,9 @@ pnpm dev            # packages en watch + API :3000 + web :5173
 
 Le projet est déclaré dans le manager sous l'id `besancon-voirie` : un seul target `app`
 pour tout le monorepo. Au démarrage d'un worktree, le manager lance
-`pnpm install`, `pnpm db:up`, `pnpm db:prepare` puis `pnpm dev`.
+`pnpm install`, `pnpm db:up`, `pnpm db:prepare` puis `pnpm dev`. Au premier démarrage d'un
+worktree, `db:prepare` y coupe la collecte tram et la file IA (`TRAM_COLLECTE=false`,
+`IA_PARALLELE=0` dans son `.env`) : c'est main qui les fait tourner.
 
 - **Ports** : web sur `5400 + slot`, API sur `3400 + slot` (le port du web moins 2000).
 - **Un conteneur PostgreSQL partagé** par tous les checkouts (nom de projet Compose fixe),
@@ -54,6 +66,9 @@ pour tout le monorepo. Au démarrage d'un worktree, le manager lance
   à installer grâce au store pnpm. Sinon, les liens vers les packages internes pointeraient
   vers le dépôt principal.
 - Bases d'un worktree supprimé : `pnpm db:psql` puis `DROP DATABASE voirie_wt_<worktree>;`.
+- Procédure complète (bases, appels extérieurs, migrations au merge) :
+  [docs/worktrees.md](docs/worktrees.md).
+- Procédure complète (bases, appels extérieurs, migrations au merge) : [docs/worktrees.md](docs/worktrees.md).
 
 Organisation : `apps/web` (React + MapLibre), `apps/api` (NestJS + Drizzle),
 `packages/schema` (zod), `packages/engine` (calcul des feux). Détails dans
@@ -517,7 +532,7 @@ métropole. Un simple mail au service Mobilité peut les obtenir, facultatif. Le
 - [x] Fond de carte « Satellite » (orthophotos IGN) pour vérifier voies et marquages.
 - [x] Configuration, étape 3 : plans de feux et plages horaires, programme par étapes, jaune et rouges de dégagement calculés sur la géométrie, diagramme de feux, lecture du cycle sur la carte.
 - [x] Configuration, étape 4 : graphe des étapes (étapes sur appel, priorité tram, arcs conditionnels) et simulation d'un scénario de demandes (attentes, journal, lecture sur la carte).
-- [x] Giratoires à feux : anneau (OSM, calé sur la photo), priorité des entrées, feux d'anneau, conflits d'insertion — voir [docs/CONFIGURATION.md §7](docs/CONFIGURATION.md#7-giratoires).
+- [x] Giratoires à feux, par nœuds comme dans TM:PE : nœuds posés sur la photo (ou détectés dans OSM), liaisons à chaque nœud, feux d'anneau, conflits d'insertion — voir [docs/CONFIGURATION.md §7](docs/CONFIGURATION.md#7-giratoires).
 - [ ] Comparer le diagramme de feux aux relevés terrain (après le chrono).
 - [x] Carte MapLibre : carrefours colorés par statut, bulle avec nom, nature et tram.
 - [ ] Fiche carrefour avec diagramme de feux ; calcul des branches (`ST_Azimuth`).

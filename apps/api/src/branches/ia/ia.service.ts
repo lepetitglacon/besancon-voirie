@@ -59,8 +59,11 @@ export class IaService {
   async analyser(carrefourId: string, emprise?: EmpriseIa | null): Promise<DetectionBranchesIa> {
     const detection = await this.branches.detecter(carrefourId); // 404 si le carrefour n'existe pas
     const cadre = cadreDe(detection, emprise);
+    const { rows } = await this.db.execute<{ nature: string }>(sql`SELECT nature FROM carrefour WHERE id = ${carrefourId}`);
+    const giratoire = rows[0]?.nature === 'giratoire';
     const contexte: ContexteIa = {
       cadre,
+      giratoire,
       detection,
       feux: await this.feux(carrefourId),
       voiesOsm: await this.voiesOsm(cadre),
@@ -85,14 +88,23 @@ export class IaService {
       if (!lecture.success) throw new UnprocessableEntityException('Réponse de Claude hors schéma');
       let resultat;
       try {
-        resultat = configurationDepuisLecture(lecture.data, cadre, detection);
+        resultat = configurationDepuisLecture(lecture.data, cadre, detection, giratoire, contexte.feux);
       } catch (erreur) {
         throw new UnprocessableEntityException((erreur as Error).message);
       }
-      const { branches, connexions } = resultat.configuration;
+      const { branches, connexions, anneau } = resultat.configuration;
       const remarques = [
         lecture.data.remarques,
+        resultat.noeuds === 'ia'
+          ? `Nœuds de l'anneau lus sur la photo (${anneau!.noeuds.length}).`
+          : resultat.noeuds === 'osm'
+            ? "Nœuds de l'anneau d'après OSM : l'IA n'en a pas proposé trois distincts."
+            : giratoire
+              ? "Aucun nœud d'anneau : posez-les avec l'outil Nœud."
+              : '',
         resultat.ecartees.length ? `Connexions écartées (voie inconnue ou en double) : ${resultat.ecartees.join(', ')}.` : '',
+        resultat.lignes.length ? `${resultat.lignes.length} ligne(s) de feux proposée(s) d'après les feux vus sur la photo.` : '',
+        resultat.feuxIgnores.length ? `Feux sans ligne proposée : ${resultat.feuxIgnores.join(' ; ')}.` : '',
       ]
         .filter(Boolean)
         .join(' ');
@@ -101,8 +113,9 @@ export class IaService {
           `${reponse.modele}, ${reponse.duree_s} s, ${reponse.cout_usd?.toFixed(3) ?? '?'} $`,
       );
       return {
-        ...deduire(detection.centre, branches, connexions, detection.anneau),
+        ...deduire(detection.centre, branches, connexions, anneau),
         rayon_m: detection.rayon_m,
+        lignes: resultat.lignes,
         sources: Object.fromEntries(branches.map((b) => [b.code, 'ia' satisfies SourceBranche])),
         ia: {
           remarques,
@@ -127,12 +140,12 @@ export class IaService {
   }
 
   private async feux(carrefourId: string): Promise<ContexteIa['feux']> {
-    const { rows } = await this.db.execute<{ type: TypeFeu; lon: number; lat: number; tags: Record<string, string> }>(sql`
-      SELECT type, ST_X(geom) AS lon, ST_Y(geom) AS lat, tags FROM feu
+    const { rows } = await this.db.execute<{ id: string; type: TypeFeu; lon: number; lat: number; tags: Record<string, string> }>(sql`
+      SELECT id, type, ST_X(geom) AS lon, ST_Y(geom) AS lat, tags FROM feu
       WHERE carrefour_id = ${carrefourId}
       ORDER BY type, ST_X(geom), ST_Y(geom)
     `);
-    return rows.map((f, i) => ({ numero: i + 1, type: f.type, position: [f.lon, f.lat], tags: f.tags }));
+    return rows.map((f, i) => ({ id: f.id, numero: i + 1, type: f.type, position: [f.lon, f.lat], tags: f.tags }));
   }
 
   /** Voies OSM circulables (et voies de tram) dans le cadre de la photo, découpées au cadre. */

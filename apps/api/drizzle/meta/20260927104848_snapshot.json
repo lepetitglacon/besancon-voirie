@@ -1,6 +1,6 @@
 {
-  "id": "c127f03e-7986-43cb-8425-de27aeeb8afd",
-  "prevId": "1351bd6c-58fa-44ec-bcc9-747f9e2dde65",
+  "id": "e61a2c60-b970-47c9-8fa0-d7eec69160b4",
+  "prevId": "510d3859-ba74-43bb-a767-e85b512ea0ba",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -199,6 +199,19 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": false
+        },
+        "noeud": {
+          "name": "noeud",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "troncon": {
+          "name": "troncon",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {},
@@ -611,12 +624,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "anneau": {
-          "name": "anneau",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -706,102 +713,6 @@
         }
       },
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.noeud": {
-      "name": "noeud",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "osm_node_id": {
-          "name": "osm_node_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "carrefour_id": {
-          "name": "carrefour_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "geom": {
-          "name": "geom",
-          "type": "geometry(point)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "liaisons": {
-          "name": "liaisons",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cree_le": {
-          "name": "cree_le",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "noeud_geom_idx": {
-          "name": "noeud_geom_idx",
-          "columns": [
-            {
-              "expression": "geom",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "gist",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "noeud_carrefour_id_carrefour_id_fk": {
-          "name": "noeud_carrefour_id_carrefour_id_fk",
-          "tableFrom": "noeud",
-          "tableTo": "carrefour",
-          "columnsFrom": [
-            "carrefour_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "noeud_osm_node_id_unique": {
-          "name": "noeud_osm_node_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "osm_node_id"
-          ]
-        },
-        "noeud_carrefour_id_unique": {
-          "name": "noeud_carrefour_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "carrefour_id"
-          ]
-        }
-      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -1056,6 +967,87 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.top_synchro": {
+      "name": "top_synchro",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "carrefour_id": {
+          "name": "carrefour_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ligne": {
+          "name": "ligne",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "instant": {
+          "name": "instant",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cree_le": {
+          "name": "cree_le",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "top_synchro_carrefour_idx": {
+          "name": "top_synchro_carrefour_idx",
+          "columns": [
+            {
+              "expression": "carrefour_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "instant",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "top_synchro_carrefour_id_carrefour_id_fk": {
+          "name": "top_synchro_carrefour_id_carrefour_id_fk",
+          "tableFrom": "top_synchro",
+          "tableTo": "carrefour",
+          "columnsFrom": [
+            "carrefour_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.tram_passage": {
       "name": "tram_passage",
       "schema": "",
@@ -1188,250 +1180,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.troncon": {
-      "name": "troncon",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "noeud_de": {
-          "name": "noeud_de",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "noeud_vers": {
-          "name": "noeud_vers",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "geom": {
-          "name": "geom",
-          "type": "geometry(LineString, 4326)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "osm_way_id": {
-          "name": "osm_way_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "osm_de": {
-          "name": "osm_de",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "osm_vers": {
-          "name": "osm_vers",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "nom": {
-          "name": "nom",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "highway": {
-          "name": "highway",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "voies_avant": {
-          "name": "voies_avant",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "voies_arriere": {
-          "name": "voies_arriere",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "vitesse_kmh": {
-          "name": "vitesse_kmh",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source": {
-          "name": "source",
-          "type": "source_reseau",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "modifie": {
-          "name": "modifie",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "supprime": {
-          "name": "supprime",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "branche_de": {
-          "name": "branche_de",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "branche_vers": {
-          "name": "branche_vers",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "liens_de": {
-          "name": "liens_de",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "liens_vers": {
-          "name": "liens_vers",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cree_le": {
-          "name": "cree_le",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "modifie_le": {
-          "name": "modifie_le",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "troncon_geom_idx": {
-          "name": "troncon_geom_idx",
-          "columns": [
-            {
-              "expression": "geom",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "gist",
-          "with": {}
-        },
-        "troncon_noeud_de_idx": {
-          "name": "troncon_noeud_de_idx",
-          "columns": [
-            {
-              "expression": "noeud_de",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "troncon_noeud_vers_idx": {
-          "name": "troncon_noeud_vers_idx",
-          "columns": [
-            {
-              "expression": "noeud_vers",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "troncon_osm_way_idx": {
-          "name": "troncon_osm_way_idx",
-          "columns": [
-            {
-              "expression": "osm_way_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "troncon_noeud_de_noeud_id_fk": {
-          "name": "troncon_noeud_de_noeud_id_fk",
-          "tableFrom": "troncon",
-          "tableTo": "noeud",
-          "columnsFrom": [
-            "noeud_de"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "troncon_noeud_vers_noeud_id_fk": {
-          "name": "troncon_noeud_vers_noeud_id_fk",
-          "tableFrom": "troncon",
-          "tableTo": "noeud",
-          "columnsFrom": [
-            "noeud_vers"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "troncon_voies_check": {
-          "name": "troncon_voies_check",
-          "value": "\"troncon\".\"voies_avant\" BETWEEN 0 AND 9 AND \"troncon\".\"voies_arriere\" BETWEEN 0 AND 9 AND \"troncon\".\"voies_avant\" + \"troncon\".\"voies_arriere\" > 0"
-        },
-        "troncon_noeuds_check": {
-          "name": "troncon_noeuds_check",
-          "value": "\"troncon\".\"noeud_de\" <> \"troncon\".\"noeud_vers\""
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.voie": {
       "name": "voie",
       "schema": "",
@@ -1544,14 +1292,6 @@
       "values": [
         "entrante",
         "sortante"
-      ]
-    },
-    "public.source_reseau": {
-      "name": "source_reseau",
-      "schema": "public",
-      "values": [
-        "osm",
-        "manuel"
       ]
     },
     "public.statut_analyse_ia": {

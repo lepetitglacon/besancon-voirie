@@ -1,37 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { repereLocal, type LonLat } from './geometrie.js';
-import { boutsAuNoeud, horsDuCercle, liaisonsParDefaut, liaisonsRetenues, liensParDefaut, voiesTroncon } from './reseau.js';
+import { boutsAuNoeud, liaisonsParDefaut, liaisonsRetenues, liensParDefaut, voiesTroncon } from './reseau.js';
 
 const centre: LonLat = [6.03, 47.25];
 const { versLonLat, versXY } = repereLocal(centre);
 const m = (x: number, y: number) => versLonLat([x, y]);
-const distance = (p: LonLat) => Math.hypot(...versXY(p));
-
-describe('découpe au cercle d’un carrefour', () => {
-  it('coupe un tronçon qui arrive au centre', () => {
-    const [morceau, ...reste] = horsDuCercle([m(0, 100), m(0, 50), m(0, 0)], centre, 30);
-    expect(reste).toEqual([]);
-    expect(morceau!.debutSurCercle).toBe(false);
-    expect(morceau!.finSurCercle).toBe(true);
-    expect(morceau!.points).toHaveLength(3);
-    expect(distance(morceau!.points[2]!)).toBeCloseTo(30, 6);
-  });
-
-  it('coupe en deux un tronçon qui traverse le carrefour', () => {
-    const morceaux = horsDuCercle([m(-100, 5), m(100, 5)], centre, 30);
-    expect(morceaux.map((p) => [p.debutSurCercle, p.finSurCercle])).toEqual([
-      [false, true],
-      [true, false],
-    ]);
-    expect(versXY(morceaux[0]!.points[1]!)[0]).toBeCloseTo(-Math.sqrt(30 ** 2 - 25), 6);
-  });
-
-  it('ne garde rien d’un tronçon entièrement dedans, et tout d’un tronçon dehors', () => {
-    expect(horsDuCercle([m(-10, 0), m(10, 0)], centre, 30)).toEqual([]);
-    const dehors = [m(-100, 50), m(100, 50)];
-    expect(horsDuCercle(dehors, centre, 30)).toEqual([{ points: dehors, debutSurCercle: false, finSurCercle: false }]);
-  });
-});
 
 describe('liens proposés entre voies', () => {
   it('relie voie à voie à nombre égal', () => {

@@ -1,5 +1,6 @@
 import type { LonLat } from '@voirie/engine'
 import type {
+  AjoutTops,
   AnalyseIa,
   AnalyseIaDetail,
   Bbox,
@@ -15,6 +16,7 @@ import type {
   EmpriseIa,
   EtatHistoriqueTram,
   FeuxGeoJson,
+  FeuxTempsReel,
   HistoriqueTroncons,
   LignesCarrefour,
   ModificationTroncon,
@@ -22,11 +24,10 @@ import type {
   NatureCarrefour,
   NouveauTroncon,
   ProgrammeCarrefour,
-  RaccordementsCarrefour,
   ReseauGeoJson,
   ReseauTram,
   SaisieLiaisons,
-  SaisieRaccordements,
+  TopsCarrefour,
   TramsTempsReel,
   TypeJour,
 } from '@voirie/schema'
@@ -101,6 +102,14 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(configuration),
     }),
+  /** Carrefours programmés de l'emprise : de quoi rejouer leurs feux à l'heure réelle. */
+  feuxTempsReel: (bbox: Bbox) => requete<FeuxTempsReel>(`/api/temps-reel/feux?bbox=${parametreBbox(bbox)}`),
+  tops: (carrefourId: string) => requete<TopsCarrefour>(`/api/carrefours/${carrefourId}/tops`),
+  /** Débuts de vert relevés sur place, pour caler le cycle sur l'heure réelle. */
+  ajouterTops: (carrefourId: string, ajout: AjoutTops) =>
+    requete<TopsCarrefour>(`/api/carrefours/${carrefourId}/tops`, { method: 'POST', body: JSON.stringify(ajout) }),
+  supprimerTop: (carrefourId: string, id: string) =>
+    requete<TopsCarrefour>(`/api/carrefours/${carrefourId}/tops/${id}`, { method: 'DELETE' }),
   reseauTram: () => requete<ReseauTram>('/api/tram/reseau'),
   tramsTempsReel: () => requete<TramsTempsReel>('/api/tram/temps-reel'),
   historiqueTroncons: (typeJour: TypeJour, heure: number | null) =>
@@ -112,7 +121,7 @@ export const api = {
   // ── Réseau routier (docs/RESEAU.md) ──
   reseau: (bbox: Bbox) => requete<ReseauGeoJson>(`/api/reseau?bbox=${parametreBbox(bbox)}`),
   genererReseau: () =>
-    requete<{ voies_osm: number; noeuds: number; troncons: number; conserves: number; carrefours: number }>('/api/reseau/generer', {
+    requete<{ voies_osm: number; noeuds: number; troncons: number; conserves: number }>('/api/reseau/generer', {
       method: 'POST',
     }),
   creerTroncon: (nouveau: NouveauTroncon) =>
@@ -124,9 +133,6 @@ export const api = {
     requete<SaisieLiaisons>(`/api/reseau/noeuds/${noeudId}/liaisons`, { method: 'PUT', body: JSON.stringify(saisie) }),
   /** Lien de téléchargement d'un fichier de l'export SUMO (de l'emprise, ou de toute la ville). */
   urlSumo: (fichier: string, bbox?: Bbox) => `/api/reseau/sumo/${fichier}${bbox ? `?bbox=${parametreBbox(bbox)}` : ''}`,
-  raccordements: (carrefourId: string) => requete<RaccordementsCarrefour>(`/api/carrefours/${carrefourId}/raccordements`),
-  enregistrerRaccordements: (carrefourId: string, saisie: SaisieRaccordements) =>
-    requete<RaccordementsCarrefour>(`/api/carrefours/${carrefourId}/raccordements`, { method: 'PUT', body: JSON.stringify(saisie) }),
 }
 
 export type Troncon = ReseauGeoJson['troncons']['features'][number]

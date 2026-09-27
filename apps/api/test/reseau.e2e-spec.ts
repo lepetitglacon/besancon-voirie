@@ -3,14 +3,14 @@ import type { INestApplication } from '@nestjs/common';
 import type { Server } from 'node:http';
 import pg from 'pg';
 import request from 'supertest';
-import type { DetectionBranches, RaccordementsCarrefour, ReseauGeoJson, TronconResume } from '@voirie/schema';
+import type { ReseauGeoJson, TronconResume } from '@voirie/schema';
 import { AppModule } from '../src/app.module.js';
 import { chargerOsm, trierElements } from '../scripts/osm.js';
 import { ELEMENTS_OSM, FEUX_A } from './fixtures/osm.js';
 
 const BBOX = '6.0,47.2,6.1,47.3';
 
-describe('Réseau routier, raccordements et export SUMO (e2e)', () => {
+describe('Réseau routier et export SUMO (e2e)', () => {
   let app: INestApplication<Server>;
   const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
   let carrefourA: string;
@@ -48,64 +48,10 @@ describe('Réseau routier, raccordements et export SUMO (e2e)', () => {
   it('POST /reseau/generer should cut the OSM roads into sections between nodes', async () => {
     const { body } = await http().post('/api/reseau/generer').expect(200);
     // Rue A, Avenue B, les deux graphies de Foch et Rue C : aucune ne partage de nœud.
-    expect(body).toMatchObject({ voies_osm: 5, troncons: 5, conserves: 0, carrefours: 0 });
+    expect(body).toMatchObject({ voies_osm: 5, troncons: 5, conserves: 0 });
     const avenueB = (await troncons()).find((t) => t.properties.nom === 'Avenue B')!;
     // lanes=3, lanes:forward=2 : deux voies vers le nord, une vers le sud.
     expect(avenueB.properties).toMatchObject({ voies_avant: 2, voies_arriere: 1, source: 'osm', highway: 'primary' });
-  });
-
-  it('PUT /branches should cut the sections on the carrefour circle and attach them to its branches', async () => {
-    const detection: DetectionBranches = (await http().get(`/api/carrefours/${carrefourA}/branches/detection`).expect(200)).body;
-    await http()
-      .put(`/api/carrefours/${carrefourA}/branches`)
-      .send({ branches: detection.branches.map(({ sens: _sens, ...b }) => b), connexions: detection.connexions })
-      .expect(200);
-
-    // Rue A et Avenue B traversent le carrefour : chacune est coupée en deux.
-    expect(await compter()).toBe(7);
-    const { body }: { body: RaccordementsCarrefour } = await http().get(`/api/carrefours/${carrefourA}/raccordements`).expect(200);
-    expect(body.alertes).toEqual([]);
-    expect(body.raccordements.map((r) => r.branche ?? '').sort((a, b) => a.localeCompare(b))).toEqual(['E', 'N', 'O', 'S']);
-    // Voies générées : ligne d'arrêt à 15 m, 25 m de long ; plus la marge de 5 m.
-    expect(body.rayon_m).toBeGreaterThan(40);
-    expect(body.rayon_m).toBeLessThan(47);
-
-    const sud = body.raccordements.find((r) => r.branche === 'S')!;
-    expect(sud).toMatchObject({ nom: 'Avenue B', extremite: 'vers', voies_vers_carrefour: 2, voies_depuis_carrefour: 1, liens_auto: true });
-    expect(sud.liens.entree).toEqual([
-      [0, 0],
-      [1, 1],
-    ]);
-
-    const ouest = (await troncons()).find((t) => t.properties.nom === 'Rue A' && t.properties.branche_vers === 'O')!;
-    expect(ouest.properties.carrefour_vers).toBe(carrefourA);
-  });
-
-  it('POST /raccordements/recalculer should be idempotent', async () => {
-    const avant = (await http().get(`/api/carrefours/${carrefourA}/raccordements`).expect(200)).body;
-    const apres = (await http().post(`/api/carrefours/${carrefourA}/raccordements/recalculer`).expect(200)).body;
-    expect(await compter()).toBe(7);
-    expect(apres).toEqual(avant);
-  });
-
-  it('PUT /raccordements should save lane links, and refuse unknown lanes', async () => {
-    const { body: lus }: { body: RaccordementsCarrefour } = await http().get(`/api/carrefours/${carrefourA}/raccordements`);
-    const sud = lus.raccordements.find((r) => r.branche === 'S')!;
-    const liens = { entree: [[0, 0], [1, 0], [1, 1]], sortie: [[0, 0]] };
-    const { body } = await http()
-      .put(`/api/carrefours/${carrefourA}/raccordements`)
-      .send({ raccordements: [{ troncon_id: sud.troncon_id, extremite: 'vers', branche: 'S', liens }] })
-      .expect(200);
-    expect(body.raccordements.find((r: { branche: string }) => r.branche === 'S')).toMatchObject({ liens, liens_auto: false });
-
-    await http()
-      .put(`/api/carrefours/${carrefourA}/raccordements`)
-      .send({ raccordements: [{ troncon_id: sud.troncon_id, extremite: 'vers', branche: 'S', liens: { entree: [[5, 0]], sortie: [] } }] })
-      .expect(400);
-    await http()
-      .put(`/api/carrefours/${carrefourA}/raccordements`)
-      .send({ raccordements: [{ troncon_id: sud.troncon_id, extremite: 'de', branche: 'S', liens: null }] })
-      .expect(400);
   });
 
   let manuel: string;
@@ -152,16 +98,6 @@ describe('Réseau routier, raccordements et export SUMO (e2e)', () => {
       .put(`/api/reseau/noeuds/${noeud}/liaisons`)
       .send({ liaisons: [{ ...liaisons[0], voie_de: 3 }] })
       .expect(400);
-    const noeudA = (await client.query('SELECT id FROM noeud WHERE carrefour_id = $1', [carrefourA])).rows[0].id;
-    await http().put(`/api/reseau/noeuds/${noeudA}/liaisons`).send({ liaisons: null }).expect(400);
-  });
-
-  it('GET /reseau should return the configured carrefours with their lanes and attached sections', async () => {
-    const { body }: { body: ReseauGeoJson } = await http().get(`/api/reseau?bbox=${BBOX}`).expect(200);
-    expect(body.carrefours).toHaveLength(1);
-    expect(body.carrefours[0]).toMatchObject({ id: carrefourA, anneau: null });
-    expect(body.carrefours[0]!.branches.map((b) => b.code).sort((a, b) => a.localeCompare(b))).toEqual(['E', 'N', 'O', 'S']);
-    expect(body.carrefours[0]!.raccordements).toHaveLength(4);
   });
 
   it('PATCH /reseau/troncons/:id should change lanes, reverse, and refuse a section without lanes', async () => {
@@ -184,14 +120,11 @@ describe('Réseau routier, raccordements et export SUMO (e2e)', () => {
     const avant = await compter();
 
     const { body } = await http().post('/api/reseau/generer').expect(200);
-    // Rue C (deux moitiés corrigées), Foch (supprimé) et Avenue B (liens saisis) sont gardés ; A est raccordé.
-    expect(body).toMatchObject({ conserves: 3, carrefours: 1 });
+    // Rue C (deux moitiés corrigées) et Foch (supprimé) sont gardés.
+    expect(body).toMatchObject({ conserves: 2 });
     expect(await compter()).toBe(avant);
     expect((await troncons()).some((t) => t.properties.nom === 'Avenue du Maréchal Foch')).toBe(false);
     expect((await troncons()).find((t) => t.id === manuel)?.properties.source).toBe('manuel');
-    const { body: raccordements }: { body: RaccordementsCarrefour } = await http().get(`/api/carrefours/${carrefourA}/raccordements`).expect(200);
-    expect(raccordements.raccordements).toHaveLength(4);
-    expect(raccordements.raccordements.find((r) => r.branche === 'S')?.liens_auto).toBe(false);
   });
 
   it('GET /reseau/sumo/* should export plain XML for netconvert', async () => {
@@ -200,13 +133,11 @@ describe('Réseau routier, raccordements et export SUMO (e2e)', () => {
     const con = (await http().get(`/api/reseau/sumo/reseau.con.xml?bbox=${BBOX}`).expect(200)).text;
     const cfg = (await http().get('/api/reseau/sumo/reseau.netccfg').expect(200)).text;
 
-    expect(nod).toContain(`<node id="c${carrefourA}"`);
-    expect(nod).toMatch(new RegExp(`id="c${carrefourA}"[^>]*type="traffic_light"`));
-    // Approches des quatre branches, et le tronçon tracé à la main (sens unique, 2 voies).
-    for (const code of ['N', 'S', 'E', 'O']) expect(edg).toContain(`id="a${carrefourA}_${code}_e_`);
+    expect(nod).toContain('type="priority"');
+    // Le tronçon tracé à la main (sens unique, 2 voies).
     expect(edg).toMatch(new RegExp(`<edge id="-t${manuel}" [^>]*numLanes="2"`));
     expect(edg).not.toContain(`id="t${manuel}"`);
-    expect(con.match(/<connection /g)!.length).toBeGreaterThan(10);
+    expect(con.match(/<connection /g)!.length).toBeGreaterThan(0);
     expect(cfg).toContain('<connection-files value="reseau.con.xml"/>');
     // Liaison saisie au nœud de l'impasse (le tronçon a depuis été inversé : il arrive par son arête inverse).
     expect(con).toContain(`<connection from="-t${manuel}"`);

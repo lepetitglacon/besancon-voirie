@@ -127,6 +127,15 @@ connexions (`flechesParVoie`, `mouvementsDepuisConnexions`), côté API comme c�
    `ConfigurationBranches`, comme un `PUT`. Elle arrive dans l'éditeur comme celle d'OSM ; la
    popup de chaque branche porte le badge « Lu sur la photo par l'IA », la confiance de l'IA et
    ses remarques, la carte d'en-tête ses remarques générales.
+5. **Lignes de feux** : l'IA dit aussi ce que commande chaque feu du carrefour (F1, F2… de la
+   consigne) : les voies entrantes d'une branche, l'anneau d'un giratoire devant un nœud (§7),
+   ou un passage piéton. Le serveur en tire des lignes proposées (`lignesDepuisLecture`) :
+   une par branche d'entrée (tous ses mouvements, F ou T pour le tram et le bus en site
+   propre), par nœud d'anneau (la circulation qui y arrive par l'anneau, qu'elle continue ou
+   sorte : A) et par passage piéton (P). Les feux qui commandent la même chose se regroupent
+   dans une ligne, avec leurs feux physiques. Ces lignes arrivent en brouillon dans l'onglet
+   Lignes de feux (on confirme si le carrefour en a déjà) et s'enregistrent après les
+   branches ; les feux qu'on n'a pas su rattacher sont cités dans les remarques.
 
 **File d'attente.** ✦ IA met le carrefour en file (`analyse_ia`) et rend la main tout de
 suite : on peut en demander plusieurs et continuer à travailler. Un travailleur de l'API
@@ -496,86 +505,109 @@ circulation quand le tram ou le bus traverse l'îlot.
 
 Rayon : cercle de même aire que l'enveloppe du tracé OSM, qui suit le milieu de la chaussée.
 
-### Modèle (comme OSM, SUMO et TM:PE)
+### Modèle : des nœuds, comme dans TM:PE
 
-Un giratoire est un carrefour de nature `giratoire`, avec un **anneau** : une chaussée à sens
-unique autour de l'îlot, où l'on tourne dans le sens antihoraire vu du ciel. Chaque branche
-s'y insère en un point. C'est le modèle d'OSM (l'anneau est une voie `junction=roundabout`),
-de SUMO (`netconvert` donne la priorité à l'anneau) et de TM:PE (une boucle de tronçons à
-sens unique, chaque raccord étant un nœud) : la phase 2 s'y branche sans traduction.
+Un giratoire est un carrefour de nature `giratoire` dont l'anneau est une **boucle de
+nœuds** posés sur la photo, dans l'ordre de circulation (antihoraire vu du ciel). On ne
+dessine pas de cercle : les nœuds suivent l'anneau réel, ovale ou déformé par un tram.
 
-```sql
-ALTER TYPE nature_carrefour ADD VALUE 'giratoire';
-ALTER TABLE carrefour  ADD COLUMN anneau jsonb;            -- { centre: [lon, lat], rayon_m, voies }
-CREATE TYPE priorite_entree AS ENUM ('cedez_le_passage', 'stop', 'priorite_a_droite');
-ALTER TABLE branche    ADD COLUMN priorite_entree priorite_entree;  -- null = cédez-le-passage
-ALTER TABLE ligne_feux ADD COLUMN anneau text;             -- feu d'anneau : branche juste en aval
-```
-
-- **Anneau** : centre de l'îlot, rayon du bord extérieur de la chaussée, nombre de voies.
-  Il s'enregistre avec les branches (`PUT /branches`, champ `anneau`).
-- **Branches** : leur azimut et leurs voies se comptent depuis le centre de l'îlot ; les
-  voies proposées s'arrêtent 2 m avant le bord de l'anneau.
+- **Nœud** : un mini-carrefour, là où une rue (ou le tram) touche l'anneau. Trois nœuds au
+  moins ferment la boucle ; à partir de quatre, la courbe suit bien un anneau réel.
+- **Tronçon d'anneau** : entre deux nœuds, une courbe lissée qui passe par les nœuds
+  (Catmull-Rom centripète). C'est une **branche générée** : `R1` part du nœud 1. Ses voies
+  (rang 0 côté îlot) sont sortantes au nœud de départ, entrantes au nœud d'arrivée ; on
+  choisit leur nombre par tronçon. Elles se recalculent quand un nœud bouge.
+- **Rue** : une branche ordinaire, raccordée à un nœud (`noeud`) ; ses voies proposées
+  partent du nœud, ligne d'arrêt à une demi-largeur d'anneau plus 2 m. Le tram ou un bus en
+  site propre qui traverse l'îlot n'est raccordé à aucun nœud.
+- **Liaisons** : l'outil Liaison habituel, à chaque nœud : `R1:e0 → R2:s0` (on continue),
+  `R1:e0 → O:s0` (on sort), `O:e0 → R2:s0` (on s'insère). Une liaison entre deux nœuds
+  différents est refusée à l'enregistrement.
 - **Priorité d'une entrée** : cédez-le-passage à l'anneau par défaut, stop, ou priorité à
   droite (anneau non prioritaire, type place de l'Étoile). C'est un attribut, pas une
   supposition. Une entrée à feux garde ce régime quand ses feux sont éteints ou au jaune
   clignotant.
-- **Feu d'anneau** : une ligne de feux qui ne commande aucun mouvement. Elle arrête la
-  circulation de l'anneau juste en amont d'une branche. Code A1, A2…
+- **Feu d'anneau** : une ligne de feux ordinaire, qui commande le mouvement « on continue »
+  d'un nœud (`R1>R2`).
 
-### Trajectoires (`giratoire.ts`)
+```sql
+ALTER TYPE nature_carrefour ADD VALUE 'giratoire';
+ALTER TABLE carrefour ADD COLUMN anneau jsonb;             -- { noeuds: [{ code, position }] }
+CREATE TYPE priorite_entree AS ENUM ('cedez_le_passage', 'stop', 'priorite_a_droite');
+ALTER TABLE branche   ADD COLUMN priorite_entree priorite_entree;  -- null = cédez-le-passage
+ALTER TABLE branche   ADD COLUMN noeud text;               -- rue : son nœud ; tronçon : nœud de départ
+ALTER TABLE branche   ADD COLUMN troncon boolean NOT NULL DEFAULT false;
+```
 
-Une connexion suit l'anneau : raccord d'entrée (Bézier tangente à la voie puis à l'anneau),
-arc sur une voie de l'anneau, raccord de sortie. Sur un anneau à plusieurs voies, la voie
-dépend de la distance à parcourir : voie extérieure pour les premières sorties, plus
-intérieure pour aller plus loin (sur trois voies : moins d'un tiers de tour, moins de deux
-tiers, au-delà). Une voie entrante de gauche ne donne jamais sur une voie plus extérieure que
-celle à son droit ; avant la sortie, on se rabat sur la voie au droit de la voie sortante. Seules les connexions **tram à
-tram** et **bus à bus** (site propre) traversent l'îlot en ligne droite.
+C'est aussi le modèle d'OSM (l'anneau est une voie `junction=roundabout` que chaque rue
+touche en un nœud) et de SUMO (une jonction par raccord) : la phase 2 s'y branche sans
+traduction.
 
-Un feu d'anneau se place juste en amont (3 m) du premier point où la branche touche
-l'anneau : l'insertion de ses voies entrantes, ou le franchissement du tram ou du bus qui en
-vient ou y va. Il est donc entre la sortie et l'entrée de la branche : on peut toujours
-quitter l'anneau vers cette branche.
+### Sens des mouvements
 
-Les trajectoires commandées par chaque ligne (`trajectoiresDesLignes`) :
-
-- **Ligne d'entrée** : les trajectoires de ses mouvements, coupées au premier feu d'anneau
-  qu'elles rencontrent (elles y attendent).
-- **Feu d'anneau** : la circulation qui passe devant lui, depuis sa ligne d'arrêt jusqu'au
-  feu d'anneau suivant, ou jusqu'à sa sortie.
+À un nœud, le sens d'un mouvement se lit sur les voies elles-mêmes, pas sur l'azimut des
+branches depuis le centre : les voies d'anneau prennent la tangente de l'anneau au nœud.
+Continuer sur l'anneau est un tout-droit, on y entre et on en sort à droite.
 
 ### Conflits
 
-| Cas | Résultat |
-|---|---|
-| Une entrée s'insère là où une autre trajectoire circule sur l'anneau | `insertion` |
-| Feu d'anneau et entrée juste en aval | `insertion` |
-| Trajectoire arrêtée par un feu d'anneau et entrée en aval de ce feu | compatibles |
-| Tram (ou bus) qui traverse l'îlot et circulation de l'anneau | `croisement` |
-| Trajectoire qui sort avant l'entrée suivante | compatibles |
-| Deux trajectoires vers la même voie de sortie | `convergence` |
+Les liaisons étant propres à chaque nœud, le calcul ordinaire des conflits suffit (§4). Deux
+liaisons qui aboutissent à la même voie d'anneau sont une **insertion** : c'est le conflit
+entre un feu d'anneau et l'entrée qu'il protège, au même nœud. Le tram qui traverse l'îlot
+coupe la liaison « on continue » du nœud posé à son passage : `croisement`.
 
-Rouge de dégagement d'une insertion : le point de conflit est celui où l'entrant rejoint
-l'anneau ; un feu d'anneau compte ses trajets depuis sa propre ligne d'arrêt, sur l'anneau.
+Les mouvements sans feux ne sont signalés que pour les origines (rue ou tronçon) dont un
+autre mouvement a des feux : une entrée sans feux cède le passage, l'anneau sans feu
+d'anneau circule librement.
 
-Les mouvements sans feux ne sont signalés que pour les entrées dont un autre mouvement a des
-feux : une entrée sans feux cède le passage, c'est normal.
+### Éditeur
+
+- Outil **Nœud** (<kbd>N</kbd>, giratoires seulement) : un clic sur la carte pose un nœud,
+  inséré dans la boucle là où il l'allonge le moins (le tronçon coupé en deux garde ses
+  liaisons, le nouveau nœud reçoit les liaisons par défaut) ; glisser un nœud le cale ;
+  cliquer ouvre ses réglages.
+- **Popup d'un nœud** : rues raccordées (cocher pour raccorder), voies du tronçon qui en
+  part, « Proposer les liaisons » (continuer, sortir, s'insérer), suppression (le tronçon
+  qui arrivait va jusqu'au nœud suivant).
+- **Popup d'une rue** : son nœud de raccordement et la priorité de son entrée.
+- Carte d'en-tête : nombre de nœuds et de rues raccordées ; retirer l'anneau.
 
 ### Détection OSM
 
 Pour un carrefour de nature `giratoire`, `GET /branches/detection` :
 
-1. prend l'anneau OSM le plus proche (60 m au plus) : voies `junction=roundabout` reliées,
-   centre et rayon de leur enveloppe, plus une demi-largeur de chaussée ; voies = `lanes` ;
-2. cherche les branches sur un cercle 15 m au-delà de l'anneau, sans compter l'anneau
-   lui-même ;
-3. propose toutes les connexions de chaque entrée vers chaque sortie, demi-tour compris :
-   les flèches d'OSM manquent presque toujours aux entrées de giratoire.
+1. prend l'anneau OSM le plus proche (60 m au plus) : voies `junction=roundabout` reliées en
+   une boucle, dans le sens de leur tracé (celui de la circulation) ;
+2. pose un nœud là où chaque rue et le tram touchent l'anneau (deux raccords à moins de 6 m
+   n'en font qu'un), puis en ajoute à mi-chemin des plus grands écarts jusqu'à quatre ;
+3. cherche les rues sur un cercle 15 m au-delà de l'anneau, sans compter l'anneau
+   lui-même, et raccorde chacune au nœud de sa voie OSM (sinon au plus proche) ;
+4. génère les tronçons (voies = `lanes` de l'anneau) et propose les liaisons de chaque nœud.
 
-Le tram n'est pas détecté (comme pour les carrefours ordinaires) : ses voies s'ajoutent à la
-main, en type `tram`. La proposition OSM + IA reçoit l'anneau et la consigne de ne pas en
-faire une branche.
+Le tram n'est pas détecté comme branche (comme pour les carrefours ordinaires) : ses voies
+s'ajoutent à la main, en type `tram`, sans nœud.
+
+### Proposition OSM + IA
+
+L'IA reçoit les nœuds d'OSM (s'il y en a) et la consigne de découper l'anneau d'après la
+photo, comme dans TM:PE. Elle renvoie, en plus des rues :
+
+- `anneau.noeuds` : la boucle, dans l'ordre de circulation, un nœud au milieu de la chaussée
+  là où chaque entrée et chaque sortie touche l'anneau (deux nœuds si l'entrée et la sortie
+  d'une rue sont à plus de 10 m l'une de l'autre), un nœud à chaque passage du tram ou d'un
+  bus en site propre, quatre au moins ; `voies` : voies de l'anneau jusqu'au nœud suivant ;
+- pour chaque rue, `noeud` : le numéro du nœud où elle touche l'anneau (null pour le tram
+  qui traverse l'îlot). Une rue dont l'entrée et la sortie touchent l'anneau à deux nœuds
+  devient deux branches : l'une entrante (NE), l'autre sortante (NE2).
+
+Le serveur nettoie la boucle (`normaliserNoeuds`) : nœuds à moins de 6 m fusionnés, sens de
+circulation rétabli, complément jusqu'à quatre au milieu des plus longs tronçons. S'il reste
+moins de trois nœuds, il garde ceux d'OSM ; une rue sans nœud valable rejoint le plus proche.
+Les tronçons et les liaisons aux nœuds se reconstruisent à partir de ces nœuds ; de l'IA, on
+ne garde que les liaisons du tram ou du bus qui traverse l'îlot. Les feux que l'IA situe devant un
+nœud deviennent des feux d'anneau proposés (ligne A sur la circulation qui arrive au nœud). Les remarques disent d'où
+viennent les nœuds (photo ou OSM). Un giratoire absent d'OSM reçoit ainsi ses nœuds de la
+photo.
 
 ### Ce qu'on ne reprend pas de TM:PE
 
@@ -589,7 +621,7 @@ jeu, pas des règles françaises :
 - **suppression des passages piétons** : en France, ils sont reculés d'environ 5 m de
   l'anneau, pas supprimés ;
 - **flèches automatiques aux entrées** (voie de droite pour la première sortie) : rares ici ;
-  les connexions restent une proposition à corriger.
+  les liaisons restent une proposition à corriger, nœud par nœud.
 
 ## 8. Ce qu'OSM fournit déjà
 
@@ -616,4 +648,6 @@ Les flèches sont donc **surtout à saisir à la main** : la détection propose,
 | `config-graphes` | Étape 4 : graphe des étapes (étapes sur appel, priorité tram, arcs conditionnels) et simulation d'un scénario de demandes |
 | `config-recalage` | Feux posés sur leur mât sur la photo, position OSM conservée |
 | `config-ia` | Proposition « OSM + IA » : orthophoto IGN lue par Claude Code sur le serveur, import d'un JSON de branches |
-| `giratoires` | Giratoires (§7) : anneau détecté dans OSM et calé sur la photo, priorité des entrées, trajectoires par l'anneau, feux d'anneau, conflits d'insertion |
+| `giratoires` | Giratoires (§7), première version : anneau circulaire (remplacée par `giratoires-noeuds`) |
+| `giratoires-noeuds` | Giratoires (§7) par nœuds, comme dans TM:PE : nœuds posés sur la photo ou détectés dans OSM, tronçons d'anneau, liaisons à chaque nœud, feux d'anneau en lignes ordinaires |
+| `feux-ia` | Lignes de feux proposées par l'IA d'après ce que commande chaque feu vu sur la photo : entrées, feux d'anneau, piétons, tram |

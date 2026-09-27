@@ -1,10 +1,10 @@
 import { z } from 'zod';
-import { LonLat, type Anneau, type BrancheLue, type Connexion } from './branches.js';
+import { LonLat } from './branches.js';
 
 /**
- * Réseau routier hors carrefours — docs/RESEAU.md. Des tronçons relient des nœuds
- * (intersections OSM, points posés à la main, carrefours configurés) ; à un carrefour, chaque
- * bout de tronçon est raccordé à une branche, voie par voie (« lane connector » de TM:PE).
+ * Réseau routier — docs/RESEAU.md. Des tronçons relient des nœuds (intersections OSM, feux,
+ * passages piétons, points posés à la main) ; à chaque nœud, les voies se relient voie à voie
+ * (« lane connector » de TM:PE). Un carrefour est un groupe de nœuds.
  */
 
 type Position = z.infer<typeof LonLat>;
@@ -34,11 +34,9 @@ export interface TronconResume {
   modifie: boolean;
   noeud_de: string;
   noeud_vers: string;
-  /** Carrefour configuré à ce bout, et branche à laquelle le bout est raccordé. */
+  /** Carrefour du nœud à chaque bout. */
   carrefour_de: string | null;
   carrefour_vers: string | null;
-  branche_de: string | null;
-  branche_vers: string | null;
 }
 
 /** Liaison, à un nœud, d'une voie qui y arrive vers une voie qui en repart (rangs dans chaque sens). */
@@ -64,17 +62,6 @@ export interface NoeudResume {
   liaisons: Liaison[] | null;
 }
 
-/** Carrefour configuré de l'emprise, pour le dessiner avec les rues : voies, connexions, raccordements. */
-export interface CarrefourReseau {
-  id: string;
-  nom: string;
-  centre: Position;
-  anneau: Anneau | null;
-  branches: BrancheLue[];
-  connexions: Connexion[];
-  raccordements: Raccordement[];
-}
-
 export interface ReseauGeoJson {
   troncons: {
     type: 'FeatureCollection';
@@ -84,8 +71,6 @@ export interface ReseauGeoJson {
     type: 'FeatureCollection';
     features: Array<{ type: 'Feature'; id: string; geometry: { type: 'Point'; coordinates: Position }; properties: NoeudResume }>;
   };
-  /** Carrefours configurés de l'emprise. */
-  carrefours: CarrefourReseau[];
   /** Vrai si l'emprise contenait plus de tronçons que la limite : la carte n'en montre qu'une partie. */
   tronque: boolean;
 }
@@ -125,58 +110,6 @@ export const ModificationTroncon = ProprietesTroncon.partial()
   .extend({ inverser: z.boolean().optional() })
   .refine(auMoinsUneVoie, MESSAGE_VOIES);
 export type ModificationTroncon = z.infer<typeof ModificationTroncon>;
-
-/**
- * Liens voie à voie entre le bout d'un tronçon et sa branche (rangs : 0 = la plus à gauche dans
- * le sens de circulation). `entree` : [voie du tronçon qui arrive, voie entrante de la branche] ;
- * `sortie` : [voie sortante de la branche, voie du tronçon qui repart].
- */
-export const LiensRaccordement = z.object({
-  entree: z.array(z.tuple([NombreVoies, NombreVoies])).max(100),
-  sortie: z.array(z.tuple([NombreVoies, NombreVoies])).max(100),
-});
-export type LiensRaccordement = z.infer<typeof LiensRaccordement>;
-
-/** Bout de tronçon raccordé (ou à raccorder) à une branche d'un carrefour configuré. */
-export interface Raccordement {
-  troncon_id: string;
-  extremite: Extremite;
-  nom: string | null;
-  /** Branche choisie (à la main ou par l'azimut) ; null : aucune branche dans cette direction. */
-  branche: string | null;
-  /** Azimut (°) du centre du carrefour vers le bout du tronçon. */
-  azimut: number;
-  /** Bout du tronçon, sur le cercle du carrefour, puis quelques points vers l'extérieur. */
-  points: Position[];
-  /** Voies du tronçon qui arrivent au carrefour, et qui en repartent. */
-  voies_vers_carrefour: number;
-  voies_depuis_carrefour: number;
-  /** Liens retenus : ceux saisis, ou à défaut ceux proposés (`liens_auto`). */
-  liens: LiensRaccordement;
-  liens_auto: boolean;
-}
-
-export interface RaccordementsCarrefour {
-  /** Rayon (m) du cercle où les tronçons s'arrêtent : le bout de la plus longue voie, plus une marge. */
-  rayon_m: number;
-  raccordements: Raccordement[];
-  alertes: string[];
-}
-
-/** PUT /api/carrefours/:id/raccordements : branche et liens de chaque bout (liens null : automatiques). */
-export const SaisieRaccordements = z.object({
-  raccordements: z
-    .array(
-      z.object({
-        troncon_id: z.uuid(),
-        extremite: Extremite,
-        branche: z.string().regex(/^[A-Z0-9]{1,4}$/).nullable(),
-        liens: LiensRaccordement.nullable(),
-      }),
-    )
-    .max(60),
-});
-export type SaisieRaccordements = z.infer<typeof SaisieRaccordements>;
 
 /** Fichiers de l'export SUMO « plain XML », à passer à netconvert. */
 export const FichierSumo = z.enum(['reseau.nod.xml', 'reseau.edg.xml', 'reseau.con.xml', 'reseau.netccfg']);

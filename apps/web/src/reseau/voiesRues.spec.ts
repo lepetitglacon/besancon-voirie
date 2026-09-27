@@ -13,7 +13,7 @@ const troncon = (id: string, de: string, vers: string, points: LonLat[], avant: 
   geometry: { type: 'LineString', coordinates: points },
   properties: {
     id, nom: null, highway: null, voies_avant: avant, voies_arriere: arriere, vitesse_kmh: null, source: 'osm', modifie: false,
-    noeud_de: de, noeud_vers: vers, carrefour_de: null, carrefour_vers: null, branche_de: null, branche_vers: null,
+    noeud_de: de, noeud_vers: vers, carrefour_de: null, carrefour_vers: null,
   } satisfies TronconResume,
 })
 const noeud = (id: string, degre: number, carrefour: string | null = null): ReseauGeoJson['noeuds']['features'][number] => ({
@@ -33,7 +33,7 @@ describe('voies des rues', () => {
     expect(geometrie.voies.map((v) => v.cle)).toEqual(['t1:a0', 't1:a1', 't1:r0', 't2:a0', 't2:r0'])
   })
 
-  it('range les bouts de voies par nœud, reculés au nœud ordinaire mais pas au carrefour', () => {
+  it('range les bouts de voies par nœud, reculés à une intersection mais pas au bout du réseau', () => {
     expect(geometrie.arrivees.get('n')?.map((b) => [b.troncon, b.rang])).toEqual([
       ['t1', 0],
       ['t1', 1],
@@ -46,7 +46,7 @@ describe('voies des rues', () => {
     // Nœud à 3 tronçons : recul de 4 + 3 voies × 3,25 × 0,6 ≈ 9,85 m.
     const arrivee = geometrie.arrivees.get('n')![0]!
     expect(versXY(arrivee.bout)[0]).toBeCloseTo(-9.85, 1)
-    // Au carrefour « c », la voie arrive au bout du tronçon.
+    // Au bout « c » (cul-de-sac), la voie arrive au bout du tronçon.
     expect(versXY(geometrie.arrivees.get('c')![0]!.bout)[1]).toBeCloseTo(100, 3)
   })
 })

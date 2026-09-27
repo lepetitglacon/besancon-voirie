@@ -45,12 +45,7 @@ export function geometrieRues(troncons: readonly Troncon[], noeuds: readonly Noe
       voiesMax.set(n, Math.max(voiesMax.get(n) ?? 0, t.properties.voies_avant + t.properties.voies_arriere))
     }
   }
-  // Au bord d'un carrefour configuré, le tronçon s'arrête déjà sur son cercle : pas de recul.
-  const retrait = (noeud: string) => {
-    const n = parId.get(noeud)
-    if (n?.carrefour_id) return 0
-    return retraitAuNoeud(n?.degre ?? 2, voiesMax.get(noeud) ?? 1)
-  }
+  const retrait = (noeud: string) => retraitAuNoeud(parId.get(noeud)?.degre ?? 2, voiesMax.get(noeud) ?? 1)
 
   const voies: VoieRue[] = []
   const arrivees = new Map<string, BoutVoie[]>()

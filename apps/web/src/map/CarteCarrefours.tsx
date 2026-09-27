@@ -64,6 +64,8 @@ type Bulle = { longitude: number; latitude: number; feu: FeuResume }
 interface Props {
   carrefours: CarrefoursGeoJson | undefined
   afficherCarrefours: boolean
+  /** Mode Temps réel : carte en lecture seule, les feux sont dessinés par la couche temps réel. */
+  tempsReel: boolean
   fond: OptionsFond
   /** Couches supplémentaires (trams…). */
   children?: ReactNode
@@ -76,7 +78,7 @@ interface Props {
    * carrefour ou ses feux, qui l'ouvrent ; pas de bulle de feu.
    */
   reseauActif?: boolean
-  /** Voies des rues et des carrefours de la vue (éditeur des voies, zoom ≥ 16). */
+  /** Voies du réseau de la vue (éditeur des voies, zoom ≥ 16). */
   rues?: ComponentProps<typeof CalqueRues> | null
   /** Curseur imposé (tracé d'un tronçon). */
   curseur?: string
@@ -91,7 +93,7 @@ interface Props {
   /** Clic sur un feu pendant la configuration : choix des feux d'une ligne, ou popup du feu. */
   onClicFeuConfiguration: (feu: FeuResume, position: LonLat) => void
   /** Clic ailleurs pendant la configuration : ferme la popup ouverte. */
-  onClicCarteConfiguration: () => void
+  onClicCarteConfiguration: (position: [number, number]) => void
   /** Clic sur un élément du calque (voie, connexion, code de branche). */
   onClicCalque: (clic: ClicCalque) => void
   /** Reçoit l'élément où rendre le contenu de la popup de configuration (portail). */
@@ -101,8 +103,6 @@ interface Props {
   /** Glisser-déposer dans l'éditeur de configuration. */
   onDeplacerPoignee: (poignee: Poignee, position: LonLat) => void
   onConnecter: (de: string, vers: string) => void
-  /** Voie tracée à la main dans le carrefour configuré : [bout côté carrefour, bout éloigné]. */
-  onTracerVoie: (geom: [LonLat, LonLat]) => void
   /** Zone de la photo IA tracée sur la carte : [ouest, sud, est, nord]. */
   onDessinerZoneIa: (emprise: EmpriseIa) => void
   /** Pose un feu sur son mât, ou le remet à sa position OSM (null). */
@@ -237,8 +237,8 @@ export function CarteCarrefours(props: Props) {
     const id =
       objet?.layer.id === 'carrefours'
         ? (objet.properties.id as string)
-        : objet?.layer.id === 'feux'
-          ? (objet.properties as FeuResume).carrefour_id
+        : objet?.layer.id === 'feux' || objet?.layer.id === 'feux-temps-reel'
+          ? (objet.properties as Pick<FeuResume, 'carrefour_id'>).carrefour_id
           : null
     const trouve = id ? carrefours?.features.find((f) => f.id === id) : undefined
     return trouve && { carrefour: trouve.properties, position: trouve.geometry.coordinates as [number, number] }
@@ -248,7 +248,7 @@ export function CarteCarrefours(props: Props) {
     const objet = evenement.features?.[0]
     const { lng: longitude, lat: latitude } = evenement.lngLat
     const vise = carrefourVise(objet)
-    if (props.reseauActif) {
+    if (props.tempsReel || props.reseauActif) {
       if (vise) props.onOuvrir(vise)
       return
     }
@@ -259,7 +259,7 @@ export function CarteCarrefours(props: Props) {
       const autre = vise && vise.carrefour.id !== configuration.carrefourId
       if (autre && configuration.mode !== null && !configuration.choixFeux) return props.onOuvrir(vise)
       if (objet?.layer.id === 'feux') return props.onClicFeuConfiguration(objet.properties as FeuResume, [longitude, latitude])
-      return props.onClicCarteConfiguration()
+      return props.onClicCarteConfiguration([longitude, latitude])
     }
     if (edition) {
       if (objet?.layer.id === 'feux') props.onBasculerFeu(objet.properties as FeuResume)
@@ -281,7 +281,7 @@ export function CarteCarrefours(props: Props) {
       style={{ width: '100%', height: '100%' }}
       hash
       attributionControl={false}
-      interactiveLayerIds={['feux', 'carrefours']}
+      interactiveLayerIds={['feux', 'carrefours', 'feux-temps-reel']}
       cursor={props.curseur ?? (traceActif ? 'crosshair' : survol ? 'pointer' : 'grab')}
       dragPan={!traceActif}
       boxZoom={edition === null}
@@ -329,6 +329,7 @@ export function CarteCarrefours(props: Props) {
             {...(configuration
               ? coucheFeux(configuration.feuxSurlignes, configuration.carrefourId, true)
               : coucheFeux(edition?.selection ?? [], edition?.carrefourId ?? null, edition !== null))}
+            layout={{ visibility: props.tempsReel ? 'none' : 'visible' }}
           />
         </Source>
       )}
@@ -338,13 +339,11 @@ export function CarteCarrefours(props: Props) {
           branches={configuration.branches}
           connexions={configuration.connexions}
           anneau={configuration.anneau}
-          feuxAnneau={configuration.feuxAnneau}
           mode={configuration.mode}
           surlignees={new Set(configuration.connexionsSurlignees)}
           feux={configuration.feux}
           onDeplacer={props.onDeplacerPoignee}
           onConnecter={props.onConnecter}
-          onTracer={props.onTracerVoie}
           feuxPlacables={feuxPlacables}
           onPlacerFeu={props.onPlacerFeu}
           onApercuFeu={setApercuFeu}

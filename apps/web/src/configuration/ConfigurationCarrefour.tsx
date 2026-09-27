@@ -6,7 +6,7 @@ import {
   contexteProgramme,
   degagementsRetenus,
   etatLigne,
-  feuxAnneau as positionsFeuxAnneau,
+  NOEUDS_MIN,
   repereLocal,
   simulerGraphe,
   validerGraphe,
@@ -24,6 +24,7 @@ import {
   type Connexion,
   type EmpriseIa,
   type FeuResume,
+  type LignesCarrefour,
   type PlanSaisi,
   type SourceBranche,
 } from '@voirie/schema'
@@ -37,21 +38,14 @@ import { Aide, BandeauMode, BarreOutils, CarteEnTete, Chiffre, Indice, Message, 
 import { demanderNotificationsSysteme, enFile, useAnalysesIa } from './analysesIa'
 import { lireBrouillons, modifierBrouillons, useBrouillonsCarrefour, type ModificationsBrouillons } from './brouillons'
 import { Chrono } from './FileIa'
-import type { ClicCalque, FeuAnneauAffiche, ModeEdition } from './calque/CalqueCarrefour'
+import type { ClicCalque, ModeEdition } from './calque/CalqueCarrefour'
 import type { EtatFeu } from './calque/elements'
-import { basculerConnexion, basculerTraversee, deplacerPoignee, tracerVoie, voiesDe, type Brouillon, type Poignee } from './modele'
+import { basculerConnexion, basculerTraversee, deplacerPoignee, poserNoeud, type Brouillon, type Poignee, voiesDe } from './modele'
 import { OngletGraphe, type Scenario } from './OngletGraphe'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
 import { OngletProgramme } from './OngletProgramme'
 import { OUTILS, RACCOURCIS, type ActionConfiguration, type OutilCarte } from './actions'
-import { PopupBranche, PopupFeu, PopupLiaison, PopupVoie, ReglageAnneau } from './PopupsConfiguration'
-import {
-  basculerLien,
-  editer,
-  raccordementsAffiches,
-  type BrouillonRaccordements,
-  type RaccordementAffiche,
-} from './raccordements'
+import { PopupBranche, PopupFeu, PopupLiaison, PopupNoeud, PopupVoie, ReglageAnneau } from './PopupsConfiguration'
 import { feuxDesLignes, geometrieEnregistree, lignesPourMoteur, plansSaisis } from './programme'
 
 /** Références stables : un `[]` littéral relancerait les effets de synchronisation à chaque rendu. */
@@ -59,8 +53,6 @@ const AUCUNE_BRANCHE: Branche[] = []
 const AUCUNE_CONNEXION: Connexion[] = []
 const AUCUN_FEU: string[] = []
 const AUCUNE_LIGNE: never[] = []
-const AUCUN_RACCORDEMENT: never[] = []
-const AUCUN_FEU_ANNEAU: FeuAnneauAffiche[] = []
 const AUCUNE_SOURCE: Record<string, SourceBranche> = {}
 
 /** Ce qui s'enregistre : sans les champs déduits (sens des branches). */
@@ -77,17 +69,13 @@ const pourEnregistrer = (brouillon: Brouillon) => ({
 export interface AffichageConfiguration {
   branches: Branche[]
   connexions: Connexion[]
-  /** Anneau d'un giratoire ; null pour un carrefour ordinaire. */
+  /** Nœuds de l'anneau d'un giratoire ; null pour un carrefour ordinaire. */
   anneau: Anneau | null
-  /** Feux d'anneau des lignes de feux, avec leur couleur pendant la lecture. */
-  feuxAnneau: FeuAnneauAffiche[]
   /** Outil actif sur le calque ; null : dessin seul. */
   mode: ModeEdition | null
   feuxSurlignes: string[]
   /** Connexions de la ligne de feux active (« de>vers »), mises en avant sur la carte. */
   connexionsSurlignees: string[]
-  /** Bouts des tronçons du réseau raccordés au carrefour (docs/RESEAU.md §4). */
-  raccordements: RaccordementAffiche[]
   /** Lecture du programme : couleur du feu de chaque connexion et passage piéton. */
   feux: { connexions: ReadonlyMap<string, EtatFeu>; traversees: ReadonlyMap<string, EtatFeu> } | null
   /** Choix des feux d'une ligne : un clic sur un feu d'un autre carrefour ne doit pas l'ouvrir. */
@@ -107,23 +95,17 @@ type Popup =
   | { type: 'voie'; cle: string; position: LonLat }
   | { type: 'connexion'; de: string; vers: string; position: LonLat }
   | { type: 'branche'; code: string; position: LonLat }
+  | { type: 'noeud'; code: string; position: LonLat }
   | { type: 'feu'; feu: FeuResume; position: LonLat }
 
 const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>> = {
   ajuster: { titre: 'Caler les voies', aides: ['Glisser les extrémités des voies et des passages sur le marquage de la photo'] },
-  connecter: {
-    titre: 'Relier les voies',
-    aides: [
-      'Glisser d’une voie entrante vers une voie sortante',
-      'Rues : du bout d’une voie (bleu) vers une voie de branche, ou d’une sortante (gris) vers une rue',
-      'Clic sur une liaison : la retirer',
-    ],
-  },
+  connecter: { titre: 'Relier les voies', aides: ['Glisser d’une voie entrante vers une voie sortante', 'Clic sur une liaison : la retirer'] },
   feux: { titre: 'Poser les feux', aides: ['Glisser chaque feu jusqu’à son mât', 'Clic sur le point creux : position OSM'] },
   pieton: { titre: 'Passages piétons', aides: ['Clic sur une voie ou un code de branche : ajouter ou retirer son passage'] },
-  tracer: {
-    titre: 'Tracer une voie',
-    aides: ['Glisser de la ligne d’arrêt vers l’amont : une voie du carrefour', 'Cliquer : les points d’une rue, Entrée pour finir', 'Molette : zoomer'],
+  noeud: {
+    titre: 'Nœuds de l’anneau',
+    aides: ['Clic sur la carte : poser un nœud là où une rue (ou le tram) touche l’anneau', 'Glisser un nœud : le caler ; clic : ses réglages'],
   },
 }
 
@@ -156,12 +138,10 @@ const LAMPES: Record<EtatFeu, EtatLampe | null> = { vert: 'vert', jaune: 'orange
 export interface ConfigurationCarrefourHandle {
   clicFeu: (feu: FeuResume, position: LonLat) => void
   clicCalque: (clic: ClicCalque) => void
-  clicCarte: () => void
+  /** Clic sur la carte hors des éléments du calque : pose un nœud avec l'outil Nœud. */
+  clicCarte: (position: LonLat) => void
   deplacerPoignee: (poignee: Poignee, position: LonLat) => void
   connecter: (de: string, vers: string) => void
-  tracerVoie: (geom: [LonLat, LonLat]) => void
-  /** Lien entre une voie de rue et une voie de branche ; une autre branche que celle du tronçon l'y raccorde. */
-  basculerLien: (cle: string, sens: 'entree' | 'sortie', paire: [number, number], branche: string) => void
   dessinerZoneIa: (emprise: EmpriseIa) => void
   executer: (action: ActionConfiguration) => void
 }
@@ -184,8 +164,6 @@ interface Props {
   onSupprimer: () => void
   /** Quitte la configuration ; les modifications non enregistrées restent dans la liste des brouillons. */
   onFermer: () => void
-  /** Outil actif à l'ouverture : celui de l'éditeur des voies, quand on y ouvre le carrefour. */
-  outilInitial?: OutilCarte
 }
 
 /** Le focus est dans un champ : les raccourcis d'une lettre ne doivent pas s'y déclencher. */
@@ -198,23 +176,9 @@ const focusLibre = () => {
   return !actif || actif === document.body || actif.classList.contains('maplibregl-canvas')
 }
 
-export function ConfigurationCarrefour({
-  ref,
-  carrefour,
-  position,
-  ciblePopup,
-  onAffichage,
-  onPlacerFeu,
-  ouvrirAnalyseIa,
-  onPanneauBas,
-  onModifierFeux,
-  onSupprimer,
-  onFermer,
-  outilInitial = 'selection',
-}: Props) {
+export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneauBas, onModifierFeux, onSupprimer, onFermer }: Props) {
   const queryClient = useQueryClient()
-  const { carte } = useMap()
-  const [outil, setOutil] = useState<OutilCarte>(outilInitial)
+  const [outil, setOutil] = useState<OutilCarte>('selection')
   const [popup, setPopup] = useState<Popup | null>(null)
   const [panneauOuvert, setPanneauOuvert] = useState(false)
   const [ongletBas, setOngletBas] = useState<Onglet>('programme')
@@ -252,6 +216,7 @@ export function ConfigurationCarrefour({
     [brouillonBranches, enregistre],
   )
   const branches = configuration.branches
+  const giratoire = carrefour.nature === 'giratoire'
   const centre: LonLat = useMemo(() => enregistre?.centre ?? [0, 0], [enregistre])
 
   const detection = useMutation({
@@ -309,10 +274,18 @@ export function ConfigurationCarrefour({
       return analyse.resultat
     },
     onSuccess: async (proposition) => {
+      // Lignes de feux proposées d'après les feux vus sur la photo (absentes des analyses plus anciennes).
+      const lignesProposees = proposition.lignes ?? []
+      const enregistrees = queryClient.getQueryData<LignesCarrefour>(['lignes', carrefour.id])?.lignes ?? []
+      const avecLignes =
+        lignesProposees.length > 0 &&
+        (enregistrees.length === 0 ||
+          window.confirm(`Remplacer aussi les lignes de feux par les ${lignesProposees.length} proposées par l’IA ?`))
       modifier({
         branches: { branches: proposition.branches, connexions: proposition.connexions, anneau: proposition.anneau },
         sources: proposition.sources,
         analyseIa: proposition.ia,
+        ...(avecLignes ? { lignes: { lignes: lignesProposees, conflits_admis: [] } } : {}),
       })
       await queryClient.invalidateQueries({ queryKey: ['analyses-ia'] })
     },
@@ -353,34 +326,8 @@ export function ConfigurationCarrefour({
     onSuccess: async (resultat) => {
       queryClient.setQueryData(['branches', carrefour.id], resultat)
       setBrouillonBranches(null)
-      // Le cercle du carrefour suit ses voies : les tronçons ont été recoupés et raccordés.
-      await queryClient.invalidateQueries({ queryKey: ['raccordements', carrefour.id] })
-      await queryClient.invalidateQueries({ queryKey: ['reseau'] })
       await queryClient.invalidateQueries({ queryKey: ['lignes', carrefour.id] })
       await queryClient.invalidateQueries({ queryKey: ['programme', carrefour.id] })
-    },
-  })
-
-  // ── Réseau : tronçons raccordés aux branches, liens voie à voie ──
-  const raccordementsEnregistres = useQuery({
-    queryKey: ['raccordements', carrefour.id],
-    queryFn: () => api.raccordements(carrefour.id),
-  })
-  const brouillonRaccordements = brouillons?.raccordements ?? null
-  const setBrouillonRaccordements = useCallback(
-    (raccordements: BrouillonRaccordements | null) => modifier({ raccordements }),
-    [modifier],
-  )
-  const raccordements = useMemo(
-    () => raccordementsAffiches(raccordementsEnregistres.data?.raccordements ?? AUCUN_RACCORDEMENT, brouillonRaccordements, branches),
-    [raccordementsEnregistres.data, brouillonRaccordements, branches],
-  )
-  const enregistrementRaccordements = useMutation({
-    mutationFn: () => api.enregistrerRaccordements(carrefour.id, { raccordements: Object.values(brouillonRaccordements ?? {}) }),
-    onSuccess: async (resultat) => {
-      queryClient.setQueryData(['raccordements', carrefour.id], resultat)
-      setBrouillonRaccordements(null)
-      await queryClient.invalidateQueries({ queryKey: ['reseau'] })
     },
   })
 
@@ -499,13 +446,7 @@ export function ConfigurationCarrefour({
   // Ce que la carte doit montrer.
   const choixFeux = onglet === 'lignes' && ligneActive !== null
   const cleSelection =
-    popup?.type === 'voie'
-      ? popup.cle
-      : popup?.type === 'connexion'
-        ? `${popup.de}>${popup.vers}`
-        : popup?.type === 'branche'
-          ? popup.code
-          : null
+    popup?.type === 'voie' ? popup.cle : popup?.type === 'connexion' ? `${popup.de}>${popup.vers}` : popup?.type === 'branche' ? popup.code : null
   const feuxSurlignes =
     onglet === 'lignes' && ligneActive ? (lignes.lignes.find((l) => l.code === ligneActive)?.feux ?? AUCUN_FEU) : AUCUN_FEU
   const mouvementsActifs =
@@ -529,23 +470,6 @@ export function ConfigurationCarrefour({
     return feuxDesLignes(new Map(lignesFeux.map((l, i) => [l.code, etats[i]!])), lignesFeux, connexionsEnregistrees)
   }, [etatsLignes, lignesFeux, connexionsEnregistrees])
 
-  // Feux d'anneau : placés sur l'anneau du brouillon, à la couleur de leur ligne pendant la lecture.
-  const lignesAnneau = lignes.lignes.flatMap((l) => (l.anneau ? [`${l.code}:${l.anneau}`] : [])).join(',')
-  const feuxAnneauAffiches = useMemo(() => {
-    if (!configuration.anneau || !lignesAnneau) return AUCUN_FEU_ANNEAU
-    const paires = lignesAnneau.split(',').map((p) => p.split(':') as [string, string])
-    const positions = positionsFeuxAnneau(
-      geometrieEnregistree({ centre, ...configuration }),
-      paires.map(([, branche]) => branche),
-    )
-    const etats = etatsLignes ? (etatsLignes.split(',') as EtatFeu[]) : []
-    const etatDe = new Map(lignesFeux.map((l, i) => [l.code, etats[i] ?? null]))
-    return paires.flatMap(([code, branche]): FeuAnneauAffiche[] => {
-      const azimut = positions.get(branche)
-      return azimut === undefined ? [] : [{ code, azimut, etat: etatDe.get(code) ?? null, surligne: onglet === 'lignes' && ligneActive === code }]
-    })
-  }, [configuration, centre, lignesAnneau, etatsLignes, lignesFeux, onglet, ligneActive])
-
   const libelleZoneIa = dimensionsIa && `Photo IA · ${Math.round(dimensionsIa.largeur_m)} × ${Math.round(dimensionsIa.hauteur_m)} m`
   useEffect(
     () =>
@@ -553,11 +477,9 @@ export function ConfigurationCarrefour({
         branches,
         connexions: configuration.connexions,
         anneau: configuration.anneau,
-        feuxAnneau: feuxAnneauAffiches,
         mode: cadrage ? null : outil,
         feuxSurlignes,
         connexionsSurlignees,
-        raccordements,
         feux,
         choixFeux,
         selection: cleSelection,
@@ -568,12 +490,10 @@ export function ConfigurationCarrefour({
       branches,
       configuration.connexions,
       configuration.anneau,
-      feuxAnneauAffiches,
       outil,
       cadrage,
       feuxSurlignes,
       connexionsSurlignees,
-      raccordements,
       feux,
       choixFeux,
       cleSelection,
@@ -584,32 +504,18 @@ export function ConfigurationCarrefour({
     ],
   )
 
-  const erreur = [
-    detection,
-    cadreAuto,
-    demandeIa,
-    chargementIa,
-    importJson,
-    enregistrementBranches,
-    enregistrementRaccordements,
-    enregistrementLignes,
-    enregistrementProgramme,
-  ].find((m) => m.error)?.error
+  const erreur = [detection, cadreAuto, demandeIa, chargementIa, importJson, enregistrementBranches, enregistrementLignes, enregistrementProgramme].find((m) => m.error)?.error
 
-  const modifications = [brouillonBranches, brouillonRaccordements, brouillonLignes, brouillonProgramme].filter((b) => b !== null).length
-  const enregistrementEnCours = [enregistrementBranches, enregistrementRaccordements, enregistrementLignes, enregistrementProgramme].some(
-    (m) => m.isPending,
-  )
-  const sansBranche = raccordements.filter((r) => r.branche === null).length
+  const modifications = [brouillonBranches, brouillonLignes, brouillonProgramme].filter((b) => b !== null).length
+  const enregistrementEnCours = [enregistrementBranches, enregistrementLignes, enregistrementProgramme].some((m) => m.isPending)
   const sansLiaison = branches.flatMap((b) =>
     voiesDe(b, 'entrante').filter((v) => !configuration.connexions.some((c) => c.de === cleVoie(b.code, 'entrante', v.rang))),
   ).length
 
-  /** Enregistre tout ce qui a changé : branches, raccordements, lignes, puis programme (sauf s'il est en erreur). */
+  /** Enregistre tout ce qui a changé : branches, puis lignes, puis programme (sauf s'il est en erreur). */
   const enregistrer = async () => {
     try {
       if (brouillonBranches) await enregistrementBranches.mutateAsync()
-      if (brouillonRaccordements) await enregistrementRaccordements.mutateAsync()
       if (brouillonLignes) await enregistrementLignes.mutateAsync()
       if (brouillonProgramme && !erreurProgramme) await enregistrementProgramme.mutateAsync()
     } catch {
@@ -623,6 +529,7 @@ export function ConfigurationCarrefour({
 
 
   const choisirOutil = (suivant: OutilCarte) => {
+    if (suivant === 'noeud' && !giratoire) return
     setOutil(suivant)
     setPopup(null)
   }
@@ -681,23 +588,6 @@ export function ConfigurationCarrefour({
   useImperativeHandle(ref, () => ({
     deplacerPoignee: (poignee, position) => setBrouillonBranches(deplacerPoignee(configuration, poignee, position)),
     connecter: (de, vers) => setBrouillonBranches(basculerConnexion(configuration, de, vers)),
-    basculerLien: (cle, sens, paire, branche) => {
-      const r = raccordements.find((x) => x.cle === cle)
-      if (!r) return
-      // Relier une rue à une autre branche la raccorde à celle-ci, avec les liens proposés.
-      const changement = branche !== r.branche ? { branche, liens: null } : { liens: basculerLien(r.liens, sens, paire) }
-      setBrouillonRaccordements(editer(brouillonRaccordements, r, changement))
-    },
-    tracerVoie: (geom) => {
-      const trace = tracerVoie(configuration, geom, centre)
-      if (!trace) {
-        return notifications.create({ type: 'error', title: 'Voie non ajoutée', description: 'La branche a déjà toutes ses voies (10 par sens au plus).' })
-      }
-      setBrouillonBranches(trace.brouillon)
-      setPopup({ type: 'voie', cle: trace.cle, position: geom[0] })
-      // La popup s'ouvre au-dessus de la voie : on la ramène sous le milieu de l'écran pour qu'elle tienne.
-      carte?.panTo(geom[0], { offset: [0, 160], duration: 300 })
-    },
     dessinerZoneIa: (emprise) => {
       if (!cadrage) return
       demandeIa.reset()
@@ -722,13 +612,17 @@ export function ConfigurationCarrefour({
       const code = clic.type === 'voie' ? clic.cle.split(':')[0] : clic.type === 'branche' ? clic.code : undefined
       if (code) setBrouillonBranches(basculerTraversee(configuration, code, centre))
     },
-    clicCarte: () => setPopup(null),
+    clicCarte: (position) => {
+      if (outil === 'noeud' && giratoire) return setBrouillonBranches(poserNoeud(configuration, position))
+      setPopup(null)
+    },
     executer,
   }))
 
   // Le panneau bas occupe le bas de l'écran : la carte recentre le carrefour dans ce qui reste.
   // Seulement quand le panneau s'ouvre ou se ferme : au montage, un easeTo interromprait le vol
   // vers le carrefour (qui remet lui-même le décalage à zéro, voir CarteCarrefours).
+  const { carte } = useMap()
   const panneauPrecedent = useRef(false)
   useEffect(() => {
     if (panneauPrecedent.current === panneauOuvert) return
@@ -751,9 +645,7 @@ export function ConfigurationCarrefour({
       <PopupVoie
         cle={popup.cle}
         brouillon={configuration}
-        centre={centre}
         onChanger={setBrouillonBranches}
-        onCle={(cle) => setPopup({ ...popup, cle })}
         onOutil={choisirOutil}
         onBranche={(code) => setPopup({ type: 'branche', code, position: popup.position })}
         onFermer={fermerPopup}
@@ -769,6 +661,8 @@ export function ConfigurationCarrefour({
         onLignes={() => ouvrirOnglet('lignes')}
         onFermer={fermerPopup}
       />
+    ) : popup?.type === 'noeud' ? (
+      <PopupNoeud code={popup.code} brouillon={configuration} onChanger={setBrouillonBranches} onOutil={choisirOutil} onFermer={fermerPopup} />
     ) : popup?.type === 'branche' ? (
       <PopupBranche
         code={popup.code}
@@ -802,6 +696,8 @@ export function ConfigurationCarrefour({
         ? `liaison ${popup.de} → ${popup.vers}`
         : popup?.type === 'branche'
           ? `branche ${popup.code}`
+          : popup?.type === 'noeud'
+            ? `nœud ${popup.code}`
           : popup?.type === 'feu'
             ? 'feu'
             : null
@@ -809,9 +705,7 @@ export function ConfigurationCarrefour({
     ? { titre: 'Zone de la photo IA', aides: ['Glisser sur la carte pour dessiner la zone : l’IA ne voit rien en dehors', 'Entrée : lancer'] }
     : onglet === 'lignes' && ligneActive
       ? { titre: `Feux de ${ligneActive}`, aides: ['Clic sur un feu du carrefour : l’ajouter ou le retirer'] }
-      : outil === 'ajuster' && configuration.anneau
-        ? { titre: 'Caler les voies et l’anneau', aides: [...CONSIGNES.ajuster!.aides, 'Points bleus : centre de l’îlot et bord de l’anneau (rayon)'] }
-        : CONSIGNES[outil]
+      : CONSIGNES[outil]
 
   return (
     <>
@@ -834,14 +728,9 @@ export function ConfigurationCarrefour({
                 {modifications} modification{modifications > 1 ? 's' : ''} à enregistrer
               </Badge>
             )}
-            {sansBranche > 0 && (
-              <Badge colorPalette="orange" title="Outil Liaison : relier une voie de cette rue à une voie de la branche qui la prolonge">
-                {sansBranche} rue{sansBranche > 1 ? 's' : ''} non reliée{sansBranche > 1 ? 's' : ''}
-              </Badge>
-            )}
-            {carrefour.nature === 'giratoire' && !configuration.anneau && branchesEnregistrees.isSuccess && (
-              <Badge colorPalette="orange" title="Section Anneau ci-dessous, ou détection OSM (O)">
-                Anneau à dessiner
+            {giratoire && (configuration.anneau?.noeuds.length ?? 0) < NOEUDS_MIN && branchesEnregistrees.isSuccess && (
+              <Badge colorPalette="orange" title="Outil Nœud (N), ou détection OSM (O)">
+                Nœuds d’anneau à poser
               </Badge>
             )}
             {sansLiaison > 0 && (
@@ -872,14 +761,14 @@ export function ConfigurationCarrefour({
             <Chiffre valeur={resultat ? `${Math.round(resultat.cycle_s)} s` : '—'} libelle="cycle" />
           </HStack>
         )}
-        {(carrefour.nature === 'giratoire' || configuration.anneau) && (
+        {(giratoire || configuration.anneau) && (
           <Box mt="2">
-            <ReglageAnneau brouillon={configuration} centre={centre} onChanger={setBrouillonBranches} onOutil={choisirOutil} />
+            <ReglageAnneau brouillon={configuration} onChanger={setBrouillonBranches} onOutil={choisirOutil} />
           </Box>
         )}
         {branchesEnregistrees.isSuccess && branches.length === 0 && (
           <Indice mt="2">
-            Aucune branche : <Kbd>O</Kbd> pour les détecter depuis OSM, <Kbd>T</Kbd> pour tracer les voies
+            Aucune branche : <Kbd>O</Kbd> pour les détecter depuis OSM
           </Indice>
         )}
         {cadrage && (
@@ -952,7 +841,7 @@ export function ConfigurationCarrefour({
         bottom={panneauOuvert ? `calc(${hauteurPanneau} + 16px)` : '22px'}
         zIndex="3"
       >
-        {OUTILS.map((o) => (
+        {OUTILS.filter((o) => giratoire || !o.giratoire).map((o) => (
           <BarreOutils.Outil key={o.outil} {...o} actif={outil === o.outil} onClick={() => choisirOutil(o.outil)} />
         ))}
         <BarreOutils.Separateur />
@@ -1092,6 +981,8 @@ export function ConfigurationCarrefour({
                   />
                 ) : (
                   <OngletProgramme
+                    carrefourId={carrefour.id}
+                    modifie={brouillonProgramme !== null}
                     contexte={contexte}
                     plans={plans}
                     onChanger={setBrouillonProgramme}

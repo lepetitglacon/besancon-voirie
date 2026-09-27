@@ -1,20 +1,10 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import {
-  boutsAuNoeud,
-  configurationNetconvert,
-  exporterSumo,
-  liaisonsRetenues,
-  type LonLat,
-  type RaccordementSumo,
-  type ReseauSumo,
-} from '@voirie/engine';
+import { boutsAuNoeud, configurationNetconvert, exporterSumo, liaisonsRetenues, type LonLat, type ReseauSumo } from '@voirie/engine';
 import type {
   Accroche,
   Bbox,
-  CarrefourReseau,
   FichierSumo,
   Liaison,
-  LiensRaccordement,
   ModificationTroncon,
   NouveauTroncon,
   ReseauGeoJson,
@@ -22,16 +12,12 @@ import type {
   TronconResume,
 } from '@voirie/schema';
 import { sql, type SQL } from 'drizzle-orm';
-import { lireBranches } from '../branches/branches.service.js';
 import { DRIZZLE, type Db } from '../db/db.module.js';
 import type { Executeur } from '../db/sql.js';
 import { genererReseau, type BilanReseau } from './generation.js';
-import { lireRaccordements, marquerModifie, raccorderCarrefour } from './raccordement.js';
 
 /** Au-delà, la carte ne reçoit qu'une partie des tronçons de l'emprise (`tronque`). */
 const LIMITE_TRONCONS = 6000;
-/** Carrefours configurés renvoyés avec le réseau d'une emprise, au plus. */
-const LIMITE_CARREFOURS = 40;
 /** Un tronçon accroché à moins de cette distance (m) du bout d'un autre s'accroche à son nœud. */
 const TOLERANCE_BOUT_M = 1.5;
 
@@ -39,8 +25,7 @@ type LigneTroncon = { [K in keyof TronconResume]: TronconResume[K] } & { geometr
 
 const COLONNES = sql`
   t.id, ST_AsGeoJSON(t.geom)::json AS geometry, t.nom, t.highway, t.voies_avant, t.voies_arriere, t.vitesse_kmh,
-  t.source, t.modifie, t.noeud_de, t.noeud_vers, nd.carrefour_id AS carrefour_de, nv.carrefour_id AS carrefour_vers,
-  t.branche_de, t.branche_vers`;
+  t.source, t.modifie, t.noeud_de, t.noeud_vers, nd.carrefour_id AS carrefour_de, nv.carrefour_id AS carrefour_vers`;
 
 const FROM_TRONCONS = sql`troncon t JOIN noeud nd ON nd.id = t.noeud_de JOIN noeud nv ON nv.id = t.noeud_vers`;
 
@@ -49,12 +34,17 @@ const pointSql = ([lon, lat]: LonLat) => sql`ST_SetSRID(ST_MakePoint(${lon}, ${l
 
 const enFeature = ({ geometry, ...properties }: LigneTroncon) => ({ type: 'Feature' as const, id: properties.id, geometry, properties });
 
-/** Carrefours configurés aux deux bouts d'un tronçon. */
-async function carrefoursAuxBouts(db: Executeur, noeuds: string[]): Promise<string[]> {
-  const { rows } = await db.execute<{ carrefour_id: string }>(sql`
-    SELECT DISTINCT carrefour_id FROM noeud WHERE carrefour_id IS NOT NULL AND id = ANY (${`{${noeuds.join(',')}}`}::uuid[])
+/**
+ * Un tronçon OSM corrigé (ou supprimé) à la main est gardé à la régénération. Ses moitiés, s'il a
+ * été coupé, partagent ses nœuds OSM d'origine : on les marque ensemble.
+ */
+async function marquerModifie(db: Executeur, id: string): Promise<void> {
+  await db.execute(sql`
+    UPDATE troncon t SET modifie = true
+    FROM troncon o
+    WHERE o.id = ${id} AND t.source = 'osm'
+      AND (t.id = o.id OR (t.osm_way_id, t.osm_de, t.osm_vers) = (o.osm_way_id, o.osm_de, o.osm_vers))
   `);
-  return rows.map((r) => r.carrefour_id);
 }
 
 @Injectable()
@@ -89,33 +79,8 @@ export class ReseauService {
           .filter((n) => n.degre > 0 || n.carrefour_id !== null)
           .map(({ geometry, ...properties }) => ({ type: 'Feature' as const, id: properties.id, geometry, properties })),
       },
-      carrefours: await this.carrefoursConfigures(bbox),
       tronque: troncons.length > LIMITE_TRONCONS,
     };
-  }
-
-  /** Carrefours de l'emprise qui ont des voies : branches, connexions et raccordements, pour les dessiner avec les rues. */
-  private async carrefoursConfigures(bbox: Bbox): Promise<CarrefourReseau[]> {
-    const { rows } = await this.db.execute<{ id: string; nom: string }>(sql`
-      SELECT c.id, c.nom FROM carrefour c
-      WHERE c.geom && ${enveloppe(bbox)}
-        AND EXISTS (SELECT 1 FROM branche b JOIN voie v ON v.branche_id = b.id WHERE b.carrefour_id = c.id)
-      LIMIT ${LIMITE_CARREFOURS}
-    `);
-    return Promise.all(
-      rows.map(async ({ id, nom }) => {
-        const [config, raccordements] = await Promise.all([lireBranches(this.db, id), lireRaccordements(this.db, id)]);
-        return {
-          id,
-          nom,
-          centre: config.centre,
-          anneau: config.anneau,
-          branches: config.branches,
-          connexions: config.connexions,
-          raccordements: raccordements.raccordements,
-        };
-      }),
-    );
   }
 
   /**
@@ -126,7 +91,6 @@ export class ReseauService {
     return this.db.transaction(async (tx) => {
       const { rows: noeuds } = await tx.execute<{ carrefour_id: string | null }>(sql`SELECT carrefour_id FROM noeud WHERE id = ${noeudId}`);
       if (!noeuds[0]) throw new NotFoundException('Nœud inconnu');
-      if (noeuds[0].carrefour_id) throw new BadRequestException('Nœud d’un carrefour configuré : ses liaisons se font dans ses branches');
       const { rows: autour } = await tx.execute<{
         id: string;
         source: string;
@@ -166,12 +130,7 @@ export class ReseauService {
                 ${nouveau.nom}, ${nouveau.voies_avant}, ${nouveau.voies_arriere}, ${nouveau.vitesse_kmh}, 'manuel')
         RETURNING id
       `);
-      // Tracé jusqu'à un carrefour configuré : il s'arrête sur son cercle et se raccorde à une branche.
-      for (const carrefour of await carrefoursAuxBouts(tx, [de.id, vers.id])) await raccorderCarrefour(tx, carrefour);
-      const cree = rows[0]!.id;
-      const { rows: reste } = await tx.execute(sql`SELECT 1 FROM troncon WHERE id = ${cree}`);
-      if (reste.length === 0) throw new BadRequestException('Tronçon entièrement dans le cercle du carrefour');
-      return cree;
+      return rows[0]!.id;
     });
     return this.lire(this.db, id);
   }
@@ -187,8 +146,7 @@ export class ReseauService {
         // PostgreSQL évalue tous les SET avec les anciennes valeurs : les échanges sont simultanés.
         await tx.execute(sql`
           UPDATE troncon SET geom = ST_Reverse(geom), noeud_de = noeud_vers, noeud_vers = noeud_de,
-            voies_avant = voies_arriere, voies_arriere = voies_avant,
-            branche_de = branche_vers, branche_vers = branche_de, liens_de = liens_vers, liens_vers = liens_de
+            voies_avant = voies_arriere, voies_arriere = voies_avant, branche_de = branche_vers, branche_vers = branche_de
           WHERE id = ${id}
         `);
       }
@@ -208,8 +166,6 @@ export class ReseauService {
         }
       }
       if (troncon.source === 'osm') await marquerModifie(tx, id);
-      // Le nombre de voies a pu changer : les liens des raccordements sont revérifiés.
-      for (const carrefour of await carrefoursAuxBouts(tx, [troncon.noeud_de, troncon.noeud_vers])) await raccorderCarrefour(tx, carrefour);
     });
     return this.lire(this.db, id);
   }
@@ -280,13 +236,13 @@ export class ReseauService {
     const milieu = noeud[0]!.id;
     await tx.execute(sql`
       INSERT INTO troncon (noeud_de, noeud_vers, geom, osm_way_id, osm_de, osm_vers, nom, highway, voies_avant, voies_arriere,
-                           vitesse_kmh, source, modifie, branche_vers, liens_vers)
+                           vitesse_kmh, source, modifie, branche_vers)
       SELECT ${milieu}, noeud_vers, ST_LineSubstring(geom, ${coupe.f}, 1), osm_way_id, osm_de, osm_vers, nom, highway,
-             voies_avant, voies_arriere, vitesse_kmh, source, modifie, branche_vers, liens_vers
+             voies_avant, voies_arriere, vitesse_kmh, source, modifie, branche_vers
       FROM troncon WHERE id = ${accroche.id}
     `);
     await tx.execute(sql`
-      UPDATE troncon SET geom = ST_LineSubstring(geom, 0, ${coupe.f}), noeud_vers = ${milieu}, branche_vers = NULL, liens_vers = NULL
+      UPDATE troncon SET geom = ST_LineSubstring(geom, 0, ${coupe.f}), noeud_vers = ${milieu}, branche_vers = NULL
       WHERE id = ${accroche.id}
     `);
     if (coupe.source === 'osm') await marquerModifie(tx, accroche.id);
@@ -294,7 +250,7 @@ export class ReseauService {
   }
 }
 
-/** Réseau à exporter : tronçons de l'emprise, leurs nœuds, les carrefours configurés et leurs raccordements. */
+/** Réseau à exporter : tronçons de l'emprise et leurs nœuds, avec le carrefour de chacun. */
 export async function donneesSumo(db: Executeur, bbox?: Bbox): Promise<ReseauSumo> {
   const { rows: troncons } = await db.execute<{
     id: string;
@@ -306,71 +262,21 @@ export async function donneesSumo(db: Executeur, bbox?: Bbox): Promise<ReseauSum
     vitesse_kmh: number | null;
     nom: string | null;
     highway: string | null;
-    branche_de: string | null;
-    branche_vers: string | null;
-    liens_de: LiensRaccordement | null;
-    liens_vers: LiensRaccordement | null;
-    carrefour_de: string | null;
-    carrefour_vers: string | null;
   }>(sql`
     SELECT t.id, t.noeud_de AS de, t.noeud_vers AS vers, (ST_AsGeoJSON(t.geom)::json)->'coordinates' AS points,
-           t.voies_avant, t.voies_arriere, t.vitesse_kmh, t.nom, t.highway,
-           t.branche_de, t.branche_vers, t.liens_de, t.liens_vers,
-           nd.carrefour_id AS carrefour_de, nv.carrefour_id AS carrefour_vers
-    FROM ${FROM_TRONCONS}
+           t.voies_avant, t.voies_arriere, t.vitesse_kmh, t.nom, t.highway
+    FROM troncon t
     WHERE NOT t.supprime ${bbox ? sql`AND t.geom && ${enveloppe(bbox)}` : sql``}
     ORDER BY t.id
   `);
   const idsNoeuds = [...new Set(troncons.flatMap((t) => [t.de, t.vers]))];
-  const { rows: noeuds } = await db.execute<{
-    id: string;
-    lon: number;
-    lat: number;
-    carrefour_id: string | null;
-    nom: string | null;
-    liaisons: Liaison[] | null;
-  }>(sql`
-    SELECT n.id, ST_X(n.geom) AS lon, ST_Y(n.geom) AS lat, n.carrefour_id, c.nom, n.liaisons
-    FROM noeud n LEFT JOIN carrefour c ON c.id = n.carrefour_id
+  const { rows: noeuds } = await db.execute<{ id: string; lon: number; lat: number; carrefour_id: string | null; liaisons: Liaison[] | null }>(sql`
+    SELECT n.id, ST_X(n.geom) AS lon, ST_Y(n.geom) AS lat, n.carrefour_id, n.liaisons
+    FROM noeud n
     WHERE n.id = ANY (${`{${idsNoeuds.join(',')}}`}::uuid[])
   `);
-
-  const carrefours: ReseauSumo['carrefours'] = [];
-  for (const n of noeuds.filter((n) => n.carrefour_id !== null)) {
-    const config = await lireBranches(db, n.carrefour_id!);
-    if (!config.branches.some((b) => b.voies.length > 0)) continue;
-    carrefours.push({
-      id: n.carrefour_id!,
-      nom: n.nom ?? n.carrefour_id!,
-      noeud: n.id,
-      centre: config.centre,
-      branches: config.branches.map((b) => ({ code: b.code, voies: b.voies })),
-      connexions: config.connexions,
-    });
-  }
-  const configures = new Set(carrefours.map((c) => c.id));
-  const raccordements: RaccordementSumo[] = troncons.flatMap((t) =>
-    (['de', 'vers'] as const).flatMap((extremite): RaccordementSumo[] => {
-      const carrefour = extremite === 'de' ? t.carrefour_de : t.carrefour_vers;
-      const branche = extremite === 'de' ? t.branche_de : t.branche_vers;
-      if (!carrefour || !branche || !configures.has(carrefour)) return [];
-      return [{ troncon: t.id, extremite, carrefour, branche, liens: extremite === 'de' ? t.liens_de : t.liens_vers }];
-    }),
-  );
   return {
-    noeuds: noeuds.map((n) => ({ id: n.id, position: [n.lon, n.lat], liaisons: n.liaisons })),
-    troncons: troncons.map((t) => ({
-      id: t.id,
-      de: t.de,
-      vers: t.vers,
-      points: t.points,
-      voies_avant: t.voies_avant,
-      voies_arriere: t.voies_arriere,
-      vitesse_kmh: t.vitesse_kmh,
-      nom: t.nom,
-      highway: t.highway,
-    })),
-    carrefours,
-    raccordements,
+    noeuds: noeuds.map((n) => ({ id: n.id, position: [n.lon, n.lat], carrefour: n.carrefour_id, liaisons: n.liaisons })),
+    troncons,
   };
 }

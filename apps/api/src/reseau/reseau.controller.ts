@@ -5,7 +5,6 @@ import {
   Get,
   Header,
   HttpCode,
-  Inject,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -20,13 +19,10 @@ import {
   ModificationTroncon,
   NouveauTroncon,
   SaisieLiaisons,
-  SaisieRaccordements,
   type Bbox,
 } from '@voirie/schema';
 import { EditionGuard } from '../common/edition.guard.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
-import { DRIZZLE, type Db } from '../db/db.module.js';
-import { enregistrerRaccordements, lireRaccordements, raccorderCarrefour } from './raccordement.js';
 import { ReseauService } from './reseau.service.js';
 
 @Controller('reseau')
@@ -81,32 +77,5 @@ export class ReseauController {
     @Query('bbox', new ZodValidationPipe(BboxQuery.optional())) bbox: Bbox | undefined,
   ) {
     return this.reseau.exporter(fichier, bbox);
-  }
-}
-
-@Controller('carrefours/:id/raccordements')
-export class RaccordementsController {
-  constructor(@Inject(DRIZZLE) private readonly db: Db) {}
-
-  /** Bouts de tronçons raccordés au carrefour, branche et liens voie à voie. */
-  @Get()
-  lire(@Param('id', ParseUUIDPipe) id: string) {
-    return lireRaccordements(this.db, id);
-  }
-
-  @Put()
-  @UseGuards(EditionGuard)
-  async enregistrer(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(SaisieRaccordements)) saisie: SaisieRaccordements) {
-    await this.db.transaction((tx) => enregistrerRaccordements(tx, id, saisie));
-    return lireRaccordements(this.db, id);
-  }
-
-  /** Recoupe les tronçons au cercle du carrefour (après avoir recalé ses voies, par exemple). */
-  @Post('recalculer')
-  @UseGuards(EditionGuard)
-  @HttpCode(200)
-  async recalculer(@Param('id', ParseUUIDPipe) id: string) {
-    await this.db.transaction((tx) => raccorderCarrefour(tx, id));
-    return lireRaccordements(this.db, id);
   }
 }

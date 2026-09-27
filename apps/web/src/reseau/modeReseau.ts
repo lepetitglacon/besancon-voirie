@@ -101,7 +101,7 @@ export function useModeReseau({ actif, bbox, zoom }: { actif: boolean; bbox: Bbo
       notifications.create({
         type: 'success',
         title: 'Réseau généré depuis OSM',
-        description: `${bilan.troncons} tronçons, ${bilan.noeuds} nœuds ; ${bilan.conserves} corrections gardées, ${bilan.carrefours} carrefour(s) raccordé(s).`,
+        description: `${bilan.troncons} tronçons, ${bilan.noeuds} nœuds ; ${bilan.conserves} corrections gardées.`,
       })
     },
     onError: (erreur) => notifications.create({ type: 'error', title: 'Génération impossible', description: erreur.message }),

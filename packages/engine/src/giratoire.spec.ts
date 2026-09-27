@@ -1,204 +1,183 @@
 import { describe, expect, it } from 'vitest';
-import { cleVoie, type Connexion } from './connexions.js';
-import { feuxAnneau, matriceConflits, trajectoiresDesLignes, type GeometrieCarrefour, type LigneConflits } from './conflits.js';
-import { degagementsCalcules } from './degagement.js';
+import { cleVoie, mouvementsDepuisConnexions } from './connexions.js';
+import { matriceConflits, type GeometrieCarrefour, type LigneConflits } from './conflits.js';
 import { genererVoies, repereLocal, type LonLat, type Segment } from './geometrie.js';
 import {
-  courbeTrajet,
-  distanceArretGiratoire,
-  parcours,
-  rayonCirculation,
-  trajetGiratoire,
-  traverseIlot,
-  voiesRaccordees,
+  azimutsVoiesGiratoire,
+  branchesTroncons,
+  codeNoeudLibre,
+  distanceArretNoeud,
+  geometrieAnneau,
+  insererNoeud,
+  liaisonsHorsNoeud,
+  noeudDeVoie,
+  normaliserNoeuds,
+  proposerLiaisonsNoeuds,
+  tronconsXY,
   type Anneau,
 } from './giratoire.js';
 
-// Giratoire à quatre branches, une voie par sens, anneau d'une voie de 15 m de rayon extérieur.
+// Giratoire de 15 m de rayon : un nœud au droit de chaque rue (N, E, S, O).
 const centre: LonLat = [6.03, 47.25];
-const anneau: Anneau = { centre, rayon_m: 15, voies: 1 };
-const branches = [
+const repere = repereLocal(centre);
+const point = (azimut: number, rayon: number): LonLat =>
+  repere.versLonLat([rayon * Math.sin((azimut * Math.PI) / 180), rayon * Math.cos((azimut * Math.PI) / 180)]);
+const RUES = [
   { code: 'N', azimut: 0 },
   { code: 'E', azimut: 90 },
   { code: 'S', azimut: 180 },
   { code: 'O', azimut: 270 },
 ];
-const voies = new Map<string, Segment>();
-const traversees = new Map<string, Segment>();
-for (const b of branches) {
-  const g = genererVoies(centre, b.azimut, 1, 1, distanceArretGiratoire(anneau));
-  voies.set(cleVoie(b.code, 'entrante', 0), g.entrantes[0]!);
-  voies.set(cleVoie(b.code, 'sortante', 0), g.sortantes[0]!);
-  traversees.set(b.code, g.traversee);
-}
-// Toutes les connexions, demi-tours compris : on peut faire le tour de l'anneau.
-const connexions: Connexion[] = branches.flatMap((o) => branches.map((d) => ({ de: `${o.code}:e0`, vers: `${d.code}:s0` })));
-const geometrie: GeometrieCarrefour = { centre, voies, connexions, traversees, anneau };
 
-const vehicules = (code: string, ...mouvements: string[]): LigneConflits => ({ code, type: 'vehicule', mouvements });
-const feuAnneau = (code: string, branche: string): LigneConflits => ({ code, type: 'vehicule', mouvements: [], anneau: branche });
-const nature = (lignes: LigneConflits[], a: string, b: string, g = geometrie) =>
-  matriceConflits(lignes, g).find((c) => (c.a === a && c.b === b) || (c.a === b && c.b === a))?.nature ?? null;
-const conflit = (a: string, b: string) => nature([vehicules('A', a), vehicules('B', b)], 'A', 'B');
+let anneau: Anneau = { noeuds: [] };
+for (const rue of RUES) anneau = insererNoeud(anneau, { code: codeNoeudLibre(anneau), position: point(rue.azimut, 15) });
+const noeudDe = (rue: string) => String(RUES.findIndex((r) => r.code === rue) + 1);
 
-describe('trajets par l’anneau', () => {
-  const repere = repereLocal(centre);
-  const trajet = (de: string, vers: string) => trajetGiratoire(voies.get(`${de}:e0`)!, voies.get(`${vers}:s0`)!, anneau, repere);
-
-  it('tourne dans le sens antihoraire : première sortie à droite, demi-tour presque complet', () => {
-    const longueurs = ['E', 'N', 'O', 'S'].map((vers) => trajet('S', vers).longueur);
-    expect(longueurs).toEqual([...longueurs].sort((a, b) => a - b));
-    expect(longueurs[0]).toBeGreaterThan(45);
-    expect(longueurs[0]).toBeLessThan(90);
-    expect(longueurs[3]).toBeGreaterThan(300);
-  });
-
-  it('suit le milieu de la chaussée annulaire entre les raccords', () => {
-    const t = trajet('S', 'N');
-    const centreXY = repere.versXY(centre);
-    const arc = courbeTrajet(t, 10, t.longueur - 10);
-    for (const [x, y] of arc) expect(Math.hypot(x - centreXY[0], y - centreXY[1])).toBeCloseTo(rayonCirculation(anneau), 6);
-    // Le raccord d'entrée part du bout de la voie entrante.
-    const [x0, y0] = courbeTrajet(t)[0]!;
-    const bout = repere.versXY(voies.get('S:e0')![0]);
-    expect(Math.hypot(x0 - bout[0], y0 - bout[1])).toBeLessThan(1e-9);
-  });
-
-  it('répartit les trajets sur les voies d’un anneau à trois voies, puis se rabat avant la sortie', () => {
-    const large: Anneau = { centre, rayon_m: 25, voies: 3 };
-    const voiesLarges = new Map<string, Segment>();
-    for (const b of branches) {
-      const g = genererVoies(centre, b.azimut, 2, 1, distanceArretGiratoire(large));
-      g.entrantes.forEach((geom, rang) => voiesLarges.set(`${b.code}:e${rang}`, geom));
-      voiesLarges.set(`${b.code}:s0`, g.sortantes[0]!);
-    }
-    const t = (de: string, vers: string) => {
-      const connexion = { de, vers };
-      return trajetGiratoire(voiesLarges.get(de)!, voiesLarges.get(vers)!, large, repere, voiesRaccordees(connexion, voiesLarges.keys(), large));
-    };
-    const rayons = (x: number) => large.rayon_m - (x + 0.5) * 3.25;
-    // Voie entrante de droite : extérieur pour la première sortie, intérieur pour les trois quarts.
-    expect(t('S:e1', 'E:s0').rayon).toBeCloseTo(rayons(0), 6);
-    expect(t('S:e1', 'N:s0').rayon).toBeCloseTo(rayons(1), 6);
-    expect(t('S:e1', 'O:s0').rayon).toBeCloseTo(rayons(2), 6);
-    // Voie entrante de gauche : jamais sur la voie extérieure.
-    expect(t('S:e0', 'E:s0').rayon).toBeCloseTo(rayons(1), 6);
-    // On quitte l'anneau par la voie extérieure, au droit de l'unique voie sortante.
-    const versO = t('S:e1', 'O:s0');
-    expect(versO.rayonSortie).toBeCloseTo(rayons(0), 6);
-    const centreXY = repere.versXY(centre);
-    // Dernier point de l'arc, juste avant le raccord de sortie.
-    const arc = courbeTrajet(versO, 0, versO.longueur - 1e-3);
-    const [x, y] = arc.at(-1)!;
-    expect(Math.hypot(x - centreXY[0], y - centreXY[1])).toBeCloseTo(rayons(0), 3);
-  });
-
-  it('fait traverser l’îlot au tram et au bus en site propre seulement', () => {
-    expect(traverseIlot('tram', 'tram')).toBe(true);
-    expect(traverseIlot('bus', 'bus')).toBe(true);
-    expect(traverseIlot('bus', 'generale')).toBe(false);
-    expect(traverseIlot('generale', 'generale')).toBe(false);
-  });
-});
-
-describe('conflits dans un giratoire sans feux d’anneau', () => {
-  it('détecte l’insertion d’une entrée devant la circulation qui passe', () => {
-    // S vers O passe devant l'entrée E, puis devant N.
-    expect(conflit('S>O', 'E>N')).toBe('insertion');
-    expect(conflit('S>O', 'N>E')).toBe('insertion');
-  });
-
-  it('laisse libre une trajectoire qui sort avant l’entrée suivante', () => {
-    expect(conflit('S>E', 'E>N')).toBeNull();
-    expect(conflit('S>E', 'N>O')).toBeNull();
-  });
-
-  it('garde la convergence pour deux trajectoires vers la même sortie', () => {
-    expect(conflit('S>N', 'E>N')).toBe('convergence');
-  });
-});
-
-describe('feux d’anneau', () => {
-  it('place le feu d’anneau entre la sortie et l’entrée de la branche', () => {
-    const azimut = feuxAnneau(geometrie, ['E']).get('E')!;
-    const repere = repereLocal(centre);
-    const versE = trajetGiratoire(voies.get('S:e0')!, voies.get('E:s0')!, anneau, repere);
-    const depuisE = trajetGiratoire(voies.get('E:e0')!, voies.get('N:s0')!, anneau, repere);
-    const sortieE = versE.debut - versE.longueur;
-    // Dans le sens de circulation : on quitte l'anneau vers E, puis le feu, puis l'entrée de E s'insère.
-    expect(parcours(sortieE, azimut)).toBeGreaterThan(0);
-    expect(parcours(sortieE, azimut)).toBeLessThan(parcours(sortieE, depuisE.debut));
-  });
-
-  it('met en conflit le feu d’anneau et l’entrée qu’il protège, pas la circulation qu’il arrête', () => {
-    const lignes = [feuAnneau('FA', 'E'), vehicules('FE', 'E>N', 'E>O', 'E>S'), vehicules('FS', 'S>N', 'S>O', 'S>E')];
-    expect(nature(lignes, 'FA', 'FE')).toBe('insertion');
-    // S vers N ou O s'arrête au feu d'anneau de E : plus de conflit avec l'entrée E.
-    expect(nature(lignes, 'FS', 'FE')).toBeNull();
-    expect(nature(lignes, 'FS', 'FA')).toBeNull();
-  });
-
-  it('coupe les trajectoires au feu d’anneau et fait repartir celles du feu jusqu’à leur sortie', () => {
-    const lignes = [feuAnneau('FA', 'E'), vehicules('FS', 'S>N')];
-    const parLigne = trajectoiresDesLignes(lignes, geometrie);
-    expect(parLigne.get('FS')!.map((t) => t.vers)).toEqual(['anneau:E']);
-    const duFeu = parLigne.get('FA')!;
-    expect(new Set(duFeu.map((t) => t.de))).toEqual(new Set(['anneau:E']));
-    // Devant le feu passent les trajets qui vont au-delà de E : vers N, O et S. Un demi-tour depuis E
-    // ressort avant de repasser devant le feu.
-    expect(new Set(duFeu.map((t) => t.vers))).toEqual(new Set(['N:s0', 'O:s0', 'S:s0']));
-  });
-
-  it('calcule un rouge de dégagement depuis la ligne d’arrêt sur l’anneau', () => {
-    const lignes = [feuAnneau('FA', 'E'), vehicules('FE', 'E>N')];
-    const degagements = degagementsCalcules(lignes, geometrie);
-    const faVersFe = degagements.find((d) => d.de === 'FA' && d.vers === 'FE')!;
-    expect(faVersFe.distances).toBeDefined();
-    // Le feu d'anneau est à 3 m en amont de l'insertion ; l'entrant a son raccord à parcourir.
-    expect(faVersFe.distances!.sortant).toBeCloseTo(3, 0);
-    expect(faVersFe.distances!.entrant).toBeGreaterThan(3);
-  });
-});
-
-describe('tram qui traverse l’îlot', () => {
-  // Tram nord-est ↔ sud-ouest, à travers l'îlot, sur deux branches dédiées.
-  const voiesTram = new Map(voies);
-  const types = new Map<string, string>();
-  for (const [code, azimut] of [
-    ['T', 45],
-    ['T2', 225],
-  ] as const) {
-    const g = genererVoies(centre, azimut, 1, 1, distanceArretGiratoire(anneau));
-    voiesTram.set(`${code}:e0`, g.entrantes[0]!);
-    voiesTram.set(`${code}:s0`, g.sortantes[0]!);
-    types.set(`${code}:e0`, 'tram').set(`${code}:s0`, 'tram');
-  }
-  const avecTram: GeometrieCarrefour = {
-    ...geometrie,
-    voies: voiesTram,
-    typesVoies: types,
-    connexions: [...connexions, { de: 'T:e0', vers: 'T2:s0' }, { de: 'T2:e0', vers: 'T:s0' }],
+const rues = RUES.map((r) => {
+  const g = genererVoies(point(r.azimut, 15), r.azimut, 1, 1, distanceArretNoeud(1));
+  return {
+    code: r.code,
+    azimut: r.azimut,
+    noeud: noeudDe(r.code),
+    troncon: false,
+    voies: [
+      { sens: 'entrante' as const, rang: 0, geom: g.entrantes[0]! },
+      { sens: 'sortante' as const, rang: 0, geom: g.sortantes[0]! },
+    ],
+    traversee: g.traversee,
   };
-  const tram: LigneConflits = { code: 'T1', type: 'vehicule', mouvements: ['T>T2', 'T2>T'] };
+});
+const troncons = branchesTroncons(anneau);
+const branches = [...rues, ...troncons];
+const connexions = proposerLiaisonsNoeuds(branches, anneau);
 
-  it('croise la circulation de l’anneau', () => {
-    expect(nature([tram, vehicules('FS', 'S>N')], 'T1', 'FS', avecTram)).toBe('croisement');
+function geometrie(extra: { branches?: typeof branches; connexions?: typeof connexions } = {}): GeometrieCarrefour {
+  const toutes = [...branches, ...(extra.branches ?? [])];
+  return {
+    centre,
+    voies: new Map(toutes.flatMap((b) => b.voies.map((v) => [cleVoie(b.code, v.sens, v.rang), v.geom as Segment] as const))),
+    connexions: [...connexions, ...(extra.connexions ?? [])],
+    traversees: new Map(),
+    troncons: new Set(troncons.map((t) => t.code)),
+  };
+}
+const ligne = (code: string, ...mouvements: string[]): LigneConflits => ({ code, type: 'vehicule', mouvements });
+const nature = (lignes: LigneConflits[], a: string, b: string, g = geometrie()) =>
+  matriceConflits(lignes, g).find((c) => [c.a, c.b].sort().join() === [a, b].sort().join())?.nature ?? null;
+/** Tronçon qui arrive au nœud de la rue, et celui qui en repart. */
+const arrivee = (rue: string) => troncons.find((t) => noeudDeVoie(`${t.code}:e0`, branches, anneau) === noeudDe(rue))!.code;
+const depart = (rue: string) => `R${noeudDe(rue)}`;
+
+describe('anneau par nœuds', () => {
+  it('classe les premiers nœuds dans le sens de circulation, puis insère au plus court', () => {
+    // Antihoraire vu du ciel : est, nord, ouest, sud (le point de départ du tour importe peu).
+    const tour = anneau.noeuds.map((n) => RUES[Number(n.code) - 1]!.code)
+      .join('');
+    expect(`${tour}${tour}`).toContain('ENOS');
+    const avecNordEst = insererNoeud(anneau, { code: '5', position: point(45, 15) }).noeuds.map((n) => n.code).join('');
+    expect(`${avecNordEst}${avecNordEst}`).toContain('2514');
   });
 
-  it('est protégé par les feux d’anneau placés avant ses deux traversées', () => {
-    const lignes = [tram, feuAnneau('FA', 'T'), feuAnneau('FB', 'T2'), vehicules('FS', 'S>N')];
-    expect(nature(lignes, 'T1', 'FA', avecTram)).toBe('croisement');
-    expect(nature(lignes, 'T1', 'FB', avecTram)).toBe('croisement');
-    // S vers N s'arrête au feu d'anneau avant la traversée nord-est.
-    expect(nature(lignes, 'T1', 'FS', avecTram)).toBeNull();
+  it('trace une courbe qui passe par les nœuds, proche du cercle entre eux', () => {
+    const xy = anneau.noeuds.map((n) => repere.versXY(n.position));
+    const traces = tronconsXY(xy);
+    traces.forEach((trace, i) => {
+      expect(trace[0]![0]).toBeCloseTo(xy[i]![0], 9);
+      expect(trace.at(-1)![1]).toBeCloseTo(xy[(i + 1) % xy.length]![1], 9);
+      // Quatre nœuds seulement : à mi-chemin, la courbe s'écarte du cercle d'un dixième du rayon.
+      for (const [x, y] of trace) expect(Math.abs(Math.hypot(x, y) - 15)).toBeLessThan(2);
+    });
+  });
+
+  it('met la voie de rang 0 d’un tronçon côté îlot', () => {
+    const t = geometrieAnneau(anneau, new Map([['R2', 2]])).find((g) => g.code === 'R2');
+    const distanceCentre = (p: LonLat) => Math.hypot(...repere.versXY(p));
+    expect(distanceCentre(t!.sortantes[0]![0])).toBeLessThan(distanceCentre(t!.sortantes[1]![0]));
+    expect(distanceCentre(t!.entrantes[0]![0])).toBeLessThan(distanceCentre(t!.entrantes[1]![0]));
+  });
+
+  it('situe chaque voie à son nœud et refuse une liaison entre deux nœuds', () => {
+    expect(noeudDeVoie(`${depart('E')}:s0`, branches, anneau)).toBe(noeudDe('E'));
+    expect(noeudDeVoie(`${arrivee('E')}:e0`, branches, anneau)).toBe(noeudDe('E'));
+    expect(liaisonsHorsNoeud(branches, connexions, anneau)).toEqual([]);
+    expect(liaisonsHorsNoeud(branches, [{ de: 'S:e0', vers: `${depart('E')}:s0` }], anneau)).toEqual([`S:e0>${depart('E')}:s0`]);
+  });
+
+  it('propose à chaque nœud : continuer, sortir, s’insérer', () => {
+    expect(connexions).toHaveLength(RUES.length * 3);
+    expect(connexions).toContainEqual({ de: `${arrivee('E')}:e0`, vers: `${depart('E')}:s0` });
+    expect(connexions).toContainEqual({ de: `${arrivee('E')}:e0`, vers: 'E:s0' });
+    expect(connexions).toContainEqual({ de: 'E:e0', vers: `${depart('E')}:s0` });
+  });
+
+  it('lit le sens des mouvements sur les voies : l’anneau continue tout droit, on entre et on sort à droite', () => {
+    const mouvements = mouvementsDepuisConnexions(branches, connexions, azimutsVoiesGiratoire(branches, anneau));
+    const direction = (o: string, d: string) => mouvements.find((m) => m.origine === o && m.destination === d)?.direction;
+    expect(direction(arrivee('E'), depart('E'))).toBe('tout_droit');
+    expect(direction(arrivee('E'), 'E')).toBe('droite');
+    expect(direction('E', depart('E'))).toBe('droite');
   });
 });
 
-describe('carrefour ordinaire', () => {
-  it('garde les trajectoires d’une connexion à l’autre sans anneau', () => {
-    const sansAnneau: GeometrieCarrefour = { ...geometrie, anneau: null };
-    const parLigne = trajectoiresDesLignes([vehicules('A', 'S>N')], sansAnneau);
-    expect(parLigne.get('A')!.map((t) => t.cle)).toEqual(['S:e0>N:s0']);
-    expect(parLigne.get('A')![0]!.anneau).toBeUndefined();
+describe('conflits d’un giratoire par nœuds', () => {
+  it('met en conflit d’insertion le feu d’anneau et l’entrée du même nœud, pas ceux d’autres nœuds', () => {
+    const lignes = [ligne('A1', `${arrivee('E')}>${depart('E')}`), ligne('F1', `E>${depart('E')}`), ligne('F2', `S>${depart('S')}`)];
+    expect(nature(lignes, 'A1', 'F1')).toBe('insertion');
+    expect(nature(lignes, 'A1', 'F2')).toBeNull();
+  });
+
+  it('détecte le tram qui traverse l’îlot sur la liaison de l’anneau à son nœud', () => {
+    // Tram nord-est ↔ sud-ouest, hors nœud, qui coupe l'anneau là où l'on a posé deux nœuds.
+    let avecTram = anneau;
+    avecTram = insererNoeud(avecTram, { code: '5', position: point(45, 15) });
+    avecTram = insererNoeud(avecTram, { code: '6', position: point(225, 15) });
+    const tronconsTram = branchesTroncons(avecTram);
+    const tram = ['T', 'T2'].map((code, i) => {
+      const g = genererVoies(centre, i === 0 ? 45 : 225, 1, 1, 22);
+      return {
+        code,
+        azimut: i === 0 ? 45 : 225,
+        noeud: null,
+        troncon: false,
+        voies: [
+          { sens: 'entrante' as const, rang: 0, geom: g.entrantes[0]! },
+          { sens: 'sortante' as const, rang: 0, geom: g.sortantes[0]! },
+        ],
+        traversee: g.traversee,
+      };
+    });
+    const toutes = [...rues, ...tronconsTram, ...tram];
+    const liaisons = [...proposerLiaisonsNoeuds(toutes, avecTram), { de: 'T:e0', vers: 'T2:s0' }];
+    expect(liaisonsHorsNoeud(toutes, liaisons, avecTram)).toEqual([]);
+    const g: GeometrieCarrefour = {
+      centre,
+      voies: new Map(toutes.flatMap((b) => b.voies.map((v) => [cleVoie(b.code, v.sens, v.rang), v.geom as Segment] as const))),
+      connexions: liaisons,
+      traversees: new Map(),
+      troncons: new Set(tronconsTram.map((t) => t.code)),
+    };
+    // Au nœud 5 (nord-est), l'anneau arrive par le tronçon du nœud E et repart par R5.
+    const anneauNordEst = ligne('A1', `${tronconsTram.find((t) => t.noeud === noeudDe('E'))!.code}>R5`);
+    expect(nature([ligne('T1', 'T>T2'), anneauNordEst], 'T1', 'A1', g)).toBe('croisement');
+  });
+});
+
+describe('nœuds proposés', () => {
+  it('fusionne les nœuds proches, remet la boucle dans le sens de circulation et la complète jusqu’à quatre', () => {
+    // Est, sud, ouest (sens horaire), plus un doublon de l'est à 2 m.
+    const positions = [point(90, 15), point(180, 15), point(270, 15), point(95, 15)];
+    const resultat = normaliserNoeuds(positions)!;
+    expect(resultat.anneau.noeuds).toHaveLength(4);
+    // Le doublon rejoint le nœud est.
+    expect(resultat.codes[3]).toBe(resultat.codes[0]);
+    // Sens antihoraire : après l'est vient le nord (le nœud ajouté), puis l'ouest, puis le sud.
+    const code = (i: number) => Number(resultat.codes[i]);
+    const n = resultat.anneau.noeuds.length;
+    expect((code(2) - code(0) + n) % n).toBe(2);
+    expect((code(1) - code(2) + n) % n).toBe(1);
+  });
+
+  it('renonce sous trois nœuds distincts', () => {
+    expect(normaliserNoeuds([point(0, 15), point(2, 15), point(180, 15)])).toBeNull();
   });
 });
