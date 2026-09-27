@@ -38,14 +38,19 @@ export type Voie = z.infer<typeof Voie>;
 export const PrioriteEntree = z.enum(['cedez_le_passage', 'stop', 'priorite_a_droite']);
 export type PrioriteEntree = z.infer<typeof PrioriteEntree>;
 
-/** Anneau d'un giratoire : chaussée annulaire à sens unique autour de l'îlot. */
-export const Anneau = z.object({
-  /** Centre de l'îlot. */
-  centre: LonLat,
-  /** Rayon du bord extérieur de la chaussée annulaire (m). */
-  rayon_m: z.number().min(4).max(150),
-  voies: z.number().int().min(1).max(4),
-});
+/** Code d'un nœud d'anneau : 1, 2, 3… */
+export const CodeNoeud = z.string().regex(/^\d{1,2}$/, 'Nœud attendu sous la forme 1, 2…');
+
+/**
+ * Anneau d'un giratoire (docs/CONFIGURATION.md §7) : ses nœuds, posés sur la photo dans
+ * l'ordre de circulation (antihoraire). Chaque nœud est un mini-carrefour ; les tronçons
+ * d'anneau entre deux nœuds sont des branches générées (R1 part du nœud 1).
+ */
+export const Anneau = z
+  .object({
+    noeuds: z.array(z.object({ code: CodeNoeud, position: LonLat })).min(3, 'Trois nœuds au moins').max(16),
+  })
+  .refine(({ noeuds }) => new Set(noeuds.map((n) => n.code)).size === noeuds.length, { message: 'Codes de nœud en double' });
 export type Anneau = z.infer<typeof Anneau>;
 
 const CodeBranche = z.string().trim().regex(/^[A-Z0-9]{1,4}$/, 'Code en majuscules, 4 caractères au plus (N, NE, S2…)');
@@ -64,6 +69,10 @@ export const Branche = z
     traversee: SegmentGeo.nullable().default(null),
     /** Giratoire : régime de l'entrée hors feux ; null = cédez-le-passage. */
     priorite_entree: PrioriteEntree.nullable().default(null),
+    /** Giratoire : nœud où la rue se raccorde à l'anneau ; pour un tronçon, son nœud de départ. */
+    noeud: CodeNoeud.nullable().default(null),
+    /** Tronçon d'anneau généré (R1, R2…), et non une rue. */
+    troncon: z.boolean().default(false),
   })
   .superRefine((branche, ctx) => {
     for (const sens of SensVoie.options) {
@@ -83,13 +92,31 @@ export type Connexion = z.infer<typeof Connexion>;
 
 export const ConfigurationBranches = z
   .object({
-    branches: z.array(Branche).max(12),
+    /** Rues (12 au plus) et, dans un giratoire, tronçons d'anneau (un par nœud, 16 au plus). */
+    branches: z.array(Branche).max(28),
     connexions: z.array(Connexion).max(300).default([]),
     /** Anneau d'un giratoire ; null pour un carrefour ordinaire. */
     anneau: Anneau.nullable().default(null),
   })
-  .superRefine(({ branches, connexions }, ctx) => {
+  .superRefine(({ branches, connexions, anneau }, ctx) => {
     const codes = branches.map((b) => b.code);
+    if (branches.filter((b) => !b.troncon).length > 12) {
+      ctx.addIssue({ code: 'custom', path: ['branches'], message: '12 rues au plus' });
+    }
+    const noeuds = new Set(anneau?.noeuds.map((n) => n.code));
+    branches.forEach((b, i) => {
+      if (b.noeud && !noeuds.has(b.noeud)) {
+        ctx.addIssue({ code: 'custom', path: ['branches', i, 'noeud'], message: `${b.code} : pas de nœud ${b.noeud} sur l'anneau` });
+      }
+      if (b.troncon && (!b.noeud || b.code !== `R${b.noeud}`)) {
+        ctx.addIssue({ code: 'custom', path: ['branches', i], message: `Tronçon ${b.code} : code attendu R + nœud de départ` });
+      }
+    });
+    for (const noeud of noeuds) {
+      if (!branches.some((b) => b.troncon && b.noeud === noeud)) {
+        ctx.addIssue({ code: 'custom', path: ['branches'], message: `Aucun tronçon d'anneau ne part du nœud ${noeud}` });
+      }
+    }
     if (new Set(codes).size !== codes.length) {
       ctx.addIssue({ code: 'custom', path: ['branches'], message: 'Codes de branche en double' });
     }

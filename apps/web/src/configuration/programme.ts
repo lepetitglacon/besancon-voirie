@@ -13,7 +13,6 @@ import {
 import {
   PLAGE_TOUTE_LA_JOURNEE,
   typeLigne,
-  type Anneau,
   type Branche,
   type Connexion,
   type Jour,
@@ -41,21 +40,20 @@ export function geometrieEnregistree(configuration: {
   centre: LonLat
   branches: readonly Branche[]
   connexions: readonly Connexion[]
-  anneau: Anneau | null
 }): GeometrieCarrefour {
-  const voies = configuration.branches.flatMap((b) => b.voies.map((v) => ({ cle: cleVoie(b.code, v.sens, v.rang), ...v })))
   return {
     centre: configuration.centre,
     connexions: configuration.connexions,
-    voies: new Map(voies.map((v) => [v.cle, v.geom] as const)),
-    typesVoies: new Map(voies.map((v) => [v.cle, v.type] as const)),
+    voies: new Map(
+      configuration.branches.flatMap((b) => b.voies.map((v) => [cleVoie(b.code, v.sens, v.rang), v.geom] as const)),
+    ),
     traversees: new Map(configuration.branches.flatMap((b) => (b.traversee ? [[b.code, b.traversee] as const] : []))),
-    anneau: configuration.anneau,
+    troncons: new Set(configuration.branches.filter((b) => b.troncon).map((b) => b.code)),
   }
 }
 
 export const lignesPourMoteur = (lignes: readonly LigneFeux[]): LigneConflits[] =>
-  lignes.map((l) => ({ code: l.code, type: typeLigne(l.signal), mouvements: l.mouvements, traverse: l.traverse, anneau: l.anneau }))
+  lignes.map((l) => ({ code: l.code, type: typeLigne(l.signal), mouvements: l.mouvements, traverse: l.traverse }))
 
 /** Plans tels qu'ils se saisissent et s'enregistrent : sans les champs calculés par l'API. */
 export const plansSaisis = (plans: readonly (PlanSaisi | PlanProgramme)[]): PlanSaisi[] =>

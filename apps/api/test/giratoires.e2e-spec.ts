@@ -16,7 +16,6 @@ describe('Giratoires (e2e)', () => {
   let detection: DetectionBranches;
   let mouvements: MouvementCarrefour[];
   const http = () => request(app.getHttpServer());
-  const depuis = (origine: string) => mouvements.filter((m) => m.origine === origine).map((m) => `${m.origine}>${m.destination}`);
 
   beforeAll(async () => {
     await client.connect();
@@ -46,23 +45,34 @@ describe('Giratoires (e2e)', () => {
     await client.end();
   });
 
-  it('GET /branches/detection should take the ring from OSM and propose branches around it', async () => {
+  const noeudDe = (code: string) => detection.branches.find((b) => b.code === code)!.noeud!;
+  /** Tronçon qui arrive au nœud, et celui qui en repart. */
+  const arrivee = (noeud: string) => {
+    const i = detection.anneau!.noeuds.findIndex((n) => n.code === noeud);
+    const noeuds = detection.anneau!.noeuds;
+    return `R${noeuds[(i - 1 + noeuds.length) % noeuds.length]!.code}`;
+  };
+
+  it('GET /branches/detection should place a node where each street meets the OSM ring', async () => {
     ({ body: detection } = await http().get(`/api/carrefours/${giratoire}/branches/detection`).expect(200));
-    const anneau = detection.anneau!;
-    const [est, nord] = repereLocal(CENTRE_GIRATOIRE_D).versXY(anneau.centre);
-    expect(Math.hypot(est, nord)).toBeLessThan(1);
-    // Tracé OSM au milieu de la chaussée + une demi-voie, à l'approximation du polygone près.
-    expect(anneau.rayon_m).toBeGreaterThan(RAYON_OSM_D_M);
-    expect(anneau.rayon_m).toBeLessThan(RAYON_OSM_D_M + 2.5);
-    expect(anneau.voies).toBe(1);
-    // L'anneau n'est pas une branche : seulement les quatre rues.
-    expect(detection.branches.map((b) => b.code).sort()).toEqual(['E', 'N', 'O', 'S']);
-    // Toutes les entrées mènent à toutes les sorties, demi-tour compris.
-    expect(detection.connexions).toHaveLength(16);
-    expect(Object.values(detection.sources)).toEqual(['defaut', 'defaut', 'defaut', 'defaut']);
+    const noeuds = detection.anneau!.noeuds;
+    expect(noeuds).toHaveLength(4);
+    const repere = repereLocal(CENTRE_GIRATOIRE_D);
+    for (const n of noeuds) expect(Math.hypot(...repere.versXY(n.position))).toBeCloseTo(RAYON_OSM_D_M, 0);
+    const rues = detection.branches.filter((b) => !b.troncon);
+    expect(rues.map((b) => b.code).sort()).toEqual(['E', 'N', 'O', 'S']);
+    // Chaque rue a son propre nœud ; chaque nœud a son tronçon d'anneau.
+    expect(new Set(rues.map((b) => b.noeud)).size).toBe(4);
+    expect(detection.branches.filter((b) => b.troncon).map((b) => b.code).sort()).toEqual(['R1', 'R2', 'R3', 'R4']);
+    // À chaque nœud : continuer, sortir, s'insérer.
+    expect(detection.connexions).toHaveLength(12);
+    const e = noeudDe('E');
+    expect(detection.connexions).toContainEqual({ de: `${arrivee(e)}:e0`, vers: `R${e}:s0` });
+    expect(detection.connexions).toContainEqual({ de: 'E:e0', vers: `R${e}:s0` });
+    expect(detection.connexions).toContainEqual({ de: `${arrivee(e)}:e0`, vers: 'E:s0' });
   });
 
-  it('PUT /branches should save the ring and the entry priorities', async () => {
+  it('PUT /branches should save the nodes, the ring sections and the entry priorities', async () => {
     const branches = detection.branches.map(({ sens: _sens, ...b }: BrancheLue) => ({
       ...b,
       priorite_entree: b.code === 'O' ? 'stop' : null,
@@ -72,45 +82,45 @@ describe('Giratoires (e2e)', () => {
       .send({ branches, connexions: detection.connexions, anneau: detection.anneau })
       .expect(200);
     expect(body.anneau).toEqual(detection.anneau);
-    expect(body.branches.find((b: BrancheLue) => b.code === 'O').priorite_entree).toBe('stop');
-    expect(body.branches.find((b: BrancheLue) => b.code === 'N').priorite_entree).toBeNull();
+    expect(body.branches.find((b: BrancheLue) => b.code === 'O')).toMatchObject({ priorite_entree: 'stop', noeud: noeudDe('O'), troncon: false });
+    expect(body.branches.find((b: BrancheLue) => b.code === 'R1')).toMatchObject({ troncon: true, noeud: '1' });
     mouvements = body.mouvements;
+    // L'anneau continue tout droit à chaque nœud ; on y entre et on en sort à droite.
+    const e = noeudDe('E');
+    const direction = (o: string, d: string) => mouvements.find((m) => m.origine === o && m.destination === d)?.direction;
+    expect(direction(arrivee(e), `R${e}`)).toBe('tout_droit');
+    expect(direction('E', `R${e}`)).toBe('droite');
+    expect(direction(arrivee(e), 'E')).toBe('droite');
   });
 
-  it('GET /lignes should not list the yield entries as movements without signals', async () => {
+  it('PUT /branches should refuse a link between two different nodes', async () => {
+    const branches = detection.branches.map(({ sens: _sens, ...b }: BrancheLue) => b);
+    const { body } = await http()
+      .put(`/api/carrefours/${giratoire}/branches`)
+      .send({ branches, connexions: [...detection.connexions, { de: 'S:e0', vers: `R${noeudDe('E')}:s0` }], anneau: detection.anneau })
+      .expect(400);
+    expect(body.erreurs).toEqual([`S:e0 → R${noeudDe('E')}:s0 : les deux voies ne sont pas au même nœud`]);
+  });
+
+  it('GET /lignes should not list yield entries and free ring flow as movements without signals', async () => {
     const { body } = await http().get(`/api/carrefours/${giratoire}/lignes`).expect(200);
     expect(body.non_commandes).toEqual([]);
   });
 
-  it('PUT /lignes should accept a ring light and find the insertion conflict it protects', async () => {
+  it('PUT /lignes should treat a ring light as an ordinary line and find the insertion it protects', async () => {
+    const e = noeudDe('E');
     const { body } = await http()
       .put(`/api/carrefours/${giratoire}/lignes`)
       .send({
         lignes: [
-          { code: 'A1', signal: 'R11v', anneau: 'E' },
-          { code: 'F1', signal: 'R11v', mouvements: depuis('E').slice(0, 2) },
+          { code: 'A1', signal: 'R11v', mouvements: [`${arrivee(e)}>R${e}`] },
+          { code: 'F1', signal: 'R11v', mouvements: [`E>R${e}`] },
         ],
       })
       .expect(200);
-    expect(body.lignes.find((l: { code: string }) => l.code === 'A1')).toMatchObject({ anneau: 'E', mouvements: [] });
     const conflit: ConflitLignes = body.conflits.find((c: ConflitLignes) => [c.a, c.b].sort().join() === 'A1,F1');
     expect(conflit).toMatchObject({ nature: 'insertion', admis: false });
-    // L'entrée E a des feux : ses mouvements sans ligne sont signalés, les autres entrées cèdent le passage.
-    expect(body.non_commandes).toEqual(depuis('E').slice(2));
-  });
-
-  it('PUT /lignes should refuse a ring light on an unknown branch', async () => {
-    const { body } = await http()
-      .put(`/api/carrefours/${giratoire}/lignes`)
-      .send({ lignes: [{ code: 'A1', signal: 'R11v', anneau: 'X' }] })
-      .expect(400);
-    expect(body.erreurs).toEqual(["A1 : pas de branche X pour placer le feu d'anneau"]);
-  });
-
-  it('PUT /lignes should refuse a ring light that also commands movements', async () => {
-    await http()
-      .put(`/api/carrefours/${giratoire}/lignes`)
-      .send({ lignes: [{ code: 'A1', signal: 'R11v', anneau: 'E', mouvements: depuis('E') }] })
-      .expect(400);
+    // L'anneau a un feu à ce nœud : sa sortie vers E, sans feu, est signalée.
+    expect(body.non_commandes).toEqual([`${arrivee(e)}>E`]);
   });
 });

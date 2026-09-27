@@ -1,6 +1,6 @@
 {
-  "id": "a9d73fcd-db98-402f-be83-e9863b3c3073",
-  "prevId": "a68948de-4e3e-4bc6-94ee-55d886202fa1",
+  "id": "e61a2c60-b970-47c9-8fa0-d7eec69160b4",
+  "prevId": "510d3859-ba74-43bb-a767-e85b512ea0ba",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -199,6 +199,19 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": false
+        },
+        "noeud": {
+          "name": "noeud",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "troncon": {
+          "name": "troncon",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {},
@@ -608,12 +621,6 @@
         },
         "traverse": {
           "name": "traverse",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "anneau": {
-          "name": "anneau",
           "type": "text",
           "primaryKey": false,
           "notNull": false

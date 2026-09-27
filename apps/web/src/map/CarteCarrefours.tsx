@@ -83,7 +83,7 @@ interface Props {
   /** Clic sur un feu pendant la configuration : choix des feux d'une ligne, ou popup du feu. */
   onClicFeuConfiguration: (feu: FeuResume, position: LonLat) => void
   /** Clic ailleurs pendant la configuration : ferme la popup ouverte. */
-  onClicCarteConfiguration: () => void
+  onClicCarteConfiguration: (position: [number, number]) => void
   /** Clic sur un élément du calque (voie, connexion, code de branche). */
   onClicCalque: (clic: ClicCalque) => void
   /** Reçoit l'élément où rendre le contenu de la popup de configuration (portail). */
@@ -249,7 +249,7 @@ export function CarteCarrefours(props: Props) {
       const autre = vise && vise.carrefour.id !== configuration.carrefourId
       if (autre && configuration.mode !== null && !configuration.choixFeux) return props.onOuvrir(vise)
       if (objet?.layer.id === 'feux') return props.onClicFeuConfiguration(objet.properties as FeuResume, [longitude, latitude])
-      return props.onClicCarteConfiguration()
+      return props.onClicCarteConfiguration([longitude, latitude])
     }
     if (edition) {
       if (objet?.layer.id === 'feux') props.onBasculerFeu(objet.properties as FeuResume)
@@ -328,7 +328,6 @@ export function CarteCarrefours(props: Props) {
           branches={configuration.branches}
           connexions={configuration.connexions}
           anneau={configuration.anneau}
-          feuxAnneau={configuration.feuxAnneau}
           mode={configuration.mode}
           surlignees={new Set(configuration.connexionsSurlignees)}
           feux={configuration.feux}

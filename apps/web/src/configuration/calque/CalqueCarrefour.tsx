@@ -6,33 +6,22 @@
  * les clics vers la carte (pointer-events: none). La molette et l'appui de la souris, eux, sont
  * relayés au canvas : la carte zoome et se déplace aussi depuis une voie ou une liaison.
  */
-import {
-  cleVoie,
-  contourAnneau,
-  courbeGiratoire,
-  flechesParVoie,
-  LARGEUR_VOIE_M as LARGEUR_VOIE_REELLE_M,
-  repereLocal,
-  traverseIlot,
-  voiesRaccordees,
-  type LonLat,
-  type XY,
-} from '@voirie/engine'
+import { azimutsVoiesGiratoire, cleVoie, flechesParVoie, repereLocal, type LonLat, type XY } from '@voirie/engine'
 import type { Anneau, Branche, Connexion, EmpriseIa, TypeFeu } from '@voirie/schema'
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
 import { useMap } from 'react-map-gl/maplibre'
 import { FLECHES } from '../libelles'
 import { couleursVoies, deplacerPoignee, voiesDe, type Poignee as PoigneeModele } from '../modele'
 import {
-  AnneauGiratoire,
   CadrePhoto,
   Courbe,
-  FeuAnneau,
   EcartOsm,
   Elastique,
   Etiquette,
+  NoeudAnneau,
   PassagePieton,
   Poignee,
+  TronconAnneau,
   Voie,
   type EtatCourbe,
   type EtatFeu,
@@ -43,15 +32,17 @@ import { useProjection } from './projection'
 
 /**
  * Outil actif sur le calque : « selection » ouvre la popup de l'élément cliqué, « pieton » ajoute
- * ou retire le passage piéton de la branche cliquée ; les autres déplacent des poignées.
+ * ou retire le passage piéton de la branche cliquée, « noeud » pose et déplace les nœuds d'un
+ * giratoire ; les autres déplacent des poignées.
  */
-export type ModeEdition = 'selection' | 'ajuster' | 'connecter' | 'feux' | 'pieton'
+export type ModeEdition = 'selection' | 'ajuster' | 'connecter' | 'feux' | 'pieton' | 'noeud'
 
 /** Élément du calque cliqué, avec la position du clic (pour y ancrer une popup). */
 export type ClicCalque =
   | { type: 'voie'; cle: string; position: LonLat }
   | { type: 'connexion'; de: string; vers: string; position: LonLat }
   | { type: 'branche'; code: string; position: LonLat }
+  | { type: 'noeud'; code: string; position: LonLat }
 
 /** Feu du carrefour, déplaçable en mode « feux » pour le poser sur son mât. */
 export interface FeuPlacable {
@@ -63,16 +54,6 @@ export interface FeuPlacable {
   placeALaMain: boolean
 }
 
-/** Feu d'anneau d'un giratoire : sa ligne, sa position sur l'anneau, son état pendant la lecture. */
-export interface FeuAnneauAffiche {
-  code: string
-  /** Azimut (°) depuis le centre de l'îlot. */
-  azimut: number
-  etat: EtatFeu | null
-  /** Ligne active dans l'onglet des lignes. */
-  surligne: boolean
-}
-
 /** Feu en cours de déplacement : la carte le dessine à cette position. */
 export interface ApercuFeu {
   id: string
@@ -82,10 +63,8 @@ export interface ApercuFeu {
 interface Props {
   branches: Branche[]
   connexions: Connexion[]
-  /** Anneau d'un giratoire ; null pour un carrefour ordinaire. */
+  /** Nœuds de l'anneau d'un giratoire ; null pour un carrefour ordinaire. */
   anneau: Anneau | null
-  /** Feux d'anneau des lignes de feux, dessinés en travers de l'anneau. */
-  feuxAnneau?: readonly FeuAnneauAffiche[]
   /** null : dessin seul, sans poignées ni clics. */
   mode: ModeEdition | null
   /** Connexions à mettre en avant (« de>vers »), par exemple celles de la ligne de feux active. */
@@ -116,13 +95,15 @@ const TOLERANCE_CIBLE_PX = 14
 /** Au-delà (px) entre l'appui et le relâché, c'est un déplacement de la carte, pas un clic. */
 const TOLERANCE_CLIC_PX = 3
 const GRIS_SORTANTE = '#e5e7eb'
-const COULEUR_ANNEAU = '#38bdf8'
+const COULEUR_NOEUD = '#38bdf8'
+/** En dessous (m), relâcher un nœud après l'avoir saisi est un clic : sa popup s'ouvre. */
+const DEPLACEMENT_NOEUD_MIN_M = 0.3
 const VIOLET_PASSAGE = '#7d3cb4'
 
 type Survol = { type: 'voie'; cle: string } | { type: 'connexion'; cle: string } | null
 
 type Glisse =
-  | { type: 'poignee'; poignee: PoigneeModele; position: LonLat }
+  | { type: 'poignee'; poignee: PoigneeModele; depart: LonLat; position: LonLat }
   | { type: 'connexion'; de: string; position: LonLat; cible: string | null }
   /** `enregistrement` : lâché, en attente de l'API (le feu reste affiché à sa nouvelle place). */
   | { type: 'feu'; id: string; depart: LonLat; position: LonLat; enregistrement: boolean }
@@ -139,7 +120,6 @@ export function CalqueCarrefour(props: Props) {
     branches,
     connexions,
     anneau,
-    feuxAnneau = [],
     mode,
     surlignees,
     feux,
@@ -208,7 +188,10 @@ export function CalqueCarrefour(props: Props) {
     [branches, connexions, anneau, glisse],
   )
   const couleurs = useMemo(() => couleursVoies(apercu.branches), [apercu.branches])
-  const fleches = useMemo(() => flechesParVoie(apercu.branches, apercu.connexions), [apercu])
+  const fleches = useMemo(
+    () => flechesParVoie(apercu.branches, apercu.connexions, azimutsVoiesGiratoire(apercu.branches, apercu.anneau)),
+    [apercu],
+  )
 
   if (!projection) return null
   const { px, lonLat, metresParPixel } = projection
@@ -216,7 +199,7 @@ export function CalqueCarrefour(props: Props) {
   const largeurPassage = Math.max(2, LARGEUR_PASSAGE_M / metresParPixel)
 
   const voies = new Map(
-    apercu.branches.flatMap((b) => b.voies.map((v) => [cleVoie(b.code, v.sens, v.rang), { ...v, branche: b.code }] as const)),
+    apercu.branches.flatMap((b) => b.voies.map((v) => [cleVoie(b.code, v.sens, v.rang), { ...v, branche: b.code, troncon: b.troncon }] as const)),
   )
   const segmentPx = (geom: [LonLat, LonLat]): [XY, XY] => [px(geom[0]), px(geom[1])]
 
@@ -285,7 +268,7 @@ export function CalqueCarrefour(props: Props) {
     if (mode === 'connecter' && poignee.role === 'voie') {
       setGlisse({ type: 'connexion', de: poignee.cle, position: depart, cible: null })
     } else {
-      setGlisse({ type: 'poignee', poignee, position: depart })
+      setGlisse({ type: 'poignee', poignee, depart, position: depart })
     }
   }
 
@@ -305,7 +288,12 @@ export function CalqueCarrefour(props: Props) {
       void onPlacerFeu(glisse.id, glisse.position).finally(() => setGlisse(null))
       return
     }
-    if (glisse?.type === 'poignee') onDeplacer(glisse.poignee, glisse.position)
+    if (glisse?.type === 'poignee') {
+      const { poignee, depart, position } = glisse
+      const immobile = Math.hypot(...repereLocal(depart).versXY(position)) < DEPLACEMENT_NOEUD_MIN_M
+      if (poignee.role === 'noeud' && immobile) onClic?.({ type: 'noeud', code: poignee.code, position })
+      else onDeplacer(poignee, position)
+    }
     if (glisse?.type === 'connexion' && glisse.cible) onConnecter(glisse.de, glisse.cible)
     setGlisse(null)
   }
@@ -322,6 +310,8 @@ export function CalqueCarrefour(props: Props) {
   if (mode === 'ajuster' || mode === 'connecter') {
     for (const [cle, voie] of voies) {
       const sortante = voie.sens === 'sortante'
+      // Les voies d'un tronçon d'anneau suivent ses nœuds : elles se relient, sans se caler.
+      if (mode === 'ajuster' && voie.troncon) continue
       for (const extremite of [0, 1] as const) {
         if (mode === 'connecter' && extremite === 1) continue
         const poignee: PoigneeModele = { role: 'voie', cle, sens: voie.sens, extremite }
@@ -355,34 +345,6 @@ export function CalqueCarrefour(props: Props) {
         })
       }
     }
-    if (mode === 'ajuster' && apercu.anneau) {
-      const { centre, rayon_m } = apercu.anneau
-      const bord = repereLocal(centre).versLonLat([rayon_m * Math.SQRT1_2, rayon_m * Math.SQRT1_2]) // au nord-est
-      const enCours = (point: 'centre' | 'bord') =>
-        glisse?.type === 'poignee' && glisse.poignee.role === 'anneau' && glisse.poignee.point === point
-      poignees.push(
-        {
-          cle: 'anneau-centre',
-          centre: px(centre),
-          rayon: 7,
-          couleur: COULEUR_ANNEAU,
-          vide: false,
-          etat: enCours('centre') ? 'active' : 'normale',
-          titre: 'Centre de l’îlot : glisser pour caler l’anneau sur la photo',
-          gestes: gestes({ role: 'anneau', point: 'centre' }, centre),
-        },
-        {
-          cle: 'anneau-bord',
-          centre: px(bord),
-          rayon: 6,
-          couleur: COULEUR_ANNEAU,
-          vide: false,
-          etat: enCours('bord') ? 'active' : 'normale',
-          titre: `Bord extérieur de l’anneau (${rayon_m} m) : glisser pour régler le rayon`,
-          gestes: gestes({ role: 'anneau', point: 'bord' }, bord),
-        },
-      )
-    }
     if (mode === 'ajuster') {
       for (const b of apercu.branches) {
         if (!b.traversee) continue
@@ -400,6 +362,22 @@ export function CalqueCarrefour(props: Props) {
           })
         }
       }
+    }
+  }
+
+  if (mode === 'noeud' && apercu.anneau) {
+    for (const noeud of apercu.anneau.noeuds) {
+      const enCours = glisse?.type === 'poignee' && glisse.poignee.role === 'noeud' && glisse.poignee.code === noeud.code
+      poignees.push({
+        cle: `noeud-${noeud.code}`,
+        centre: px(enCours ? glisse.position : noeud.position),
+        rayon: 9,
+        couleur: COULEUR_NOEUD,
+        vide: false,
+        etat: enCours ? 'active' : 'normale',
+        titre: `Nœud ${noeud.code} : glisser pour le caler sur la photo, cliquer pour ses réglages`,
+        gestes: gestes({ role: 'noeud', code: noeud.code }, noeud.position),
+      })
     }
   }
 
@@ -433,14 +411,6 @@ export function CalqueCarrefour(props: Props) {
     return [px([ouest, nord]), px([est, nord]), px([est, sud]), px([ouest, sud])] as [XY, XY, XY, XY]
   })()
 
-  // Giratoire : chaussée annulaire, et feux d'anneau en travers de la chaussée, code côté îlot.
-  const contour = apercu.anneau ? contourAnneau(apercu.anneau) : null
-  const surAnneau = (azimut: number, rayon: number): XY => {
-    const a = (azimut * Math.PI) / 180
-    return px(repereLocal(apercu.anneau!.centre).versLonLat([rayon * Math.sin(a), rayon * Math.cos(a)]))
-  }
-  const rayonIlot = apercu.anneau ? Math.max(apercu.anneau.rayon_m - apercu.anneau.voies * LARGEUR_VOIE_REELLE_M, 0.5) : 0
-
   const depart = glisse?.type === 'connexion' ? voies.get(glisse.de) : undefined
   const cible = cibleEnCours ? voies.get(cibleEnCours) : undefined
 
@@ -448,7 +418,17 @@ export function CalqueCarrefour(props: Props) {
     <svg ref={refSvg} className={`calque-carrefour ${mode ?? 'lecture'}`} aria-label="Configuration du carrefour">
       {coinsCadre && cadrePhoto && <CadrePhoto coins={coinsCadre} libelle={cadrePhoto.libelle} />}
 
-      {contour && <AnneauGiratoire exterieur={contour.exterieur.map(px)} ilot={contour.ilot.map(px)} />}
+      {apercu.branches.map(
+        (b) =>
+          b.troncon &&
+          b.geom && (
+            <TronconAnneau
+              key={`troncon-${b.code}`}
+              trace={b.geom.map(px)}
+              largeur={(Math.max(voiesDe(b, 'sortante').length, 1) * 3.25) / metresParPixel}
+            />
+          ),
+      )}
 
       {apercu.branches.map(
         (b) => b.traversee && (
@@ -481,17 +461,11 @@ export function CalqueCarrefour(props: Props) {
         const sortie = voies.get(c.vers)
         if (!entree || !sortie) return null
         const cle = cleConnexion(c)
-        const parAnneau = apercu.anneau && !traverseIlot(entree.type, sortie.type)
         return (
           <Courbe
             key={cle}
             entree={segmentPx(entree.geom)}
             sortie={segmentPx(sortie.geom)}
-            points={
-              parAnneau
-                ? courbeGiratoire(entree.geom, sortie.geom, apercu.anneau!, voiesRaccordees(c, voies.keys(), apercu.anneau!)).map(px)
-                : undefined
-            }
             couleur={couleurs.get(c.de) ?? '#ffffff'}
             etat={etatCourbe(cle)}
             feu={feux ? (feux.connexions.get(cle) ?? 'libre') : undefined}
@@ -507,19 +481,6 @@ export function CalqueCarrefour(props: Props) {
           />
         )
       })}
-
-      {apercu.anneau &&
-        feuxAnneau.map((f) => (
-          <FeuAnneau
-            key={`anneau-${f.code}`}
-            de={surAnneau(f.azimut, rayonIlot)}
-            a={surAnneau(f.azimut, apercu.anneau!.rayon_m)}
-            etiquette={surAnneau(f.azimut, Math.max(rayonIlot - 3, rayonIlot / 2))}
-            code={f.code}
-            feu={f.etat ?? undefined}
-            surligne={f.surligne}
-          />
-        ))}
 
       {glisse?.type === 'connexion' && depart && (
         <Elastique depart={px(depart.geom[0])} arrivee={cible ? px(cible.geom[0]) : px(glisse.position)} valide={cible !== undefined} />
@@ -537,16 +498,32 @@ export function CalqueCarrefour(props: Props) {
           )
         })}
 
+      {apercu.anneau &&
+        mode !== 'noeud' &&
+        apercu.anneau.noeuds.map((noeud) => (
+          <NoeudAnneau
+            key={`noeud-${noeud.code}`}
+            centre={px(noeud.position)}
+            code={noeud.code}
+            onClic={cliquable && onClic ? (e) => onClic({ type: 'noeud', code: noeud.code, position: positionClic(e) }) : undefined}
+          />
+        ))}
+
       {apercu.branches.map((b) => {
-        const bout = b.geom?.at(-1) ?? voiesDe(b, 'entrante')[0]?.geom[1] ?? voiesDe(b, 'sortante')[0]?.geom[1]
+        // Tronçon d'anneau : son code à mi-chemin entre ses deux nœuds.
+        const bout = b.troncon
+          ? b.geom?.[Math.floor(b.geom.length / 2)]
+          : (b.geom?.at(-1) ?? voiesDe(b, 'entrante')[0]?.geom[1] ?? voiesDe(b, 'sortante')[0]?.geom[1])
         return (
           bout && (
             <Etiquette
               key={`code-${b.code}`}
-              classe="calque-code"
+              classe={b.troncon ? 'calque-code troncon' : 'calque-code'}
               position={px(bout)}
-              titre={cliquable ? `${b.code} · ${b.nom ?? 'branche'}` : undefined}
-              onClic={cliquable && onClic ? (e) => onClic({ type: 'branche', code: b.code, position: positionClic(e) }) : undefined}
+              titre={b.troncon ? `Tronçon d’anneau ${b.code}` : cliquable ? `${b.code} · ${b.nom ?? 'branche'}` : undefined}
+              onClic={
+                cliquable && onClic && !b.troncon ? (e) => onClic({ type: 'branche', code: b.code, position: positionClic(e) }) : undefined
+              }
             >
               {b.code}
             </Etiquette>

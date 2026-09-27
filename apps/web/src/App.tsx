@@ -109,7 +109,6 @@ function App() {
     branches: [],
     connexions: [],
     anneau: null,
-    feuxAnneau: [],
     mode: null,
     feuxSurlignes: [],
     connexionsSurlignees: [],
@@ -408,7 +407,7 @@ function App() {
               }
             }
             onClicFeuConfiguration={(feu, position) => panneauConfiguration.current?.clicFeu(feu, position)}
-            onClicCarteConfiguration={() => panneauConfiguration.current?.clicCarte()}
+            onClicCarteConfiguration={(position) => panneauConfiguration.current?.clicCarte(position)}
             onClicCalque={(clic) => panneauConfiguration.current?.clicCalque(clic)}
             onCiblePopup={setCiblePopup}
             onMenuContextuel={setPointMenu}

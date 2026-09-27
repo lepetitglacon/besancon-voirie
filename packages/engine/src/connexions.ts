@@ -3,6 +3,7 @@
  * voie sortante. Flèches et mouvements s'en déduisent — docs/CONFIGURATION.md §3.
  */
 import { directionMouvement, type Direction } from './branches.js';
+import { repereLocal, type Segment } from './geometrie.js';
 
 export type SensVoie = 'entrante' | 'sortante';
 
@@ -34,25 +35,48 @@ export interface MouvementDeduit {
   voies: number[];
 }
 
-/** Mouvements (branche d'origine → branche de destination) déduits des connexions. */
+/** Azimut d'une voie, de son bout côté carrefour vers son bout éloigné (°). */
+export function azimutSegment(segment: Segment): number {
+  const [x, y] = repereLocal(segment[0]).versXY(segment[1]);
+  return ((Math.atan2(x, y) * 180) / Math.PI + 360) % 360;
+}
+
+/** Direction d'une connexion : d'après ses voies si leurs azimuts sont donnés, sinon d'après ses branches. */
+function directionConnexion(
+  connexion: Connexion,
+  azimuts: ReadonlyMap<string, number>,
+  azimutsVoies: ReadonlyMap<string, number>,
+): Direction | null {
+  const de = lireCleVoie(connexion.de);
+  const vers = lireCleVoie(connexion.vers);
+  if (!de || !vers) return null;
+  const entree = azimutsVoies.get(connexion.de) ?? azimuts.get(de.branche);
+  const sortie = azimutsVoies.get(connexion.vers) ?? azimuts.get(vers.branche);
+  if (entree === undefined || sortie === undefined) return null;
+  return directionMouvement(entree, sortie, de.branche === vers.branche);
+}
+
+/**
+ * Mouvements (branche d'origine → branche de destination) déduits des connexions.
+ * `azimutsVoies` : azimuts des voies de giratoire (voir `azimutsVoiesGiratoire`).
+ */
 export function mouvementsDepuisConnexions(
   branches: ReadonlyArray<{ code: string; azimut: number }>,
   connexions: readonly Connexion[],
+  azimutsVoies: ReadonlyMap<string, number> = new Map(),
 ): MouvementDeduit[] {
   const azimuts = new Map(branches.map((b) => [b.code, b.azimut]));
   const parCle = new Map<string, MouvementDeduit>();
   for (const connexion of connexions) {
     const de = lireCleVoie(connexion.de);
     const vers = lireCleVoie(connexion.vers);
-    if (!de || !vers) continue;
-    const azimutEntree = azimuts.get(de.branche);
-    const azimutSortie = azimuts.get(vers.branche);
-    if (azimutEntree === undefined || azimutSortie === undefined) continue;
+    const direction = directionConnexion(connexion, azimuts, azimutsVoies);
+    if (!de || !vers || !direction) continue;
     const cle = `${de.branche}>${vers.branche}`;
     const mouvement = parCle.get(cle) ?? {
       origine: de.branche,
       destination: vers.branche,
-      direction: directionMouvement(azimutEntree, azimutSortie, de.branche === vers.branche),
+      direction,
       voies: [],
     };
     if (!mouvement.voies.includes(de.rang)) mouvement.voies.push(de.rang);
@@ -67,16 +91,13 @@ export function mouvementsDepuisConnexions(
 export function flechesParVoie(
   branches: ReadonlyArray<{ code: string; azimut: number }>,
   connexions: readonly Connexion[],
+  azimutsVoies: ReadonlyMap<string, number> = new Map(),
 ): Record<string, Direction[]> {
   const azimuts = new Map(branches.map((b) => [b.code, b.azimut]));
   const fleches: Record<string, Direction[]> = {};
   for (const connexion of connexions) {
-    const de = lireCleVoie(connexion.de);
-    const vers = lireCleVoie(connexion.vers);
-    const a = de && azimuts.get(de.branche);
-    const b = vers && azimuts.get(vers.branche);
-    if (!de || !vers || a === undefined || b === undefined || a === null || b === null) continue;
-    const direction = directionMouvement(a, b, de.branche === vers.branche);
+    const direction = directionConnexion(connexion, azimuts, azimutsVoies);
+    if (!direction) continue;
     const liste = (fleches[connexion.de] ??= []);
     if (!liste.includes(direction)) liste.push(direction);
   }

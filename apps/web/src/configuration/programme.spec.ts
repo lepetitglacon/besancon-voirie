@@ -108,8 +108,8 @@ describe('graphe des étapes', () => {
 describe('lecture du programme sur la carte', () => {
   it('colore chaque connexion d’après la ligne qui commande son mouvement, et chaque passage piéton', () => {
     const lignes: LigneFeux[] = [
-      { code: 'F1', signal: 'R11v', mouvements: ['S>N'], traverse: null, anneau: null, feux: [] },
-      { code: 'P1', signal: 'R12', mouvements: [], traverse: 'E', anneau: null, feux: [] },
+      { code: 'F1', signal: 'R11v', mouvements: ['S>N'], traverse: null, feux: [] },
+      { code: 'P1', signal: 'R12', mouvements: [], traverse: 'E', feux: [] },
     ]
     const feux = feuxDesLignes(
       new Map([

@@ -78,51 +78,35 @@ body {
   opacity: 0.6;
 }
 
-/* Giratoire : chaussée annulaire et îlot, sous les voies et les trajectoires. */
-.calque-anneau .chaussee {
-  fill: rgba(56, 189, 248, 0.12);
-  stroke: #38bdf8;
-  stroke-width: 1.5;
-  stroke-dasharray: 6 4;
-}
-
-.calque-anneau .ilot {
-  fill: rgba(31, 138, 76, 0.18);
-  stroke: none;
-}
-
-/* Feu d'anneau : barre en travers de l'anneau, code côté îlot. */
-.calque-feu-anneau .barre {
+/* Giratoire : tronçons d'anneau entre les nœuds, sous les voies et les liaisons. */
+.calque-troncon {
   fill: none;
-  stroke: #9ca3af;
-  stroke-width: 5;
+  stroke: rgba(56, 189, 248, 0.22);
   stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.calque-feu-anneau text {
-  font-size: 11px;
+.calque-noeud circle {
+  fill: #0c4a6e;
+  stroke: #38bdf8;
+  stroke-width: 2;
+}
+
+.calque-noeud text {
+  font-size: 10px;
   font-weight: 700;
   fill: #ffffff;
-  paint-order: stroke;
-  stroke: rgba(0, 0, 0, 0.7);
-  stroke-width: 3px;
+  pointer-events: none;
 }
 
-.calque-feu-anneau.surligne .barre {
-  stroke: var(--chakra-colors-brand-solid);
-  stroke-width: 7;
+.calque-noeud.interactive {
+  pointer-events: all;
+  cursor: pointer;
 }
 
-.calque-feu-anneau.feu-vert .barre {
-  stroke: var(--chakra-colors-feu-vert);
-}
-
-.calque-feu-anneau.feu-jaune .barre {
-  stroke: var(--chakra-colors-feu-orange);
-}
-
-.calque-feu-anneau.feu-rouge .barre {
-  stroke: var(--chakra-colors-feu-rouge);
+.calque-code.troncon {
+  font-size: 10px;
+  opacity: 0.75;
 }
 
 .calque-courbe .trace {

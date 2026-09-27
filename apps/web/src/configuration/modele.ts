@@ -3,11 +3,16 @@
  * et opérations d'édition, sans effet de bord.
  */
 import {
+  azimutSegment,
+  branchesTroncons,
   cleVoie,
-  distanceArretGiratoire,
+  codeNoeudLibre,
+  distanceArretNoeud,
   genererVoies,
-  RAYON_ANNEAU_DEFAUT_M,
-  repereLocal,
+  insererNoeud,
+  NOEUDS_MIN,
+  noeudDeVoie,
+  proposerLiaisonsNoeuds,
   voieAdjacente,
   type LonLat,
   type Segment,
@@ -21,22 +26,24 @@ export interface Brouillon {
   anneau: Anneau | null
 }
 
-/** Poignée déplaçable sur la carte : extrémité d'une voie ou d'un passage piéton, centre ou bord de l'anneau. */
+/** Poignée déplaçable sur la carte : extrémité d'une voie ou d'un passage piéton, nœud d'anneau. */
 export type Poignee =
   | { role: 'voie'; cle: string; sens: SensVoie; extremite: 0 | 1 }
   | { role: 'traversee'; branche: string; extremite: 0 | 1 }
-  | { role: 'anneau'; point: 'centre' | 'bord' }
-
-/** Bornes du rayon extérieur d'un anneau (m), comme le schéma. */
-const RAYON_ANNEAU_MIN_M = 4
-const RAYON_ANNEAU_MAX_M = 150
+  | { role: 'noeud'; code: string }
 
 /**
  * Où générer les voies d'une branche : depuis le centre du carrefour, ligne d'arrêt à 15 m ;
- * dans un giratoire, depuis le centre de l'îlot, ligne d'arrêt au bord de l'anneau.
+ * pour une rue de giratoire, depuis son nœud, ligne d'arrêt au bord de l'anneau.
  */
-function origineVoies(brouillon: Brouillon, centre: LonLat): { centre: LonLat; distanceArret?: number } {
-  return brouillon.anneau ? { centre: brouillon.anneau.centre, distanceArret: distanceArretGiratoire(brouillon.anneau) } : { centre }
+function origineVoies(brouillon: Brouillon, branche: Branche, centre: LonLat): { centre: LonLat; azimut: number; distanceArret?: number } {
+  const noeud = !branche.troncon && brouillon.anneau?.noeuds.find((n) => n.code === branche.noeud)
+  if (!noeud) return { centre, azimut: branche.azimut }
+  // Axe : du nœud vers le bout de la rue (son axe OSM, ou ses voies), à défaut son azimut.
+  const bout = branche.geom?.at(-1) ?? branche.voies[0]?.geom[1]
+  const azimut = bout ? azimutSegment([noeud.position, bout]) : branche.azimut
+  const voiesAnneau = Math.max(1, ...brouillon.branches.filter((b) => b.troncon).map((b) => voiesDe(b, 'sortante').length))
+  return { centre: noeud.position, azimut, distanceArret: distanceArretNoeud(voiesAnneau) }
 }
 
 export const voiesDe = (branche: Branche, sens: SensVoie) =>
@@ -52,11 +59,11 @@ const sansVoie = (connexions: Connexion[], cle: string) => connexions.filter((c)
 
 /** Ajoute une voie à côté de la dernière du même sens, sans toucher aux voies déjà calées. */
 export function ajouterVoie(brouillon: Brouillon, code: string, sens: SensVoie, centre: LonLat): Brouillon {
-  const origine = origineVoies(brouillon, centre)
   return surBranche(brouillon, code, (b) => {
+    const origine = origineVoies(brouillon, b, centre)
     const existantes = voiesDe(b, sens)
     const derniere = existantes.at(-1)
-    const generees = genererVoies(origine.centre, b.azimut, sens === 'entrante' ? 1 : 0, sens === 'sortante' ? 1 : 0, origine.distanceArret)
+    const generees = genererVoies(origine.centre, origine.azimut, sens === 'entrante' ? 1 : 0, sens === 'sortante' ? 1 : 0, origine.distanceArret)
     const geom: Segment = derniere
       ? voieAdjacente(derniere.geom, sens === 'entrante' ? 'gauche' : 'droite')
       : (sens === 'entrante' ? generees.entrantes : generees.sortantes)[0]!
@@ -109,15 +116,12 @@ export function basculerConnexion(brouillon: Brouillon, de: string, vers: string
   }
 }
 
-/** Déplace l'extrémité d'une voie ou d'un passage piéton, le centre ou le bord de l'anneau (calage sur la photo). */
+/** Déplace l'extrémité d'une voie ou d'un passage piéton, ou un nœud d'anneau (calage sur la photo). */
 export function deplacerPoignee(brouillon: Brouillon, poignee: Poignee, position: LonLat): Brouillon {
-  if (poignee.role === 'anneau') {
+  if (poignee.role === 'noeud') {
     const { anneau } = brouillon
     if (!anneau) return brouillon
-    if (poignee.point === 'centre') return { ...brouillon, anneau: { ...anneau, centre: position } }
-    const rayon = Math.hypot(...repereLocal(anneau.centre).versXY(position))
-    const rayon_m = Math.round(Math.min(Math.max(rayon, RAYON_ANNEAU_MIN_M), RAYON_ANNEAU_MAX_M) * 10) / 10
-    return { ...brouillon, anneau: { ...anneau, rayon_m } }
+    return appliquerAnneau(brouillon, { noeuds: anneau.noeuds.map((n) => (n.code === poignee.code ? { ...n, position } : n)) })
   }
   const remplacer = (segment: Segment): Segment =>
     poignee.extremite === 0 ? [position, segment[1]] : [segment[0], position]
@@ -133,20 +137,24 @@ export function deplacerPoignee(brouillon: Brouillon, poignee: Poignee, position
 
 /** Ajoute un passage piéton proposé en travers de la branche, ou le retire. */
 export function basculerTraversee(brouillon: Brouillon, code: string, centre: LonLat): Brouillon {
-  const origine = origineVoies(brouillon, centre)
-  return surBranche(brouillon, code, (b) => ({
-    ...b,
-    traversee: b.traversee
-      ? null
-      : genererVoies(origine.centre, b.azimut, nombre(b, 'entrante'), nombre(b, 'sortante'), origine.distanceArret).traversee,
-  }))
+  return surBranche(brouillon, code, (b) => {
+    if (b.troncon) return b
+    const origine = origineVoies(brouillon, b, centre)
+    return {
+      ...b,
+      traversee: b.traversee
+        ? null
+        : genererVoies(origine.centre, origine.azimut, nombre(b, 'entrante'), nombre(b, 'sortante'), origine.distanceArret).traversee,
+    }
+  })
 }
 
 /** Replace les voies (et le passage piéton) de la branche à leur position proposée. */
 export function regenererVoies(brouillon: Brouillon, code: string, centre: LonLat): Brouillon {
-  const origine = origineVoies(brouillon, centre)
   return surBranche(brouillon, code, (b) => {
-    const generees = genererVoies(origine.centre, b.azimut, nombre(b, 'entrante'), nombre(b, 'sortante'), origine.distanceArret)
+    if (b.troncon) return b
+    const origine = origineVoies(brouillon, b, centre)
+    const generees = genererVoies(origine.centre, origine.azimut, nombre(b, 'entrante'), nombre(b, 'sortante'), origine.distanceArret)
     return {
       ...b,
       voies: b.voies.map((v) => ({ ...v, geom: (v.sens === 'entrante' ? generees.entrantes : generees.sortantes)[v.rang]! })),
@@ -155,20 +163,121 @@ export function regenererVoies(brouillon: Brouillon, code: string, centre: LonLa
   })
 }
 
-/** Dessine un anneau proposé, centré sur le carrefour, à caler ensuite sur la photo. */
-export const creerAnneau = (brouillon: Brouillon, centre: LonLat): Brouillon => ({
-  ...brouillon,
-  anneau: { centre, rayon_m: RAYON_ANNEAU_DEFAUT_M, voies: 1 },
-})
+// ── Giratoire : nœuds et tronçons d'anneau (docs/CONFIGURATION.md §7) ──
 
-export const retirerAnneau = (brouillon: Brouillon): Brouillon => ({
-  ...brouillon,
-  anneau: null,
-  branches: brouillon.branches.map((b) => ({ ...b, priorite_entree: null })),
-})
+type AnneauBrouillon = Brouillon['anneau'] & {}
 
-export const changerVoiesAnneau = (brouillon: Brouillon, voies: number): Brouillon =>
-  brouillon.anneau ? { ...brouillon, anneau: { ...brouillon.anneau, voies } } : brouillon
+/** Nombre de voies de chaque tronçon d'anneau (code → voies). */
+const voiesTroncons = (brouillon: Brouillon) =>
+  new Map(brouillon.branches.filter((b) => b.troncon).map((b) => [b.code, Math.max(voiesDe(b, 'sortante').length, 1)]))
+
+/**
+ * Recalcule les tronçons d'anneau d'après les nœuds (en gardant leur nombre de voies), et ne
+ * garde que les liaisons encore valides : voies existantes, au même nœud. `renommer` : clés de
+ * voie à réécrire d'abord (un tronçon qui change de nœud de départ change de code).
+ */
+function appliquerAnneau(
+  brouillon: Brouillon,
+  anneau: AnneauBrouillon | null,
+  voies: ReadonlyMap<string, number> = voiesTroncons(brouillon),
+  renommer: (cle: string) => string = (cle) => cle,
+): Brouillon {
+  const codes = new Set(anneau?.noeuds.map((n) => n.code))
+  const rues = brouillon.branches
+    .filter((b) => !b.troncon)
+    .map((b) => (b.noeud && !codes.has(b.noeud) ? { ...b, noeud: null } : b))
+    .map((b) => (anneau ? b : { ...b, priorite_entree: null }))
+  const troncons = anneau && anneau.noeuds.length >= NOEUDS_MIN ? branchesTroncons(anneau, voies) : []
+  const branches: Branche[] = [...rues, ...troncons]
+  const cles = new Set(branches.flatMap((b) => b.voies.map((v) => cleVoie(b.code, v.sens, v.rang))))
+  const vues = new Set<string>()
+  const connexions = brouillon.connexions
+    .map((c) => ({ de: renommer(c.de), vers: renommer(c.vers) }))
+    .filter((c) => cles.has(c.de) && cles.has(c.vers))
+    .filter((c) => !anneau || troncons.length === 0 || noeudDeVoie(c.de, branches, anneau) === noeudDeVoie(c.vers, branches, anneau))
+    .filter((c) => !vues.has(`${c.de}>${c.vers}`) && vues.add(`${c.de}>${c.vers}`))
+  return { branches, connexions, anneau }
+}
+
+/** Ajoute les liaisons par défaut d'un nœud (continuer, sortir, s'insérer) qui manquent. */
+function completerLiaisons(brouillon: Brouillon, noeud: string, rue?: string): Brouillon {
+  const { anneau } = brouillon
+  if (!anneau) return brouillon
+  const existantes = new Set(brouillon.connexions.map((c) => `${c.de}>${c.vers}`))
+  const nouvelles = proposerLiaisonsNoeuds(brouillon.branches, anneau).filter(
+    (c) =>
+      noeudDeVoie(c.de, brouillon.branches, anneau) === noeud &&
+      (!rue || c.de.startsWith(`${rue}:`) || c.vers.startsWith(`${rue}:`)) &&
+      !existantes.has(`${c.de}>${c.vers}`),
+  )
+  return { ...brouillon, connexions: [...brouillon.connexions, ...nouvelles] }
+}
+
+/**
+ * Pose un nœud d'anneau : il s'insère dans la boucle là où il l'allonge le moins. Le tronçon
+ * qu'il coupe en deux garde ses liaisons au départ ; celles de l'arrivée passent au nouveau
+ * tronçon, et le nouveau nœud reçoit les liaisons par défaut.
+ */
+export function poserNoeud(brouillon: Brouillon, position: LonLat): Brouillon {
+  const avant = brouillon.anneau ?? { noeuds: [] }
+  const code = codeNoeudLibre(avant)
+  const apres = { noeuds: [...insererNoeud(avant, { code, position }).noeuds] }
+  const index = apres.noeuds.findIndex((n) => n.code === code)
+  const precedent = apres.noeuds[(index - 1 + apres.noeuds.length) % apres.noeuds.length]!
+  const voies = new Map(voiesTroncons(brouillon))
+  voies.set(`R${code}`, voies.get(`R${precedent.code}`) ?? 1)
+  const coupe = avant.noeuds.length >= NOEUDS_MIN
+  const suivant = appliquerAnneau(brouillon, apres, voies, (cle) =>
+    coupe && cle.startsWith(`R${precedent.code}:e`) ? `R${code}${cle.slice(`R${precedent.code}`.length)}` : cle,
+  )
+  // La boucle se ferme au troisième nœud : chaque nœud reçoit ses liaisons ; ensuite, seul le nouveau.
+  if (avant.noeuds.length === NOEUDS_MIN - 1) return apres.noeuds.reduce((b, n) => completerLiaisons(b, n.code), suivant)
+  return coupe ? completerLiaisons(suivant, code) : suivant
+}
+
+/**
+ * Retire un nœud : le tronçon qui y arrivait va jusqu'au nœud suivant et reprend les liaisons
+ * de celui qui en partait ; les rues raccordées au nœud ne le sont plus.
+ */
+export function supprimerNoeud(brouillon: Brouillon, code: string): Brouillon {
+  const { anneau } = brouillon
+  if (!anneau) return brouillon
+  const index = anneau.noeuds.findIndex((n) => n.code === code)
+  if (index < 0) return brouillon
+  const precedent = anneau.noeuds[(index - 1 + anneau.noeuds.length) % anneau.noeuds.length]!
+  const reste = { noeuds: anneau.noeuds.filter((n) => n.code !== code) }
+  // Les liaisons au nœud retiré partent avec lui : sans renommage, leurs voies n'existent plus.
+  const sansNoeud = {
+    ...brouillon,
+    connexions: brouillon.connexions.filter((c) => noeudDeVoie(c.de, brouillon.branches, anneau) !== code),
+  }
+  return appliquerAnneau(sansNoeud, reste, voiesTroncons(brouillon), (cle) =>
+    cle.startsWith(`R${code}:e`) ? `R${precedent.code}${cle.slice(`R${code}`.length)}` : cle,
+  )
+}
+
+/** Retire l'anneau : il n'y a plus de nœuds ni de tronçons, les rues ne sont plus raccordées. */
+export const retirerAnneau = (brouillon: Brouillon): Brouillon => appliquerAnneau(brouillon, null)
+
+/** Nombre de voies du tronçon d'anneau qui part d'un nœud. */
+export function changerVoiesTroncon(brouillon: Brouillon, code: string, voies: number): Brouillon {
+  if (!brouillon.anneau) return brouillon
+  return appliquerAnneau(brouillon, brouillon.anneau, new Map(voiesTroncons(brouillon)).set(code, voies))
+}
+
+/** Raccorde une rue à un nœud (null : à aucun, pour le tram qui traverse l'îlot) et lui propose ses liaisons. */
+export function raccorderBranche(brouillon: Brouillon, code: string, noeud: string | null): Brouillon {
+  const raccordee = appliquerAnneau(surBranche(brouillon, code, (b) => ({ ...b, noeud })), brouillon.anneau)
+  return noeud ? completerLiaisons(raccordee, noeud, code) : raccordee
+}
+
+/** Remplace les liaisons d'un nœud par celles proposées par défaut. */
+export function reproposerLiaisons(brouillon: Brouillon, noeud: string): Brouillon {
+  const { anneau } = brouillon
+  if (!anneau) return brouillon
+  const autres = brouillon.connexions.filter((c) => noeudDeVoie(c.de, brouillon.branches, anneau) !== noeud)
+  return completerLiaisons({ ...brouillon, connexions: autres }, noeud)
+}
 
 /** Régime d'une entrée de giratoire hors feux ; cédez-le-passage, la règle par défaut, s'enregistre comme null. */
 export const changerPrioriteEntree = (brouillon: Brouillon, code: string, priorite: PrioriteEntree): Brouillon =>
