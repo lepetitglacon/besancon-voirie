@@ -22,7 +22,11 @@ export function MenuContextuel({ children, entete, entrees, onChoisir }: Props) 
       <Portal>
         <Menu.Positioner>
           <Menu.Content minW="250px">
-            {entete && <Menu.ItemGroupLabel px="2.5" pt="1.5" pb="2">{entete}</Menu.ItemGroupLabel>}
+            {entete && (
+              <chakra.div px="2.5" pt="1.5" pb="2" fontFamily="mono" textStyle="2xs" color="fg.subtle">
+                {entete}
+              </chakra.div>
+            )}
             {entrees.map((entree, i) =>
               entree.type === 'separateur' ? (
                 <Menu.Separator key={i} />

@@ -7,7 +7,7 @@
  */
 import { cleVoie, flechesParVoie, repereLocal, type LonLat, type XY } from '@voirie/engine'
 import type { Branche, Connexion, TypeFeu } from '@voirie/schema'
-import { useEffect, useMemo, useState, type PointerEvent } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent, type PointerEvent } from 'react'
 import { FLECHES } from '../libelles'
 import { couleursVoies, deplacerPoignee, voiesDe, type Poignee as PoigneeModele } from '../modele'
 import {
@@ -25,7 +25,17 @@ import {
 } from './elements'
 import { useProjection } from './projection'
 
-export type ModeEdition = 'ajuster' | 'connecter' | 'feux'
+/**
+ * Outil actif sur le calque : « selection » ouvre la popup de l'élément cliqué, « pieton » ajoute
+ * ou retire le passage piéton de la branche cliquée ; les autres déplacent des poignées.
+ */
+export type ModeEdition = 'selection' | 'ajuster' | 'connecter' | 'feux' | 'pieton'
+
+/** Élément du calque cliqué, avec la position du clic (pour y ancrer une popup). */
+export type ClicCalque =
+  | { type: 'voie'; cle: string; position: LonLat }
+  | { type: 'connexion'; de: string; vers: string; position: LonLat }
+  | { type: 'branche'; code: string; position: LonLat }
 
 /** Feu du carrefour, déplaçable en mode « feux » pour le poser sur son mât. */
 export interface FeuPlacable {
@@ -46,7 +56,7 @@ export interface ApercuFeu {
 interface Props {
   branches: Branche[]
   connexions: Connexion[]
-  /** null : dessin seul (onglet des lignes), sans poignées. */
+  /** null : dessin seul, sans poignées ni clics. */
   mode: ModeEdition | null
   /** Connexions à mettre en avant (« de>vers »), par exemple celles de la ligne de feux active. */
   surlignees?: ReadonlySet<string>
@@ -60,6 +70,10 @@ interface Props {
   /** Pose le feu (ou le remet à sa position OSM : null) ; l'aperçu reste jusqu'à la fin de la promesse. */
   onPlacerFeu: (id: string, position: LonLat | null) => Promise<void>
   onApercuFeu: (apercu: ApercuFeu | null) => void
+  /** Clic sur une voie, une connexion ou le code d'une branche (outils « selection » et « pieton »). */
+  onClic?: (clic: ClicCalque) => void
+  /** Élément sélectionné, mis en avant (clé de voie, « de>vers » ou code de branche). */
+  selection?: string | null
 }
 
 /** Part de la largeur réelle (3,25 m) occupée par le dessin d'une voie. */
@@ -86,7 +100,7 @@ const cleConnexion = (c: Connexion) => `${c.de}>${c.vers}`
 const symboles = new Map(FLECHES.map((f) => [f.direction, f.symbole]))
 
 export function CalqueCarrefour(props: Props) {
-  const { branches, connexions, mode, surlignees, feux, onDeplacer, onConnecter, feuxPlacables, onPlacerFeu, onApercuFeu } =
+  const { branches, connexions, mode, surlignees, feux, onDeplacer, onConnecter, feuxPlacables, onPlacerFeu, onApercuFeu, onClic, selection } =
     props
   const projection = useProjection()
   const [survol, setSurvol] = useState<Survol>(null)
@@ -138,6 +152,7 @@ export function CalqueCarrefour(props: Props) {
 
   const etatVoie = (cle: string, sortante: boolean): EtatVoie => {
     if (glisse?.type === 'connexion' && sortante) return cle === cibleEnCours ? 'cible' : 'cible-possible'
+    if (selection === cle) return 'survolee'
     if (survol?.type === 'voie' && survol.cle === cle) return 'survolee'
     if (voiesLiees.has(cle)) return 'liee'
     if (survol && !voiesLiees.has(cle)) return 'estompee'
@@ -148,6 +163,8 @@ export function CalqueCarrefour(props: Props) {
     if (survol?.type === 'connexion' && survol.cle === cle) return mode === 'connecter' ? 'a-retirer' : 'survolee'
     if (courbesLiees.has(cle)) return 'survolee'
     if (survol) return 'estompee'
+    // Une connexion sélectionnée : les autres s'estompent (maquette, « clic sur une liaison »).
+    if (selection?.includes('>')) return selection === cle ? 'surlignee' : 'estompee'
     if (surlignees?.size) return surlignees.has(cle) ? 'surlignee' : 'estompee'
     return 'normale'
   }
@@ -155,6 +172,12 @@ export function CalqueCarrefour(props: Props) {
   // ── Glisser-déposer (capture du pointeur sur la poignée) ──
   const positionPointeur = (e: PointerEvent<SVGElement>): LonLat => {
     const cadre = e.currentTarget.ownerSVGElement!.getBoundingClientRect()
+    return lonLat(e.clientX - cadre.left, e.clientY - cadre.top)
+  }
+
+  const cliquable = mode === 'selection' || mode === 'pieton'
+  const positionClic = (e: MouseEvent<SVGElement>): LonLat => {
+    const cadre = (e.currentTarget.ownerSVGElement ?? e.currentTarget).getBoundingClientRect()
     return lonLat(e.clientX - cadre.left, e.clientY - cadre.top)
   }
 
@@ -316,6 +339,7 @@ export function CalqueCarrefour(props: Props) {
           interactive={mode !== null}
           titre={`${cle} · voie ${voie.sens} ${voie.rang + 1} (${voie.type})`}
           onSurvol={(actif) => setSurvol(actif ? { type: 'voie', cle } : null)}
+          onClic={cliquable && onClic ? (e) => onClic({ type: 'voie', cle, position: positionClic(e) }) : undefined}
         />
       ))}
 
@@ -334,7 +358,13 @@ export function CalqueCarrefour(props: Props) {
             feu={feux ? (feux.connexions.get(cle) ?? 'libre') : undefined}
             titre={mode === 'connecter' ? `${c.de} → ${c.vers} : cliquer pour retirer` : `${c.de} → ${c.vers}`}
             onSurvol={mode ? (actif) => setSurvol(actif ? { type: 'connexion', cle } : null) : undefined}
-            onClic={mode === 'connecter' ? () => onConnecter(c.de, c.vers) : undefined}
+            onClic={
+              mode === 'connecter'
+                ? () => onConnecter(c.de, c.vers)
+                : mode === 'selection' && onClic
+                  ? (e) => onClic({ type: 'connexion', de: c.de, vers: c.vers, position: positionClic(e) })
+                  : undefined
+            }
           />
         )
       })}
@@ -359,7 +389,13 @@ export function CalqueCarrefour(props: Props) {
         const bout = b.geom?.at(-1) ?? voiesDe(b, 'entrante')[0]?.geom[1] ?? voiesDe(b, 'sortante')[0]?.geom[1]
         return (
           bout && (
-            <Etiquette key={`code-${b.code}`} classe="calque-code" position={px(bout)}>
+            <Etiquette
+              key={`code-${b.code}`}
+              classe="calque-code"
+              position={px(bout)}
+              titre={cliquable ? `${b.code} · ${b.nom ?? 'branche'}` : undefined}
+              onClic={cliquable && onClic ? (e) => onClic({ type: 'branche', code: b.code, position: positionClic(e) }) : undefined}
+            >
               {b.code}
             </Etiquette>
           )

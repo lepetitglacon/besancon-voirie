@@ -10,9 +10,9 @@ import Map, {
   type MapMouseEvent,
   type MapRef,
 } from 'react-map-gl/maplibre'
-import { CalqueCarrefour, type ApercuFeu, type FeuPlacable } from '../configuration/calque/CalqueCarrefour'
+import { CalqueCarrefour, type ApercuFeu, type ClicCalque, type FeuPlacable } from '../configuration/calque/CalqueCarrefour'
 import type { Poignee } from '../configuration/modele'
-import type { AffichageConfiguration } from '../configuration/PanneauConfiguration'
+import type { AffichageConfiguration } from '../configuration/ConfigurationCarrefour'
 import { Aide, BarreOutils, ControleZoom, Pastille, PopupCarte, PopupSurCarte } from '../ds'
 import { coucheCarrefours, coucheFeux } from './couches'
 import { FondDeCarte, type OptionsFond } from './FondDeCarte'
@@ -92,8 +92,16 @@ interface Props {
   onConfigurer: (carrefour: CarrefourResume, position: [number, number]) => void
   /** Carrefour en cours de configuration : voies et connexions dessinées, bulles désactivées. */
   configuration: (AffichageConfiguration & { carrefourId: string; position: [number, number] }) | null
-  /** Clic sur un feu pendant la configuration (choix des feux d'une ligne). */
-  onClicFeuConfiguration: (feu: FeuResume) => void
+  /** Clic sur un feu pendant la configuration : choix des feux d'une ligne, ou popup du feu. */
+  onClicFeuConfiguration: (feu: FeuResume, position: LonLat) => void
+  /** Clic ailleurs pendant la configuration : sur le carrefour configuré (`centre`) ou dans le vide. */
+  onClicCarteConfiguration: (cible: 'centre' | 'vide', position: LonLat) => void
+  /** Clic sur un élément du calque (voie, connexion, code de branche). */
+  onClicCalque: (clic: ClicCalque) => void
+  /** Reçoit l'élément où rendre le contenu de la popup de configuration (portail). */
+  onCiblePopup: (cible: HTMLElement | null) => void
+  /** Clic droit : position, pour le menu contextuel. */
+  onMenuContextuel: (position: LonLat) => void
   /** Glisser-déposer dans l'éditeur de configuration. */
   onDeplacerPoignee: (poignee: Poignee, position: LonLat) => void
   onConnecter: (de: string, vers: string) => void
@@ -105,7 +113,7 @@ interface Props {
 const ZOOM_CONFIGURATION = 18.3
 
 export function CarteCarrefours(props: Props) {
-  const { carrefours, edition, configuration, afficherCarrefours, fond, children } = props
+  const { carrefours, edition, configuration, afficherCarrefours, fond, children, onCiblePopup } = props
   const carte = useRef<MapRef>(null)
 
   // Feux du carrefour configuré, déplaçables ; celui qu'on tire est dessiné à sa nouvelle place.
@@ -184,8 +192,10 @@ export function CarteCarrefours(props: Props) {
     const objet = evenement.features?.[0]
     const { lng: longitude, lat: latitude } = evenement.lngLat
     if (configuration) {
-      if (objet?.layer.id === 'feux') props.onClicFeuConfiguration(objet.properties as FeuResume)
-      return setBulle(undefined)
+      setBulle(undefined)
+      if (objet?.layer.id === 'feux') return props.onClicFeuConfiguration(objet.properties as FeuResume, [longitude, latitude])
+      const centre = objet?.layer.id === 'carrefours' && objet.properties.id === configuration.carrefourId
+      return props.onClicCarteConfiguration(centre ? 'centre' : 'vide', [longitude, latitude])
     }
     if (!objet) return setBulle(undefined)
 
@@ -204,12 +214,14 @@ export function CarteCarrefours(props: Props) {
 
   return (
     <Map
+      id="carte"
       ref={carte}
       initialViewState={VUE_INITIALE}
       mapStyle={STYLE_CARTE}
       style={{ width: '100%', height: '100%' }}
       hash
-      interactiveLayerIds={configuration ? ['feux'] : ['feux', 'carrefours']}
+      attributionControl={{ compact: true }}
+      interactiveLayerIds={['feux', 'carrefours']}
       cursor={traceActif ? 'crosshair' : survol ? 'pointer' : 'grab'}
       dragPan={!traceActif}
       boxZoom={edition === null}
@@ -219,7 +231,12 @@ export function CarteCarrefours(props: Props) {
       onMouseEnter={() => setSurvol(true)}
       onMouseLeave={() => setSurvol(false)}
       onClick={cliquer}
-      onLoad={(evenement) => props.onEmprise(emprise(evenement.target))}
+      onContextMenu={(evenement) => props.onMenuContextuel([evenement.lngLat.lng, evenement.lngLat.lat])}
+      onLoad={(evenement) => {
+        // Attribution repliée (bouton « i ») : dépliée, elle passerait sous la barre d'outils.
+        evenement.target.getContainer().querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show')
+        props.onEmprise(emprise(evenement.target))
+      }}
       onMoveEnd={(evenement) => props.onEmprise(emprise(evenement.target))}
     >
       <ControleZoom position="absolute" top="4" right="4" zIndex="1" />
@@ -268,7 +285,14 @@ export function CarteCarrefours(props: Props) {
           feuxPlacables={feuxPlacables}
           onPlacerFeu={props.onPlacerFeu}
           onApercuFeu={setApercuFeu}
+          onClic={props.onClicCalque}
+          selection={configuration.selection}
         />
+      )}
+      {configuration?.ancre && (
+        <PopupSurCarte longitude={configuration.ancre[0]} latitude={configuration.ancre[1]} closeOnClick={false}>
+          <div ref={onCiblePopup} />
+        </PopupSurCarte>
       )}
 
       {bulle && !edition && !configuration && (
