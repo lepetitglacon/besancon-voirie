@@ -23,9 +23,19 @@ cp .env.example .env
 pnpm install
 pnpm db:up          # PostgreSQL 17 + PostGIS 3.5 + pgRouting 4.0 (port 5433)
 pnpm db:prepare     # bases voirie + voirie_test, extensions, migrations
+pnpm build:packages # compile @voirie/schema et @voirie/engine, requis par osm:import
 pnpm osm:import     # feux, voies et tram depuis OpenStreetMap (Overpass, mis en cache)
 pnpm dev            # packages en watch + API :3000 + web :5173
 ```
+
+Résultat attendu :
+
+- `pnpm db:prepare` se termine par `migrations applied successfully!` ; `pnpm db:verifier`
+  indique alors `0 en attente`. La base `voirie_test` est créée vide, les tests e2e la migrent.
+- `pnpm osm:import` affiche le décompte des signaux, voies, trams et feux importés, et écrit
+  le cache `data/osm/besancon.json` (hors git). Les imports suivants relisent ce cache
+  (`--refresh` pour retélécharger) ; le manager le copie dans chaque nouveau worktree.
+- Aucun carrefour n'existe encore : ils se composent à la main sur la carte.
 
 | Commande | Effet |
 |---|---|
@@ -54,6 +64,9 @@ pour tout le monorepo. Au démarrage d'un worktree, le manager lance
   à installer grâce au store pnpm. Sinon, les liens vers les packages internes pointeraient
   vers le dépôt principal.
 - Bases d'un worktree supprimé : `pnpm db:psql` puis `DROP DATABASE voirie_wt_<worktree>;`.
+- Procédure complète (bases, appels extérieurs, migrations au merge) :
+  [docs/worktrees.md](docs/worktrees.md).
+- Procédure complète (bases, appels extérieurs, migrations au merge) : [docs/worktrees.md](docs/worktrees.md).
 
 Organisation : `apps/web` (React + MapLibre), `apps/api` (NestJS + Drizzle),
 `packages/schema` (zod), `packages/engine` (calcul des feux). Détails dans
