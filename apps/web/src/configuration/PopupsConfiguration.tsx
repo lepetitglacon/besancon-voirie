@@ -499,7 +499,9 @@ interface PropsAnneau {
 /** Anneau d'un giratoire : ses nœuds, posés avec l'outil Nœud ; le retirer. */
 export function ReglageAnneau({ brouillon, onChanger, onOutil }: PropsAnneau) {
   const noeuds = brouillon.anneau?.noeuds.length ?? 0
-  const rues = brouillon.branches.filter((b) => !b.troncon)
+  // Le tram ou un bus en site propre qui traverse l'îlot n'a pas à être raccordé.
+  const sitePropre = (b: Brouillon['branches'][number]) => b.voies.length > 0 && b.voies.every((v) => v.type === 'tram' || v.type === 'bus')
+  const rues = brouillon.branches.filter((b) => !b.troncon && !sitePropre(b))
   const raccordees = rues.filter((b) => b.noeud).length
   return (
     <Section libelle="Anneau">
