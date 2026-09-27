@@ -1,6 +1,6 @@
 /**
  * Popups de la configuration d'un carrefour : un clic sur un élément de la carte (voie, liaison,
- * feu, code de branche, carrefour) ouvre une popup courte ancrée à cet élément.
+ * feu, code de branche) ouvre une popup courte ancrée à cet élément.
  */
 import { Badge, Button, HStack, Input, Stack, Text } from '@chakra-ui/react'
 import {
@@ -24,7 +24,6 @@ import {
   Aide,
   BarreOutils,
   Bascule,
-  Chiffre,
   Compteur,
   LigneConflit,
   Pastille,
@@ -466,87 +465,50 @@ const SOURCES: Record<SourceBranche, { couleur: string; libelle: string }> = {
 }
 const CONFIANCES: Record<ConfianceIa, string> = { haute: 'green', moyenne: 'orange', basse: 'red' }
 
-// ── Carrefour ──
+// ── Anneau d'un giratoire (carte d'en-tête) ──
 
-interface PropsCarrefour {
-  nom: string
-  /** Déclaré giratoire à la composition : l'anneau se dessine ici. */
-  giratoire: boolean
+interface PropsAnneau {
   brouillon: Brouillon
   centre: LonLat
   onChanger: (brouillon: Brouillon) => void
   onOutil: (outil: OutilCarte) => void
-  /** Durée du cycle du plan actif, null sans programme calculé. */
-  cycle: number | null
-  detectionEnCours: boolean
-  onDetecter: () => void
-  /** Une analyse OSM + IA de ce carrefour est déjà en file ou en cours. */
-  iaEnFile: boolean
-  onGenererIa: () => void
-  onPlan: () => void
-  onFermer: () => void
 }
 
-export function PopupCarrefour(props: PropsCarrefour) {
-  const { nom, giratoire, brouillon, centre, onChanger, onOutil, cycle, detectionEnCours, onDetecter, iaEnFile, onGenererIa, onPlan, onFermer } = props
+/** Anneau d'un giratoire : le dessiner, régler ses voies, le caler sur la photo ou le retirer. */
+export function ReglageAnneau({ brouillon, centre, onChanger, onOutil }: PropsAnneau) {
   const { anneau } = brouillon
   return (
-    <PopupCarte
-      titre={nom}
-      soustitre={giratoire ? 'Giratoire à feux' : 'Carrefour à feux'}
-      onFermer={onFermer}
-      pied={
+    <Section libelle="Anneau">
+      {anneau ? (
         <>
-          <BarreOutils.Espace />
-          <Button variant="solid" onClick={onPlan}>
-            Plan de feux (Tab)
-          </Button>
+          <HStack justify="space-between">
+            <Text>Voies sur l’anneau</Text>
+            <Compteur
+              taille="xs"
+              aria-label="Voies sur l’anneau"
+              min={1}
+              max={4}
+              valeur={anneau.voies}
+              onChange={(n) => onChanger(changerVoiesAnneau(brouillon, n ?? 1))}
+            />
+          </HStack>
+          <HStack justify="space-between">
+            <Aide>Rayon extérieur : {anneau.rayon_m} m</Aide>
+            <HStack gap="1">
+              <Button variant="lien" size="xs" onClick={() => onOutil('ajuster')}>
+                Caler (L)
+              </Button>
+              <Button variant="lien" size="xs" colorPalette="red" onClick={() => onChanger(retirerAnneau(brouillon))}>
+                Retirer
+              </Button>
+            </HStack>
+          </HStack>
         </>
-      }
-    >
-      <HStack gap="2">
-        <Chiffre valeur={brouillon.branches.length} libelle="branches" />
-        <Chiffre valeur={brouillon.connexions.length} libelle="liaisons" />
-        <Chiffre valeur={cycle === null ? '—' : `${Math.round(cycle)} s`} libelle="cycle" />
-      </HStack>
-      {(giratoire || anneau) && (
-        <Section libelle="Anneau">
-          {anneau ? (
-            <>
-              <HStack justify="space-between">
-                <Text>Voies sur l’anneau</Text>
-                <Compteur
-                  taille="xs"
-                  aria-label="Voies sur l’anneau"
-                  min={1}
-                  max={4}
-                  valeur={anneau.voies}
-                  onChange={(n) => onChanger(changerVoiesAnneau(brouillon, n ?? 1))}
-                />
-              </HStack>
-              <HStack justify="space-between">
-                <Aide>Rayon extérieur : {anneau.rayon_m} m</Aide>
-                <HStack gap="1">
-                  <Button variant="lien" size="xs" onClick={() => onOutil('ajuster')}>
-                    Caler (L)
-                  </Button>
-                  <Button variant="lien" size="xs" colorPalette="red" onClick={() => onChanger(retirerAnneau(brouillon))}>
-                    Retirer
-                  </Button>
-                </HStack>
-              </HStack>
-            </>
-          ) : (
-            <Button onClick={() => onChanger(creerAnneau(brouillon, centre))}>Dessiner l’anneau</Button>
-          )}
-        </Section>
+      ) : (
+        <Button size="xs" onClick={() => onChanger(creerAnneau(brouillon, centre))}>
+          Dessiner l’anneau
+        </Button>
       )}
-      <Button loading={detectionEnCours} loadingText="Détection…" onClick={onDetecter}>
-        Détecter les branches depuis OSM (O)
-      </Button>
-      <Button disabled={iaEnFile} onClick={onGenererIa} title="La détection OSM, corrigée par Claude d’après la photo aérienne IGN (~1 min, en file d’attente)">
-        {iaEnFile ? '✦ Analyse IA en file…' : '✦ Générer avec OSM + IA (I)'}
-      </Button>
-    </PopupCarte>
+    </Section>
   )
 }

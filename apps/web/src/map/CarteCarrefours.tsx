@@ -1,9 +1,10 @@
-import { Badge, Box, Button, Text } from '@chakra-ui/react'
+import { Badge, Box, Button } from '@chakra-ui/react'
 import type { LonLat } from '@voirie/engine'
 import type { Bbox, CarrefourResume, CarrefoursGeoJson, EmpriseIa, FeuResume, FeuxGeoJson } from '@voirie/schema'
-import type { Map as CarteMapLibre } from 'maplibre-gl'
+import type { Map as CarteMapLibre, MapGeoJSONFeature } from 'maplibre-gl'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Map, {
+  AttributionControl,
   Layer,
   Source,
   type MapLayerMouseEvent,
@@ -13,7 +14,7 @@ import Map, {
 import { CalqueCarrefour, type ApercuFeu, type ClicCalque, type FeuPlacable } from '../configuration/calque/CalqueCarrefour'
 import type { Poignee } from '../configuration/modele'
 import type { AffichageConfiguration } from '../configuration/ConfigurationCarrefour'
-import { Aide, BarreOutils, ControleZoom, Pastille, PopupCarte, PopupSurCarte } from '../ds'
+import { Aide, BarreOutils, ControleZoom, PopupCarte, PopupSurCarte } from '../ds'
 import { coucheCarrefours, coucheFeux } from './couches'
 import { FondDeCarte, type OptionsFond } from './FondDeCarte'
 
@@ -22,20 +23,6 @@ const VUE_INITIALE = { longitude: 6.0241, latitude: 47.2378, zoom: 13.5 }
 
 /** Style vectoriel libre, sans clé d'API. Attribution OSM incluse dans le style. */
 const STYLE_CARTE = 'https://tiles.openfreemap.org/styles/liberty'
-
-const NATURES: Record<CarrefourResume['nature'], string> = {
-  carrefour: 'Carrefour à feux',
-  giratoire: 'Giratoire à feux',
-  traversee_pietonne: 'Traversée piétonne à feux',
-}
-
-const STATUTS: Record<CarrefourResume['statut'], string> = {
-  a_confirmer: 'à confirmer',
-  non_releve: 'non relevée',
-  estime: 'estimée',
-  mesure: 'mesurée',
-  verifie: 'vérifiée',
-}
 
 function emprise(carte: CarteMapLibre): Bbox {
   const limites = carte.getBounds()
@@ -70,9 +57,8 @@ function useMajEnfoncee(): boolean {
   return enfoncee
 }
 
-type Bulle =
-  | { type: 'carrefour'; longitude: number; latitude: number; carrefour: CarrefourResume }
-  | { type: 'feu'; longitude: number; latitude: number; feu: FeuResume }
+/** Popup d'un feu libre (les carrefours s'affichent dans la carte d'en-tête). */
+type Bulle = { longitude: number; latitude: number; feu: FeuResume }
 
 interface Props {
   carrefours: CarrefoursGeoJson | undefined
@@ -88,15 +74,14 @@ interface Props {
   /** Feux couverts par un rectangle tracé en mode composition. */
   onAjouterFeux: (feux: FeuResume[]) => void
   onComposerDepuis: (feu: FeuResume) => void
-  onModifier: (carrefour: CarrefourResume) => void
-  onSupprimer: (carrefour: CarrefourResume) => void
-  onConfigurer: (carrefour: CarrefourResume, position: [number, number]) => void
+  /** Clic sur un carrefour ou l'un de ses feux : il s'ouvre en configuration, à la place de celui qui l'était. */
+  onOuvrir: (choix: { carrefour: CarrefourResume; position: [number, number] }) => void
   /** Carrefour en cours de configuration : voies et connexions dessinées, bulles désactivées. */
   configuration: (AffichageConfiguration & { carrefourId: string; position: [number, number] }) | null
   /** Clic sur un feu pendant la configuration : choix des feux d'une ligne, ou popup du feu. */
   onClicFeuConfiguration: (feu: FeuResume, position: LonLat) => void
-  /** Clic ailleurs pendant la configuration : sur le carrefour configuré (`centre`) ou dans le vide. */
-  onClicCarteConfiguration: (cible: 'centre' | 'vide', position: LonLat) => void
+  /** Clic ailleurs pendant la configuration : ferme la popup ouverte. */
+  onClicCarteConfiguration: () => void
   /** Clic sur un élément du calque (voie, connexion, code de branche). */
   onClicCalque: (clic: ClicCalque) => void
   /** Reçoit l'élément où rendre le contenu de la popup de configuration (portail). */
@@ -149,9 +134,15 @@ export function CarteCarrefours(props: Props) {
 
   // Recentre la carte sur le carrefour quand on entre en configuration.
   const [lon, lat] = configuration?.position ?? []
+  // Le panneau bas est fermé à l'ouverture : le décalage qu'il imposait est remis à zéro.
   useEffect(() => {
     if (lon !== undefined && lat !== undefined) {
-      carte.current?.flyTo({ center: [lon, lat], zoom: ZOOM_CONFIGURATION, duration: 800 })
+      carte.current?.flyTo({
+        center: [lon, lat],
+        zoom: ZOOM_CONFIGURATION,
+        padding: { top: 0, right: 0, bottom: 0, left: 0 },
+        duration: 800,
+      })
     }
   }, [lon, lat])
 
@@ -198,28 +189,40 @@ export function CarteCarrefours(props: Props) {
     props.onAjouterFeux([...parId.values()])
   }
 
+  /** Carrefour visé par un clic : le disque du carrefour, ou l'un de ses feux. */
+  const carrefourVise = (objet: MapGeoJSONFeature | undefined) => {
+    const id =
+      objet?.layer.id === 'carrefours'
+        ? (objet.properties.id as string)
+        : objet?.layer.id === 'feux'
+          ? (objet.properties as FeuResume).carrefour_id
+          : null
+    const trouve = id ? carrefours?.features.find((f) => f.id === id) : undefined
+    return trouve && { carrefour: trouve.properties, position: trouve.geometry.coordinates as [number, number] }
+  }
+
   const cliquer = (evenement: MapLayerMouseEvent) => {
     const objet = evenement.features?.[0]
     const { lng: longitude, lat: latitude } = evenement.lngLat
+    const vise = carrefourVise(objet)
     if (configuration) {
       setBulle(undefined)
+      // Un autre carrefour remplace celui qu'on configure (ses brouillons sont conservés),
+      // sauf pendant un tracé ou le choix des feux d'une ligne.
+      const autre = vise && vise.carrefour.id !== configuration.carrefourId
+      if (autre && configuration.mode !== null && !configuration.choixFeux) return props.onOuvrir(vise)
       if (objet?.layer.id === 'feux') return props.onClicFeuConfiguration(objet.properties as FeuResume, [longitude, latitude])
-      const centre = objet?.layer.id === 'carrefours' && objet.properties.id === configuration.carrefourId
-      return props.onClicCarteConfiguration(centre ? 'centre' : 'vide', [longitude, latitude])
+      return props.onClicCarteConfiguration()
     }
-    if (!objet) return setBulle(undefined)
-
-    if (objet.layer.id === 'feux') {
-      const feu = objet.properties as FeuResume
-      if (edition) return props.onBasculerFeu(feu)
-      const carrefour = feu.carrefour_id
-        ? carrefours?.features.find((f) => f.id === feu.carrefour_id)?.properties
-        : undefined
-      return setBulle(
-        carrefour ? { type: 'carrefour', longitude, latitude, carrefour } : { type: 'feu', longitude, latitude, feu },
-      )
+    if (edition) {
+      if (objet?.layer.id === 'feux') props.onBasculerFeu(objet.properties as FeuResume)
+      return
     }
-    if (!edition) setBulle({ type: 'carrefour', longitude, latitude, carrefour: objet.properties as CarrefourResume })
+    if (vise) {
+      setBulle(undefined)
+      return props.onOuvrir(vise)
+    }
+    setBulle(objet?.layer.id === 'feux' ? { longitude, latitude, feu: objet.properties as FeuResume } : undefined)
   }
 
   return (
@@ -230,7 +233,7 @@ export function CarteCarrefours(props: Props) {
       mapStyle={STYLE_CARTE}
       style={{ width: '100%', height: '100%' }}
       hash
-      attributionControl={{ compact: true }}
+      attributionControl={false}
       interactiveLayerIds={['feux', 'carrefours']}
       cursor={traceActif ? 'crosshair' : survol ? 'pointer' : 'grab'}
       dragPan={!traceActif}
@@ -249,6 +252,8 @@ export function CarteCarrefours(props: Props) {
       }}
       onMoveEnd={(evenement) => props.onEmprise(emprise(evenement.target))}
     >
+      {/* En bas à gauche : le bas à droite accueille la carte de suivi. */}
+      <AttributionControl position="bottom-left" compact />
       <ControleZoom position="absolute" top="4" right="4" zIndex="1" />
       <FondDeCarte {...fond} />
       {children}
@@ -271,7 +276,10 @@ export function CarteCarrefours(props: Props) {
       )}
       {carrefours && (
         <Source id="carrefours" type="geojson" data={carrefours}>
-          <Layer {...coucheCarrefours(edition !== null)} layout={{ visibility: afficherCarrefours ? 'visible' : 'none' }} />
+          <Layer
+            {...coucheCarrefours(edition !== null, configuration?.carrefourId ?? null)}
+            layout={{ visibility: afficherCarrefours ? 'visible' : 'none' }}
+          />
         </Source>
       )}
       {feux && (
@@ -310,59 +318,22 @@ export function CarteCarrefours(props: Props) {
 
       {bulle && !edition && !configuration && (
         <PopupSurCarte longitude={bulle.longitude} latitude={bulle.latitude} closeOnClick={false} onClose={() => setBulle(undefined)}>
-          {bulle.type === 'carrefour' ? (
-            <PopupCarte
-              titre={bulle.carrefour.nom}
-              soustitre={NATURES[bulle.carrefour.nature]}
-              onFermer={() => setBulle(undefined)}
-              pied={
-                <>
-                  <Button variant="plain" colorPalette="red" px="2" onClick={() => (setBulle(undefined), props.onSupprimer(bulle.carrefour))}>
-                    Supprimer
-                  </Button>
-                  <BarreOutils.Espace />
-                  <Button onClick={() => (setBulle(undefined), props.onModifier(bulle.carrefour))}>Feux</Button>
-                  <Button
-                    variant="solid"
-                    onClick={() => {
-                      const objet = carrefours?.features.find((f) => f.id === bulle.carrefour.id)
-                      setBulle(undefined)
-                      if (objet) props.onConfigurer(bulle.carrefour, objet.geometry.coordinates)
-                    }}
-                  >
-                    Configurer
-                  </Button>
-                </>
-              }
-            >
-              <Text display="flex" alignItems="center" gap="2">
-                <Pastille couleur={`statut.${bulle.carrefour.statut}`} />
-                {bulle.carrefour.nb_feux} feu(x) · programmation {STATUTS[bulle.carrefour.statut]}
-              </Text>
-              {bulle.carrefour.pres_tram && (
-                <Badge colorPalette="orange" alignSelf="start">
-                  Tram à proximité (priorité probable)
-                </Badge>
-              )}
-            </PopupCarte>
-          ) : (
-            <PopupCarte
-              titre={`Feu ${bulle.feu.type === 'pieton' ? 'piéton' : 'véhicule'} libre`}
-              soustitre={bulle.feu.osm_id ? `Nœud OSM ${bulle.feu.osm_id}` : undefined}
-              onFermer={() => setBulle(undefined)}
-              pied={
-                <>
-                  <BarreOutils.Espace />
-                  <Button variant="solid" onClick={() => (setBulle(undefined), props.onComposerDepuis(bulle.feu))}>
-                    Composer un carrefour
-                  </Button>
-                </>
-              }
-            >
-              {!bulle.feu.present_osm && <Badge colorPalette="red" alignSelf="start">Disparu d'OpenStreetMap</Badge>}
-              {bulle.feu.position_manuelle && <Aide>Placé sur son mât (position OSM conservée)</Aide>}
-            </PopupCarte>
-          )}
+          <PopupCarte
+            titre={`Feu ${bulle.feu.type === 'pieton' ? 'piéton' : 'véhicule'} libre`}
+            soustitre={bulle.feu.osm_id ? `Nœud OSM ${bulle.feu.osm_id}` : undefined}
+            onFermer={() => setBulle(undefined)}
+            pied={
+              <>
+                <BarreOutils.Espace />
+                <Button variant="solid" onClick={() => (setBulle(undefined), props.onComposerDepuis(bulle.feu))}>
+                  Composer un carrefour
+                </Button>
+              </>
+            }
+          >
+            {!bulle.feu.present_osm && <Badge colorPalette="red" alignSelf="start">Disparu d'OpenStreetMap</Badge>}
+            {bulle.feu.position_manuelle && <Aide>Placé sur son mât (position OSM conservée)</Aide>}
+          </PopupCarte>
         </PopupSurCarte>
       )}
     </Map>

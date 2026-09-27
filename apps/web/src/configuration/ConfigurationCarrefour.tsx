@@ -22,7 +22,6 @@ import {
   type BranchesCarrefour,
   type CarrefourResume,
   type Connexion,
-  type DetectionBranchesIa,
   type EmpriseIa,
   type FeuResume,
   type PlanSaisi,
@@ -32,8 +31,11 @@ import { useCallback, useEffect, useEffectEvent, useImperativeHandle, useMemo, u
 import { createPortal } from 'react-dom'
 import { useMap } from 'react-map-gl/maplibre'
 import { api } from '../api'
-import { Aide, BandeauMode, BarreOutils, CarteEnTete, Indice, Message, notifications, PanneauBas, Valeur, type EtatLampe } from '../ds'
+import { NATURES } from '../carrefour/libelles'
+import { ResumeCarrefour } from '../carrefour/ResumeCarrefour'
+import { Aide, BandeauMode, BarreOutils, CarteEnTete, Chiffre, Indice, Message, notifications, PanneauBas, Valeur, type EtatLampe } from '../ds'
 import { demanderNotificationsSysteme, enFile, useAnalysesIa } from './analysesIa'
+import { lireBrouillons, modifierBrouillons, useBrouillonsCarrefour, type ModificationsBrouillons } from './brouillons'
 import { Chrono } from './FileIa'
 import type { ClicCalque, FeuAnneauAffiche, ModeEdition } from './calque/CalqueCarrefour'
 import type { EtatFeu } from './calque/elements'
@@ -42,7 +44,7 @@ import { OngletGraphe, type Scenario } from './OngletGraphe'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
 import { OngletProgramme } from './OngletProgramme'
 import { OUTILS, RACCOURCIS, type ActionConfiguration, type OutilCarte } from './actions'
-import { PopupBranche, PopupCarrefour, PopupFeu, PopupLiaison, PopupVoie } from './PopupsConfiguration'
+import { PopupBranche, PopupFeu, PopupLiaison, PopupVoie, ReglageAnneau } from './PopupsConfiguration'
 import { feuxDesLignes, geometrieEnregistree, lignesPourMoteur, plansSaisis } from './programme'
 
 /** Références stables : un `[]` littéral relancerait les effets de synchronisation à chaque rendu. */
@@ -51,6 +53,7 @@ const AUCUNE_CONNEXION: Connexion[] = []
 const AUCUN_FEU: string[] = []
 const AUCUNE_LIGNE: never[] = []
 const AUCUN_FEU_ANNEAU: FeuAnneauAffiche[] = []
+const AUCUNE_SOURCE: Record<string, SourceBranche> = {}
 
 /** Ce qui s'enregistre : sans les champs déduits (sens des branches). */
 const pourEnregistrer = (brouillon: Brouillon) => ({
@@ -77,6 +80,8 @@ export interface AffichageConfiguration {
   connexionsSurlignees: string[]
   /** Lecture du programme : couleur du feu de chaque connexion et passage piéton. */
   feux: { connexions: ReadonlyMap<string, EtatFeu>; traversees: ReadonlyMap<string, EtatFeu> } | null
+  /** Choix des feux d'une ligne : un clic sur un feu d'un autre carrefour ne doit pas l'ouvrir. */
+  choixFeux: boolean
   /** Élément dont la popup est ouverte (clé de voie, « de>vers » ou code de branche). */
   selection: string | null
   /** Où ancrer la popup ouverte ; null : aucune popup. */
@@ -93,7 +98,6 @@ type Popup =
   | { type: 'connexion'; de: string; vers: string; position: LonLat }
   | { type: 'branche'; code: string; position: LonLat }
   | { type: 'feu'; feu: FeuResume; position: LonLat }
-  | { type: 'carrefour'; position: LonLat }
 
 const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>> = {
   ajuster: { titre: 'Caler les voies', aides: ['Glisser les extrémités des voies et des passages sur le marquage de la photo'] },
@@ -104,7 +108,7 @@ const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>>
 
 /** Hauteur du panneau bas « Plan de feux », en % de la fenêtre. */
 const HAUTEUR_PANNEAU_VH = 44
-const hauteurPanneau = `${HAUTEUR_PANNEAU_VH}vh`
+export const hauteurPanneau = `${HAUTEUR_PANNEAU_VH}vh`
 
 /** Plus grand côté de l'image envoyée à l'IA (px) : la résolution baisse quand la zone grandit. */
 const TAILLE_PHOTO_IA_PX = 1024
@@ -131,7 +135,7 @@ const LAMPES: Record<EtatFeu, EtatLampe | null> = { vert: 'vert', jaune: 'orange
 export interface ConfigurationCarrefourHandle {
   clicFeu: (feu: FeuResume, position: LonLat) => void
   clicCalque: (clic: ClicCalque) => void
-  clicCarte: (cible: 'centre' | 'vide', position: LonLat) => void
+  clicCarte: () => void
   deplacerPoignee: (poignee: Poignee, position: LonLat) => void
   connecter: (de: string, vers: string) => void
   dessinerZoneIa: (emprise: EmpriseIa) => void
@@ -141,6 +145,7 @@ export interface ConfigurationCarrefourHandle {
 interface Props {
   ref?: Ref<ConfigurationCarrefourHandle>
   carrefour: CarrefourResume
+  position: [number, number]
   /** Élément de la popup MapLibre où rendre le contenu de la popup ouverte. */
   ciblePopup: HTMLElement | null
   onAffichage: (affichage: AffichageConfiguration) => void
@@ -148,6 +153,12 @@ interface Props {
   onPlacerFeu: (id: string, position: LonLat | null) => Promise<void>
   /** Proposition IA à charger à l'ouverture (« Ouvrir » d'une notification). Un nouvel objet la recharge. */
   ouvrirAnalyseIa?: { id: string } | null
+  /** Le panneau bas s'ouvre ou se ferme : les cartes flottantes du bas se posent au-dessus. */
+  onPanneauBas: (ouvert: boolean) => void
+  /** Revient au choix des feux du carrefour. */
+  onModifierFeux: () => void
+  onSupprimer: () => void
+  /** Quitte la configuration ; les modifications non enregistrées restent dans la liste des brouillons. */
   onFermer: () => void
 }
 
@@ -161,7 +172,7 @@ const focusLibre = () => {
   return !actif || actif === document.body || actif.classList.contains('maplibregl-canvas')
 }
 
-export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onFermer }: Props) {
+export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneauBas, onModifierFeux, onSupprimer, onFermer }: Props) {
   const queryClient = useQueryClient()
   const [outil, setOutil] = useState<OutilCarte>('selection')
   const [popup, setPopup] = useState<Popup | null>(null)
@@ -169,15 +180,26 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
   const [ongletBas, setOngletBas] = useState<Onglet>('programme')
   /** Onglet du panneau bas affiché, null panneau fermé : pilote la lecture et la simulation. */
   const onglet: Onglet | null = panneauOuvert ? ongletBas : null
+  useEffect(() => onPanneauBas(panneauOuvert), [onPanneauBas, panneauOuvert])
+  useEffect(() => () => onPanneauBas(false), [onPanneauBas])
+
+  // Brouillons des trois étapes, conservés hors de la configuration (voir brouillons.ts).
+  const brouillons = useBrouillonsCarrefour(carrefour.id)
+  const brouillonBranches = brouillons?.branches ?? null
+  const sources = brouillons?.sources ?? AUCUNE_SOURCE
+  const analyseIa = brouillons?.analyseIa ?? null
+  const brouillonLignes = brouillons?.lignes ?? null
+  const brouillonProgramme = brouillons?.programme ?? null
+  const modifier = useCallback((m: ModificationsBrouillons) => modifierBrouillons(carrefour, position, m), [carrefour, position])
+  const setBrouillonBranches = useCallback((branches: Brouillon | null) => modifier({ branches }), [modifier])
+  const setBrouillonLignes = useCallback((lignes: BrouillonLignes | null) => modifier({ lignes }), [modifier])
+  const setBrouillonProgramme = useCallback((programme: PlanSaisi[] | null) => modifier({ programme }), [modifier])
 
   // ── Étape 1 : branches ──
   const branchesEnregistrees = useQuery({
     queryKey: ['branches', carrefour.id],
     queryFn: () => api.branches(carrefour.id),
   })
-  const [brouillonBranches, setBrouillonBranches] = useState<Brouillon | null>(null)
-  const [sources, setSources] = useState<Record<string, SourceBranche>>({})
-  const [analyseIa, setAnalyseIa] = useState<DetectionBranchesIa['ia'] | null>(null)
   const champImport = useRef<HTMLInputElement>(null)
   const enregistre: BranchesCarrefour | undefined = branchesEnregistrees.data
   const configuration: Brouillon = useMemo(
@@ -194,11 +216,12 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
 
   const detection = useMutation({
     mutationFn: () => api.detecterBranches(carrefour.id),
-    onSuccess: (proposition) => {
-      setBrouillonBranches({ branches: proposition.branches, connexions: proposition.connexions, anneau: proposition.anneau })
-      setSources(proposition.sources)
-      setAnalyseIa(null)
-    },
+    onSuccess: (proposition) =>
+      modifier({
+        branches: { branches: proposition.branches, connexions: proposition.connexions, anneau: proposition.anneau },
+        sources: proposition.sources,
+        analyseIa: null,
+      }),
   })
 
   // ── Proposition OSM + IA : mise en file, suivie, puis chargée quand elle est prête ──
@@ -238,10 +261,6 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     if (!cadrage || !zoneIa || dimensionsIa?.refus || demandeIa.isPending) return
     demandeIa.mutate(cadrage.emprise ?? undefined)
   }
-  const brouillonActuel = useRef(brouillonBranches)
-  useEffect(() => {
-    brouillonActuel.current = brouillonBranches
-  }, [brouillonBranches])
   const chargementIa = useMutation({
     mutationFn: async (id: string) => {
       const analyse = await api.analyseIa(id)
@@ -250,20 +269,22 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
       return analyse.resultat
     },
     onSuccess: async (proposition) => {
-      setBrouillonBranches({ branches: proposition.branches, connexions: proposition.connexions, anneau: proposition.anneau })
-      setSources(proposition.sources)
-      setAnalyseIa(proposition.ia)
+      modifier({
+        branches: { branches: proposition.branches, connexions: proposition.connexions, anneau: proposition.anneau },
+        sources: proposition.sources,
+        analyseIa: proposition.ia,
+      })
       await queryClient.invalidateQueries({ queryKey: ['analyses-ia'] })
     },
   })
   const chargerIa = chargementIa.mutate
   const chargerAnalyse = useCallback(
     (id: string) => {
-      if (brouillonActuel.current === null || window.confirm('Remplacer les modifications non enregistrées par la proposition IA ?')) {
+      if (!lireBrouillons(carrefour.id)?.branches || window.confirm('Remplacer les modifications non enregistrées par la proposition IA ?')) {
         chargerIa(id)
       }
     },
-    [chargerIa],
+    [chargerIa, carrefour.id],
   )
   useEffect(() => {
     if (ouvrirAnalyseIa) chargerAnalyse(ouvrirAnalyseIa.id)
@@ -284,11 +305,7 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
       }
       return resultat.data
     },
-    onSuccess: (configurationImportee) => {
-      setBrouillonBranches(configurationImportee)
-      setSources({})
-      setAnalyseIa(null)
-    },
+    onSuccess: (configurationImportee) => modifier({ branches: configurationImportee, sources: {}, analyseIa: null }),
   })
 
   const enregistrementBranches = useMutation({
@@ -306,7 +323,6 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     queryKey: ['lignes', carrefour.id],
     queryFn: () => api.lignes(carrefour.id),
   })
-  const [brouillonLignes, setBrouillonLignes] = useState<BrouillonLignes | null>(null)
   const lignesEnregistreesData = lignesEnregistrees.data
   const lignes: BrouillonLignes = useMemo(
     () =>
@@ -333,7 +349,6 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     queryKey: ['programme', carrefour.id],
     queryFn: () => api.programme(carrefour.id),
   })
-  const [brouillonProgramme, setBrouillonProgramme] = useState<PlanSaisi[] | null>(null)
   const programmeData = programmeEnregistre.data
   const plans: PlanSaisi[] = useMemo(
     () => brouillonProgramme ?? plansSaisis(programmeData?.plans ?? AUCUNE_LIGNE),
@@ -416,6 +431,7 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
   }, [vitesse, cycle, onglet])
 
   // Ce que la carte doit montrer.
+  const choixFeux = onglet === 'lignes' && ligneActive !== null
   const cleSelection =
     popup?.type === 'voie' ? popup.cle : popup?.type === 'connexion' ? `${popup.de}>${popup.vers}` : popup?.type === 'branche' ? popup.code : null
   const feuxSurlignes =
@@ -470,6 +486,7 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
         feuxSurlignes,
         connexionsSurlignees,
         feux,
+        choixFeux,
         selection: cleSelection,
         ancre: popup?.position ?? null,
         cadreIa: zoneIa && libelleZoneIa ? { emprise: zoneIa, libelle: libelleZoneIa } : null,
@@ -484,6 +501,7 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
       feuxSurlignes,
       connexionsSurlignees,
       feux,
+      choixFeux,
       cleSelection,
       popup?.position,
       zoneIa,
@@ -515,9 +533,6 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     if (branches.length === 0 || window.confirm('Remplacer les branches actuelles par la proposition OSM ?')) detection.mutate()
   }
 
-  const fermer = () => {
-    if (modifications === 0 || window.confirm('Abandonner les modifications non enregistrées ?')) onFermer()
-  }
 
   const choisirOutil = (suivant: OutilCarte) => {
     setOutil(suivant)
@@ -537,17 +552,17 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     if (action === 'json') return champImport.current?.click()
     if (action === 'plan') return setPanneauOuvert((ouvert) => !ouvert)
     if (action === 'enregistrer') return void enregistrer()
-    if (action === 'fermer') return fermer()
+    if (action === 'fermer') return onFermer()
     choisirOutil(action)
   }
 
-  /** Échap défait une chose à la fois : cadrage IA, popup, choix des feux d'une ligne, outil, puis la configuration. */
+  /** Échap défait une chose à la fois : cadrage IA, popup, choix des feux d'une ligne, outil, puis quitte la configuration. */
   const echap = () => {
     if (cadrage) return setCadrage(null)
     if (popup) return setPopup(null)
     if (ligneActive) return setLigneActive(null)
     if (outil !== 'selection') return setOutil('selection')
-    fermer()
+    onFermer()
   }
 
   // Raccourcis clavier : le gestionnaire lit toujours le dernier état, sans se réabonner.
@@ -602,14 +617,18 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
       const code = clic.type === 'voie' ? clic.cle.split(':')[0] : clic.type === 'branche' ? clic.code : undefined
       if (code) setBrouillonBranches(basculerTraversee(configuration, code, centre))
     },
-    clicCarte: (cible, position) => setPopup(cible === 'centre' && outil === 'selection' ? { type: 'carrefour', position } : null),
+    clicCarte: () => setPopup(null),
     executer,
   }))
 
   // Le panneau bas occupe le bas de l'écran : la carte recentre le carrefour dans ce qui reste.
-  // Seulement si le décalage change : un easeTo au montage interromprait le vol vers le carrefour.
+  // Seulement quand le panneau s'ouvre ou se ferme : au montage, un easeTo interromprait le vol
+  // vers le carrefour (qui remet lui-même le décalage à zéro, voir CarteCarrefours).
   const { carte } = useMap()
+  const panneauPrecedent = useRef(false)
   useEffect(() => {
+    if (panneauPrecedent.current === panneauOuvert) return
+    panneauPrecedent.current = panneauOuvert
     const bas = panneauOuvert ? (window.innerHeight * HAUTEUR_PANNEAU_VH) / 100 : 0
     if (!carte || (carte.getPadding().bottom ?? 0) === bas) return
     carte.easeTo({ padding: { top: 0, right: 0, left: 0, bottom: bas }, duration: 300 })
@@ -668,25 +687,6 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
         onOutil={choisirOutil}
         onFermer={fermerPopup}
       />
-    ) : popup?.type === 'carrefour' ? (
-      <PopupCarrefour
-        nom={carrefour.nom}
-        giratoire={carrefour.nature === 'giratoire'}
-        brouillon={configuration}
-        centre={centre}
-        onChanger={setBrouillonBranches}
-        onOutil={choisirOutil}
-        cycle={resultat?.cycle_s ?? null}
-        detectionEnCours={detection.isPending}
-        onDetecter={detecter}
-        iaEnFile={iaEnFile}
-        onGenererIa={genererIa}
-        onPlan={() => {
-          setPopup(null)
-          setPanneauOuvert(true)
-        }}
-        onFermer={fermerPopup}
-      />
     ) : null
 
   const selectionLue =
@@ -698,9 +698,7 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
           ? `branche ${popup.code}`
           : popup?.type === 'feu'
             ? 'feu'
-            : popup?.type === 'carrefour'
-              ? 'carrefour'
-              : null
+            : null
   const consigne = cadrage
     ? { titre: 'Zone de la photo IA', aides: ['Glisser sur la carte pour dessiner la zone : l’IA ne voit rien en dehors', 'Entrée : lancer'] }
     : onglet === 'lignes' && ligneActive
@@ -719,10 +717,11 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
         w="340px"
         maxW="calc(100vw - 24px)"
         pe="10"
-        surtitre="Besançon Voirie · configuration"
+        surtitre={`Besançon Voirie · ${NATURES[carrefour.nature].toLowerCase()}`}
         titre={carrefour.nom}
         badges={
           <>
+            {carrefour.pres_tram && <Badge colorPalette="orange">Tram à proximité</Badge>}
             <Badge colorPalette="gray">{selectionLue ? `Sélection : ${selectionLue}` : 'Aucune sélection'}</Badge>
             {modifications > 0 && (
               <Badge colorPalette="orange">
@@ -730,7 +729,7 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
               </Badge>
             )}
             {carrefour.nature === 'giratoire' && !configuration.anneau && branchesEnregistrees.isSuccess && (
-              <Badge colorPalette="orange" title="Clic sur le centre du carrefour, ou détection OSM (O)">
+              <Badge colorPalette="orange" title="Section Anneau ci-dessous, ou détection OSM (O)">
                 Anneau à dessiner
               </Badge>
             )}
@@ -749,11 +748,24 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
           variant="ghost"
           size="xs"
           aria-label="Quitter la configuration"
-          title="Quitter la configuration (Échap)"
-          onClick={fermer}
+          title="Quitter la configuration (Échap) : les modifications non enregistrées restent dans le suivi"
+          onClick={onFermer}
         >
           ×
         </IconButton>
+        <ResumeCarrefour carrefour={carrefour} onModifierFeux={onModifierFeux} onSupprimer={onSupprimer} mt="1.5" />
+        {branches.length > 0 && (
+          <HStack gap="2" mt="2">
+            <Chiffre valeur={branches.length} libelle="branches" />
+            <Chiffre valeur={configuration.connexions.length} libelle="liaisons" />
+            <Chiffre valeur={resultat ? `${Math.round(resultat.cycle_s)} s` : '—'} libelle="cycle" />
+          </HStack>
+        )}
+        {(carrefour.nature === 'giratoire' || configuration.anneau) && (
+          <Box mt="2">
+            <ReglageAnneau brouillon={configuration} centre={centre} onChanger={setBrouillonBranches} onOutil={choisirOutil} />
+          </Box>
+        )}
         {branchesEnregistrees.isSuccess && branches.length === 0 && (
           <Indice mt="2">
             Aucune branche : <Kbd>O</Kbd> pour les détecter depuis OSM
