@@ -1,17 +1,55 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { matriceConflits, mouvementsNonCommandes, type LigneConflits } from '@voirie/engine';
-import { typeLigne, type ConfigurationLignes, type LigneFeux, type LignesCarrefour } from '@voirie/schema';
+import { typeLigne, type BranchesCarrefour, type ConfigurationLignes, type LigneFeux, type LignesCarrefour } from '@voirie/schema';
 import { BranchesService, geometrieDe } from '../branches/branches.service.js';
 import { DRIZZLE, type Db } from '../db/db.module.js';
 import { uuids } from '../db/sql.js';
 
-const pourConflits = (l: LigneFeux): LigneConflits => ({
+export const pourConflits = (l: LigneFeux): LigneConflits => ({
   code: l.code,
   type: typeLigne(l.signal),
   mouvements: l.mouvements,
   traverse: l.traverse,
+  anneau: l.anneau,
 });
+
+/**
+ * Références d'une ligne vers des éléments absents des branches : à l'enregistrement (erreurs)
+ * ou à la lecture, quand les branches ont changé depuis (alertes).
+ */
+function referencesInvalides(
+  l: LigneFeux,
+  configuration: BranchesCarrefour,
+  cles: Set<string>,
+  traversees: Set<string>,
+  moment: 'lecture' | 'enregistrement',
+) {
+  const lecture = moment === 'lecture';
+  return [
+    ...l.mouvements
+      .filter((cle) => !cles.has(cle))
+      .map((cle) => (lecture ? `${l.code} : le mouvement ${cle} n'existe plus` : `${l.code} : mouvement ${cle} inconnu`)),
+    ...(l.traverse && !traversees.has(l.traverse)
+      ? [`${l.code} : ${lecture ? 'plus de' : 'pas de'} passage piéton sur la branche ${l.traverse}`]
+      : []),
+    ...(l.anneau && !configuration.anneau ? [`${l.code} : feu d'anneau, mais le carrefour n'a pas d'anneau`] : []),
+    ...(l.anneau && configuration.anneau && !configuration.branches.some((b) => b.code === l.anneau)
+      ? [`${l.code} : pas de branche ${l.anneau} pour placer le feu d'anneau`]
+      : []),
+  ];
+}
+
+/**
+ * Mouvements sans ligne de feux. Dans un giratoire, une entrée sans feux cède le passage à
+ * l'anneau : seuls comptent les mouvements des entrées dont un autre mouvement a des feux.
+ */
+function nonCommandes(configuration: BranchesCarrefour, lignes: LigneFeux[]): string[] {
+  const liste = mouvementsNonCommandes(configuration.mouvements, lignes.map(pourConflits));
+  if (!configuration.anneau) return liste;
+  const aFeux = new Set(lignes.flatMap((l) => l.mouvements.map((cle) => cle.split('>')[0])));
+  return liste.filter((cle) => aFeux.has(cle.split('>')[0]));
+}
 
 @Injectable()
 export class LignesService {
@@ -25,7 +63,7 @@ export class LignesService {
     const configuration = await this.branches.lire(carrefourId); // 404 si carrefour inconnu
     const { branches, mouvements } = configuration;
     const { rows: lignes } = await this.db.execute<LigneFeux>(sql`
-      SELECT l.code, l.signal, l.mouvements, l.traverse,
+      SELECT l.code, l.signal, l.mouvements, l.traverse, l.anneau,
              coalesce(array_agg(lf.feu_id ORDER BY lf.feu_id) FILTER (WHERE lf.feu_id IS NOT NULL), '{}') AS feux
       FROM ligne_feux l
       LEFT JOIN ligne_feux_feu lf ON lf.ligne_feux_id = l.id
@@ -40,33 +78,28 @@ export class LignesService {
 
     const cles = new Set(mouvements.map((m) => `${m.origine}>${m.destination}`));
     const traversees = new Set(branches.filter((b) => b.traversee).map((b) => b.code));
-    const alertes = lignes.flatMap((l) => [
-      ...l.mouvements.filter((cle) => !cles.has(cle)).map((cle) => `${l.code} : le mouvement ${cle} n'existe plus`),
-      ...(l.traverse && !traversees.has(l.traverse) ? [`${l.code} : plus de passage piéton sur la branche ${l.traverse}`] : []),
-    ]);
+    const alertes = lignes.flatMap((l) => referencesInvalides(l, configuration, cles, traversees, 'lecture'));
 
     return {
       lignes,
       conflits_admis: conflitsAdmis,
       conflits: matriceConflits(lignes.map(pourConflits), geometrieDe(configuration), conflitsAdmis),
       mouvements,
-      non_commandes: mouvementsNonCommandes(mouvements, lignes.map(pourConflits)),
+      non_commandes: nonCommandes(configuration, lignes),
       alertes,
     };
   }
 
   /** Remplace les lignes de feux et les conflits admis du carrefour. */
   async enregistrer(carrefourId: string, { lignes, conflits_admis }: ConfigurationLignes): Promise<LignesCarrefour> {
-    const { branches, mouvements } = await this.branches.lire(carrefourId);
+    const configuration = await this.branches.lire(carrefourId);
+    const { branches, mouvements } = configuration;
     const cles = new Set(mouvements.map((m) => `${m.origine}>${m.destination}`));
     const traversees = new Set(branches.filter((b) => b.traversee).map((b) => b.code));
     const codesLignes = new Set(lignes.map((l) => l.code));
     const feux = [...new Set(lignes.flatMap((l) => l.feux))];
 
-    const erreurs = lignes.flatMap((l) => [
-      ...l.mouvements.filter((cle) => !cles.has(cle)).map((cle) => `${l.code} : mouvement ${cle} inconnu`),
-      ...(l.traverse && !traversees.has(l.traverse) ? [`${l.code} : pas de passage piéton sur la branche ${l.traverse}`] : []),
-    ]);
+    const erreurs = lignes.flatMap((l) => referencesInvalides(l, configuration, cles, traversees, 'enregistrement'));
     if (feux.length > 0) {
       const { rows } = await this.db.execute<{ id: string }>(sql`
         SELECT id FROM feu WHERE id = ANY (${uuids(feux)}) AND carrefour_id = ${carrefourId}
@@ -80,8 +113,8 @@ export class LignesService {
       await tx.execute(sql`DELETE FROM ligne_feux WHERE carrefour_id = ${carrefourId}`);
       for (const ligne of lignes) {
         const { rows } = await tx.execute<{ id: string }>(sql`
-          INSERT INTO ligne_feux (carrefour_id, code, signal, mouvements, traverse)
-          VALUES (${carrefourId}, ${ligne.code}, ${ligne.signal}, ${`{${ligne.mouvements.join(',')}}`}::text[], ${ligne.traverse})
+          INSERT INTO ligne_feux (carrefour_id, code, signal, mouvements, traverse, anneau)
+          VALUES (${carrefourId}, ${ligne.code}, ${ligne.signal}, ${`{${ligne.mouvements.join(',')}}`}::text[], ${ligne.traverse}, ${ligne.anneau})
           RETURNING id
         `);
         if (ligne.feux.length > 0) {

@@ -4,6 +4,7 @@ export * from './decalage.js';
 export * from './nommage.js';
 export * from './branches.js';
 export * from './geometrie.js';
+export * from './giratoire.js';
 export * from './connexions.js';
 export * from './conflits.js';
 export * from './degagement.js';

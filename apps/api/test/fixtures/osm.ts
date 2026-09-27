@@ -62,3 +62,36 @@ export const ELEMENTS_OSM: OverpassElement[] = [
   // Hors commune : ignoré
   noeud(401, 6.2, 47.25, FEU),
 ];
+
+// D : giratoire d'une voie (tracé OSM au milieu de l'anneau, 13,4 m de rayon) et quatre rues,
+// à part du jeu principal pour ne pas changer ses comptages.
+const CENTRE_D: [number, number] = [6.05, 47.28];
+const metresVersLonLat = ([est, nord]: [number, number]): [number, number] => [
+  CENTRE_D[0] + est / (111_195 * Math.cos((CENTRE_D[1] * Math.PI) / 180)),
+  CENTRE_D[1] + nord / 111_195,
+];
+const pointD = (azimut: number, rayon: number) =>
+  metresVersLonLat([rayon * Math.sin((azimut * Math.PI) / 180), rayon * Math.cos((azimut * Math.PI) / 180)]);
+export const RAYON_OSM_D_M = 13.375;
+export const FEUX_D = [501, 502];
+export const CENTRE_GIRATOIRE_D = CENTRE_D;
+
+export const ELEMENTS_GIRATOIRE: OverpassElement[] = [
+  // Anneau fermé, tracé dans le sens de circulation (antihoraire vu du ciel).
+  voie(
+    5000,
+    { highway: 'secondary', junction: 'roundabout' },
+    Array.from({ length: 25 }, (_, i) => pointD(360 - i * 15, RAYON_OSM_D_M)),
+  ),
+  ...[
+    [5001, 0, 'Rue du Nord'],
+    [5002, 90, 'Rue de l’Est'],
+    [5003, 180, 'Rue du Sud'],
+    [5004, 270, 'Rue de l’Ouest'],
+  ].map(([id, azimut, name]) =>
+    voie(id as number, { highway: 'tertiary', name: name as string }, [pointD(azimut as number, RAYON_OSM_D_M), pointD(azimut as number, 120)]),
+  ),
+  // Un feu sur l'anneau, juste avant l'entrée est, et un feu à l'entrée est.
+  noeud(501, ...pointD(100, RAYON_OSM_D_M), FEU),
+  noeud(502, ...pointD(85, 17), FEU),
+];

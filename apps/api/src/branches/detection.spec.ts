@@ -1,4 +1,4 @@
-import { brancheDepuisPassage, proposerBranches, type Passage } from './detection.js';
+import { brancheDepuisPassage, connexionsGiratoire, proposerBranches, type Passage } from './detection.js';
 
 const passage = (azimut: number, tags: Record<string, string>, vientDeLInterieur: boolean, osmId = 1): Passage => ({
   osmId,
@@ -59,5 +59,32 @@ describe('proposerBranches', () => {
     expect(branches[0]!.azimut).toBe(90);
     expect(branches[0]!.geom![0]).toEqual([6, 47]);
     expect(sources).toEqual({ E: 'defaut', O: 'defaut' });
+  });
+});
+
+describe('connexionsGiratoire', () => {
+  const branche = (code: string, entrantes: number, sortantes: number) => ({
+    code,
+    nom: null,
+    azimut: 0,
+    osm_way_id: 1,
+    geom: [] as [number, number][],
+    fleches: Array.from({ length: entrantes }, () => []),
+    sortantes,
+  });
+
+  it('should connect every entry lane to every exit, U-turn included', () => {
+    const connexions = connexionsGiratoire([branche('N', 1, 1), branche('S', 2, 1), branche('E', 0, 2)]);
+    expect(connexions).toEqual([
+      { de: 'N:e0', vers: 'N:s0' },
+      { de: 'N:e0', vers: 'S:s0' },
+      { de: 'N:e0', vers: 'E:s0' },
+      { de: 'S:e0', vers: 'N:s0' },
+      { de: 'S:e0', vers: 'S:s0' },
+      { de: 'S:e0', vers: 'E:s0' },
+      { de: 'S:e1', vers: 'N:s0' },
+      { de: 'S:e1', vers: 'S:s0' },
+      { de: 'S:e1', vers: 'E:s1' },
+    ]);
   });
 });

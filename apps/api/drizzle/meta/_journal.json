@@ -106,6 +106,13 @@
       "when": 1790473975945,
       "tag": "20260927015255_analyse_ia_emprise",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1790475746788,
+      "tag": "20260927022226_giratoires",
+      "breakpoints": true
     }
   ]
 }

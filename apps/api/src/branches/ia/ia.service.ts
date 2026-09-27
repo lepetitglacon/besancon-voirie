@@ -101,7 +101,7 @@ export class IaService {
           `${reponse.modele}, ${reponse.duree_s} s, ${reponse.cout_usd?.toFixed(3) ?? '?'} $`,
       );
       return {
-        ...deduire(detection.centre, branches, connexions),
+        ...deduire(detection.centre, branches, connexions, detection.anneau),
         rayon_m: detection.rayon_m,
         sources: Object.fromEntries(branches.map((b) => [b.code, 'ia' satisfies SourceBranche])),
         ia: {

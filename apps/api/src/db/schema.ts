@@ -19,7 +19,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import type { ArcGraphe, Controleur, Etape, IntervalleVert, Plage } from '@voirie/schema';
+import type { Anneau, ArcGraphe, Controleur, Etape, IntervalleVert, Plage } from '@voirie/schema';
 
 // Tables du projet — voir docs/ARCHITECTURE.md §4.
 // Les tables issues d'OpenStreetMap (osm_*) sont gérées par l'import, pas par Drizzle.
@@ -42,8 +42,8 @@ export const statutCarrefour = pgEnum('statut_carrefour', [
   'verifie',
 ]);
 
-/** Carrefour à feux, ou traversée piétonne à feux isolée (hors carrefour). */
-export const natureCarrefour = pgEnum('nature_carrefour', ['carrefour', 'traversee_pietonne']);
+/** Carrefour à feux, giratoire, ou traversée piétonne à feux isolée (hors carrefour). */
+export const natureCarrefour = pgEnum('nature_carrefour', ['carrefour', 'giratoire', 'traversee_pietonne']);
 
 export const statutModeration = pgEnum('statut_moderation', ['en_attente', 'valide', 'rejete']);
 
@@ -60,6 +60,8 @@ export const carrefour = pgTable(
     presTram: boolean('pres_tram').notNull().default(false),
     /** Paires de lignes en conflit tolérées (tourne-à-droite avec piétons…). */
     conflitsAdmis: jsonb('conflits_admis').$type<Array<[string, string]>>().notNull().default([]),
+    /** Giratoire : anneau (centre de l'îlot, rayon extérieur, voies) — docs/CONFIGURATION.md §7. */
+    anneau: jsonb('anneau').$type<Anneau>(),
     creeLe: creeLe(),
     modifieLe: timestamp('modifie_le', { withTimezone: true })
       .notNull()
@@ -99,6 +101,8 @@ export const feu = pgTable(
 export const sensBranche = pgEnum('sens_branche', ['entrant', 'sortant', 'double']);
 export const typeVoie = pgEnum('type_voie', ['generale', 'bus', 'velo', 'tram']);
 export const sensVoie = pgEnum('sens_voie', ['entrante', 'sortante']);
+/** Régime d'une entrée de giratoire hors feux ; null = cédez-le-passage. */
+export const prioriteEntree = pgEnum('priorite_entree', ['cedez_le_passage', 'stop', 'priorite_a_droite']);
 
 /** Rue qui arrive au carrefour — docs/CONFIGURATION.md §3. */
 export const branche = pgTable(
@@ -119,6 +123,7 @@ export const branche = pgTable(
     geom: ligne('geom'),
     /** Passage piéton en travers de la branche, d'un trottoir à l'autre. */
     traversee: ligne('traversee'),
+    prioriteEntree: prioriteEntree('priorite_entree'),
   },
   (t) => [unique().on(t.carrefourId, t.code)],
 );
@@ -162,7 +167,8 @@ export const connexion = pgTable(
 
 /**
  * Ligne de feux (signal group) — docs/CONFIGURATION.md §4. `mouvements` : clés « S>O » des
- * mouvements commandés ; `traverse` : branche traversée par une ligne piétonne (R12).
+ * mouvements commandés ; `traverse` : branche traversée par une ligne piétonne (R12) ;
+ * `anneau` : feu d'anneau d'un giratoire, en amont de cette branche (§7).
  */
 export const ligneFeux = pgTable(
   'ligne_feux',
@@ -178,6 +184,7 @@ export const ligneFeux = pgTable(
       .notNull()
       .default(sql`'{}'`),
     traverse: text('traverse'),
+    anneau: text('anneau'),
   },
   (t) => [unique().on(t.carrefourId, t.code)],
 );
