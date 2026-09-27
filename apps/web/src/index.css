@@ -217,6 +217,42 @@ body {
   opacity: 0.7;
 }
 
+.calque-noeud-reseau {
+  pointer-events: none;
+}
+
+.calque-noeud-reseau.interactive {
+  pointer-events: all;
+  cursor: grab;
+}
+
+.calque-noeud-reseau.interactive:active {
+  cursor: grabbing;
+}
+
+.calque-noeud-reseau .zebras {
+  stroke: #f8fafc;
+  stroke-dasharray: 2 2;
+  opacity: 0.85;
+}
+
+.calque-noeud-reseau .anneau-carrefour {
+  fill: none;
+  stroke-width: 2.5;
+}
+
+.calque-noeud-reseau .pastille {
+  stroke: #1d2330;
+  stroke-width: 1;
+}
+
+.calque-noeud-reseau.interactive:hover .pastille,
+.calque-noeud-reseau.selectionne .pastille {
+  stroke: #ffffff;
+  stroke-width: 2.5;
+}
+
+
 .calque-liens .lien {
   fill: none;
   stroke-width: 2.5;

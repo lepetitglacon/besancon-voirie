@@ -31,19 +31,23 @@ export function EnTeteReseau({ outil, visible, nbTroncons, tronque, bbox, genera
         {outil === 'tracer' ? (
           <>
             Cliquez un nœud, une rue ou un point libre, puis les points de la rue, et finissez sur un nœud ou une rue
-            (<Kbd>Entrée</Kbd> : finir sur un point libre, <Kbd>⌫</Kbd> : retirer le dernier point). Tracée jusqu’au
-            centre d’un carrefour, la rue s’arrête à son bord et se relie à sa branche.
+            (<Kbd>Entrée</Kbd> : finir sur un point libre, <Kbd>⌫</Kbd> : retirer le dernier point).
+          </>
+        ) : outil === 'couper' ? (
+          <>
+            Cliquez une rue pour y poser un nœud : ligne d’arrêt, passage piéton, début d’une voie de présélection. Les
+            voies et les liaisons sont gardées de part et d’autre.
           </>
         ) : outil === 'connecter' ? (
           <>
-            Glissez du bout d’une voie (bleu) vers une voie qui repart : à chaque intersection, et au bord d’un
-            carrefour vers ses voies (cliquez-le d’abord pour l’ouvrir). Pointillés : liaisons proposées ; un clic sur
-            une liaison la retire.
+            Glissez du bout d’une voie (bleu) vers une voie qui repart, à chaque nœud. Pointillés : liaisons proposées ;
+            un clic sur une liaison la retire.
           </>
         ) : (
           <>
-            Rues et carrefours, voie par voie à partir du zoom 16. Cliquez une rue pour ses voies, son sens ou sa
-            vitesse, un carrefour pour l’ouvrir ; <Kbd>T</Kbd> trace une rue qui manque, <Kbd>C</Kbd> relie les voies.
+            Tout le réseau, voie par voie à partir du zoom 16, sur la photo IGN. Glissez un nœud pour le caler, cliquez
+            une rue ou un nœud pour ses réglages ; <Kbd>T</Kbd> trace une rue, <Kbd>X</Kbd> coupe une rue,{' '}
+            <Kbd>C</Kbd> relie les voies. Un carrefour se compose à partir de ses feux, puis s’ouvre d’un clic.
           </>
         )}
       </Aide>
@@ -54,6 +58,18 @@ export function EnTeteReseau({ outil, visible, nbTroncons, tronque, bbox, genera
             {l.libelle}
           </HStack>
         ))}
+        <HStack as="li" gap="1">
+          <Pastille forme="trait" couleur={COULEURS_RESEAU.velo} />
+          vélo
+        </HStack>
+        <HStack as="li" gap="1">
+          <Pastille couleur={COULEURS_RESEAU.feux} />
+          feux
+        </HStack>
+        <HStack as="li" gap="1">
+          <Pastille couleur={COULEURS_RESEAU.carrefour} />
+          carrefour
+        </HStack>
         <HStack as="li" gap="1">
           <Pastille couleur={COULEURS_RESEAU.culDeSac} />
           cul-de-sac

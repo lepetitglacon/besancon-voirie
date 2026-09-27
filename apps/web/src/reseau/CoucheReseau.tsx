@@ -1,7 +1,9 @@
 /**
- * Réseau routier sur la carte (docs/RESEAU.md) : tronçons à la largeur de leurs voies, nœuds,
- * sens de circulation, tracé en cours. En mode réseau, un clic choisit un tronçon (outil
- * Sélection) ou ajoute un point au tracé (outil Tracer), accroché au nœud ou au tronçon visé.
+ * Réseau routier sur la carte (docs/RESEAU.md) : tronçons à la largeur de leurs voies, nœuds
+ * (feux, passages piétons, carrefours), sens de circulation, tracé en cours. Un clic vise le
+ * nœud ou le tronçon sous le pointeur ; l'outil actif décide quoi en faire (popup, point du
+ * tracé, coupe, nœud du carrefour). Au zoom des voies, le calque SVG dessine tout, et ces
+ * couches ne servent plus qu'aux clics.
  */
 import type { LonLat } from '@voirie/engine'
 import type { ReseauGeoJson } from '@voirie/schema'
@@ -12,8 +14,8 @@ import { PopupSurCarte } from '../ds'
 import { COULEURS_RESEAU } from './couleurs'
 import type { Cible, Trace } from './trace'
 
-/** Outils de l'éditeur des voies quand aucun carrefour n'est ouvert. */
-export type OutilReseau = 'selection' | 'tracer' | 'connecter'
+/** Outils de l'éditeur des voies (le dernier seulement avec un carrefour ouvert). */
+export type OutilReseau = 'selection' | 'tracer' | 'couper' | 'connecter' | 'noeuds'
 
 /** Distance (px) à laquelle un clic accroche un nœud ou un tronçon. */
 const TOLERANCE_PX = 8
@@ -73,7 +75,12 @@ export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }
       const troncon = objets.find((f) => f.layer.id === 'reseau-troncons')
       return troncon ? { type: 'troncon', id: troncon.properties.id as string } : null
     }
-    const cliquer = (e: MapLayerMouseEvent) => relayerClic([e.lngLat.lng, e.lngLat.lat], cibleSous(e), memePoint)
+    const cliquer = (e: MapLayerMouseEvent) => {
+      // Un feu (sa popup) ou le disque d'un carrefour (il s'ouvre) : le réseau ne répond pas en même temps.
+      const autres = ['feux', 'carrefours'].filter((id) => map.getLayer(id))
+      if (autres.length > 0 && map.queryRenderedFeatures(e.point, { layers: autres }).length > 0) return
+      relayerClic([e.lngLat.lng, e.lngLat.lat], cibleSous(e), memePoint)
+    }
     const bouger = (e: MapMouseEvent) => setCurseur([e.lngLat.lng, e.lngLat.lat])
     map.on('click', cliquer)
     map.on('mousemove', bouger)
@@ -164,12 +171,16 @@ export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }
                 ],
                 'circle-color': [
                   'case',
+                  ['get', 'feux'], COULEURS_RESEAU.feux,
+                  ['!=', ['get', 'pieton'], null], COULEURS_RESEAU.pieton,
                   ['!=', ['get', 'carrefour_id'], null], COULEURS_RESEAU.carrefour,
                   ['==', ['get', 'degre'], 1], COULEURS_RESEAU.culDeSac,
                   '#ffffff',
                 ],
-                'circle-stroke-width': 1,
-                'circle-stroke-color': '#1d2330',
+                'circle-stroke-width': ['case', ['!=', ['get', 'carrefour_id'], null], 2.5, 1],
+                'circle-stroke-color': ['case', ['!=', ['get', 'carrefour_id'], null], COULEURS_RESEAU.carrefour, '#1d2330'],
+                'circle-opacity': auZoomDesVoies(1),
+                'circle-stroke-opacity': auZoomDesVoies(1),
               }}
             />
           </Source>

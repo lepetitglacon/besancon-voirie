@@ -1,27 +1,40 @@
 /**
- * Voies du réseau de la vue, dans un calque SVG (docs/RESEAU.md §7) : chaque tronçon est dessiné
- * voie par voie, à sa largeur, et les voies se relient à chaque nœud avec le même geste (outil
- * Liaison, à la « lane connector » de TM:PE) : du bout d'une voie qui arrive au début d'une voie
- * qui repart. Refaire le geste, ou cliquer une liaison, la retire.
+ * Réseau de la vue voie par voie, dans un calque SVG (docs/RESEAU.md §7), à la TM:PE :
+ * - chaque tronçon est dessiné voie par voie, à sa largeur ; les voies vélo, bus et tram dans
+ *   leur couleur, les autres dans celle de leur origine (OSM, corrigée, tracée à la main) ;
+ * - chaque nœud montre ce qu'il porte : ligne d'arrêt à feux, passage piéton (zébras en travers
+ *   de la rue), appartenance à un carrefour (cercle) ;
+ * - outil Sélection : glisser un nœud le déplace (les tronçons suivent), un clic sur un nœud ou
+ *   une voie ouvre sa popup ; outil Couper : un clic sur une voie coupe son tronçon à cet endroit ;
+ * - outil Liaison : du bout d'une voie qui arrive au début d'une voie qui repart (« lane
+ *   connector »), à chaque nœud ; refaire le geste, ou cliquer une liaison, la retire.
+ * Le reste des clics traverse le calque : la couche du réseau trouve le tronçon ou le nœud visé.
  */
-import { boutsAuNoeud, liaisonsRetenues, type Liaison, type LonLat, type XY } from '@voirie/engine'
-import type { ReseauGeoJson } from '@voirie/schema'
+import { boutsAuNoeud, liaisonsRetenues, typesVoies, type Liaison, type LonLat, type XY } from '@voirie/engine'
+import type { ReseauGeoJson, TypeVoie } from '@voirie/schema'
 import { useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
 import { cheminConnexion } from '../configuration/calque/chemins'
 import { Elastique, Poignee } from '../configuration/calque/elements'
 import { useProjection } from '../configuration/calque/projection'
-import { useRelaisCarte } from '../configuration/calque/relais'
+import { TOLERANCE_CLIC_PX, useRelaisCarte } from '../configuration/calque/relais'
+import type { OutilReseau } from './CoucheReseau'
 import { COULEURS_RESEAU } from './couleurs'
+import type { SelectionReseau } from './modeReseau'
 import { geometrieRues, type BoutVoie } from './voiesRues'
 
-export type OutilVoies = 'selection' | 'tracer' | 'connecter' | 'autre'
+/** Outil actif : `autre` pour les outils propres au carrefour ouvert (poser ses feux). */
+export type OutilVoies = OutilReseau | 'autre'
 
 interface Props {
   reseau: ReseauGeoJson
   outil: OutilVoies | null
-  /** Tronçon sélectionné, mis en avant. */
-  selection: string | null
+  selection: SelectionReseau | null
+  /** Carrefour ouvert : ses nœuds sont cerclés. */
+  carrefourOuvert: string | null
+  onClicNoeud: (id: string, position: LonLat) => void
+  /** Clic sur une voie (outils Sélection et Couper) : son tronçon, au point cliqué. */
   onClicTroncon: (id: string, position: LonLat) => void
+  onDeplacerNoeud: (id: string, position: LonLat) => void
   /** Ajoute la liaison au nœud, ou la retire si elle existe (les liaisons proposées deviennent saisies). */
   onBasculerLiaison: (noeud: string, liaison: Liaison) => void
 }
@@ -35,6 +48,7 @@ const GRIS = '#e5e7eb'
 const BLEU_ARRIVEE = '#2f6fd6'
 
 const COULEUR_SOURCE = { osm: GRIS, modifie: COULEURS_RESEAU.modifie, manuel: COULEURS_RESEAU.manuel } as const
+const COULEUR_TYPE: Partial<Record<TypeVoie, string>> = { velo: COULEURS_RESEAU.velo, bus: COULEURS_RESEAU.bus, tram: COULEURS_RESEAU.tram }
 
 interface Depart {
   noeud: string
@@ -50,32 +64,46 @@ interface Glisse {
   position: LonLat | null
 }
 
-export function CalqueRues({ reseau, outil, selection, onClicTroncon, onBasculerLiaison }: Props) {
+/** Nœud saisi à la souris : où il a été pris, où il est maintenant (en pixels et sur la carte). */
+interface Deplacement {
+  id: string
+  appui: XY
+  position: LonLat
+  bouge: boolean
+}
+
+export function CalqueRues({ reseau, outil, selection, carrefourOuvert, onClicNoeud, onClicTroncon, onDeplacerNoeud, onBasculerLiaison }: Props) {
   const projection = useProjection()
   const refSvg = useRef<SVGSVGElement>(null)
   useRelaisCarte(refSvg)
   const [glisse, setGlisse] = useState<Glisse | null>(null)
+  const [deplacement, setDeplacement] = useState<Deplacement | null>(null)
 
   const troncons = reseau.troncons.features
   const geometrie = useMemo(() => geometrieRues(troncons, reseau.noeuds.features), [troncons, reseau.noeuds.features])
   const parTroncon = useMemo(() => new Map(troncons.map((t) => [t.id, t])), [troncons])
+  const autour = useMemo(() => {
+    const carte = new Map<string, typeof troncons>()
+    for (const t of troncons) {
+      for (const n of [t.properties.noeud_de, t.properties.noeud_vers]) carte.set(n, [...(carte.get(n) ?? []), t])
+    }
+    return carte
+  }, [troncons])
 
   // Liaisons de chaque nœud, saisies ou proposées.
-  const noeuds = useMemo(() => {
-    const autour = new Map<string, typeof troncons>()
-    for (const t of troncons) {
-      for (const n of [t.properties.noeud_de, t.properties.noeud_vers]) autour.set(n, [...(autour.get(n) ?? []), t])
-    }
-    return reseau.noeuds.features
-      .filter((n) => (autour.get(n.id)?.length ?? 0) >= 2)
-      .map((n) => {
-        const bouts = boutsAuNoeud(
-          n.id,
-          (autour.get(n.id) ?? []).map((t) => ({ ...t.properties, points: t.geometry.coordinates })),
-        )
-        return { id: n.id, ...liaisonsRetenues(bouts, n.properties.liaisons) }
-      })
-  }, [troncons, reseau.noeuds.features])
+  const noeuds = useMemo(
+    () =>
+      reseau.noeuds.features
+        .filter((n) => (autour.get(n.id)?.length ?? 0) >= 2)
+        .map((n) => {
+          const bouts = boutsAuNoeud(
+            n.id,
+            (autour.get(n.id) ?? []).map((t) => ({ ...t.properties, points: t.geometry.coordinates })),
+          )
+          return { id: n.id, ...liaisonsRetenues(bouts, n.properties.liaisons) }
+        }),
+    [autour, reseau.noeuds.features],
+  )
 
   if (!projection) return null
   const { px, lonLat, metresParPixel } = projection
@@ -86,9 +114,11 @@ export function CalqueRues({ reseau, outil, selection, onClicTroncon, onBasculer
 
   const connecter = outil === 'connecter'
   const selectionner = outil === 'selection'
-  const positionClic = (e: MouseEvent<SVGElement> | PointerEvent<SVGElement>): LonLat => {
+  const voiesCliquables = selectionner || outil === 'couper'
+  const pointeurSur = (e: PointerEvent<SVGElement> | MouseEvent<SVGElement>): { xy: XY; lonLat: LonLat } => {
     const cadre = (e.currentTarget.ownerSVGElement ?? (e.currentTarget as SVGElement)).getBoundingClientRect()
-    return lonLat(e.clientX - cadre.left, e.clientY - cadre.top)
+    const xy: XY = [e.clientX - cadre.left, e.clientY - cadre.top]
+    return { xy, lonLat: lonLat(xy[0], xy[1]) }
   }
   const pres = (a: LonLat, b: LonLat) => {
     const [ax, ay] = px(a)
@@ -116,7 +146,7 @@ export function CalqueRues({ reseau, outil, selection, onClicTroncon, onBasculer
     },
     onPointerMove: (e: PointerEvent<SVGCircleElement>) => {
       if (!glisse) return
-      const pointeur = positionClic(e)
+      const pointeur = pointeurSur(e).lonLat
       const trouve = cibleSous(glisse.depart, pointeur)
       setGlisse({ ...glisse, pointeur, cible: trouve?.cible ?? null, position: trouve?.position ?? null })
     },
@@ -124,23 +154,117 @@ export function CalqueRues({ reseau, outil, selection, onClicTroncon, onBasculer
     onPointerCancel: () => setGlisse(null),
   })
 
+  // ── Déplacer un nœud (outil Sélection) ; sans bouger, c'est un clic ──
+  const gestesNoeud = (id: string) => ({
+    onPointerDown: (e: PointerEvent<SVGGElement>) => {
+      if (e.button !== 0) return
+      e.stopPropagation()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      const { xy, lonLat: position } = pointeurSur(e)
+      setDeplacement({ id, appui: xy, position, bouge: false })
+    },
+    onPointerMove: (e: PointerEvent<SVGGElement>) => {
+      if (deplacement?.id !== id) return
+      const { xy, lonLat: position } = pointeurSur(e)
+      const bouge = deplacement.bouge || Math.hypot(xy[0] - deplacement.appui[0], xy[1] - deplacement.appui[1]) > TOLERANCE_CLIC_PX
+      setDeplacement({ ...deplacement, position, bouge })
+    },
+    onPointerUp: () => {
+      if (deplacement?.id !== id) return
+      if (deplacement.bouge) onDeplacerNoeud(id, deplacement.position)
+      else onClicNoeud(id, deplacement.position)
+      setDeplacement(null)
+    },
+    onPointerCancel: () => setDeplacement(null),
+  })
+
+  /** Direction (px) de la rue au nœud, pour poser les zébras en travers. */
+  const directionAuNoeud = (noeud: string, centre: XY): XY => {
+    const t = autour.get(noeud)?.[0]
+    if (!t) return [1, 0]
+    const points = t.properties.noeud_de === noeud ? t.geometry.coordinates : [...t.geometry.coordinates].reverse()
+    const [x, y] = px(points[1] ?? points[0]!)
+    const l = Math.hypot(x - centre[0], y - centre[1]) || 1
+    return [(x - centre[0]) / l, (y - centre[1]) / l]
+  }
+  const largeurRue = (noeud: string) =>
+    Math.max(...(autour.get(noeud) ?? []).map((t) => t.properties.voies_avant + t.properties.voies_arriere), 1) * largeur
+
   return (
     <svg ref={refSvg} className={`calque-carrefour calque-rues ${outil ?? 'lecture'}`} aria-label="Voies du réseau">
-      {/* Voies, dans la couleur de leur origine (OSM, corrigée, tracée à la main). */}
+      {/* Voies : réservées (vélo, bus, tram) dans leur couleur, les autres dans celle de leur origine. */}
       {geometrie.voies.map((v) => {
-        const t = parTroncon.get(v.troncon)!
-        const origine = t.properties.source === 'manuel' ? 'manuel' : t.properties.modifie ? 'modifie' : 'osm'
+        const t = parTroncon.get(v.troncon)!.properties
+        const origine = t.source === 'manuel' ? 'manuel' : t.modifie ? 'modifie' : 'osm'
+        const avant = v.cle.includes(':a')
+        const type = typesVoies(avant ? t.voies_avant : t.voies_arriere, avant ? t.types_avant : t.types_arriere)[v.rang] ?? 'generale'
         return (
           <path
             key={v.cle}
-            className={['calque-rue', selection === v.troncon && 'selectionnee', selectionner && 'interactive'].filter(Boolean).join(' ')}
+            className={['calque-rue', voiesCliquables && 'interactive', selection?.type === 'troncon' && selection.id === v.troncon && 'selectionnee']
+              .filter(Boolean)
+              .join(' ')}
             d={chemin(v.points)}
-            stroke={COULEUR_SOURCE[origine]}
+            stroke={COULEUR_TYPE[type] ?? COULEUR_SOURCE[origine]}
             strokeWidth={largeur}
-            onClick={selectionner ? (e) => onClicTroncon(v.troncon, positionClic(e)) : undefined}
+            onClick={voiesCliquables ? (e) => onClicTroncon(v.troncon, pointeurSur(e).lonLat) : undefined}
           >
-            <title>{`${t.properties.nom ?? 'Rue sans nom'} · voie ${v.rang + 1}`}</title>
+            <title>{`${t.nom ?? 'Rue sans nom'} · voie ${v.rang + 1}${type !== 'generale' ? ` (${type})` : ''}`}</title>
           </path>
+        )
+      })}
+
+      {/* Nœuds : passage piéton, ligne d'arrêt à feux, appartenance à un carrefour. */}
+      {reseau.noeuds.features.map((n) => {
+        const p = n.properties
+        const position = deplacement?.id === n.id ? deplacement.position : n.geometry.coordinates
+        const centre = px(position)
+        const [dx, dy] = directionAuNoeud(n.id, centre)
+        const demi = largeurRue(n.id) / 2 + 3
+        const ouvert = p.carrefour_id !== null && p.carrefour_id === carrefourOuvert
+        const selectionne = selection?.type === 'noeud' && selection.id === n.id
+        const titre = [
+          p.feux && 'ligne d’arrêt à feux',
+          p.pieton && `passage piéton${p.pieton === 'feux' ? ' à feux' : p.pieton === 'non_marquee' ? ' non marqué' : ''}`,
+          p.carrefour_id && (ouvert ? 'nœud du carrefour ouvert' : 'nœud d’un carrefour'),
+          `${p.degre} tronçon${p.degre > 1 ? 's' : ''}`,
+        ]
+          .filter(Boolean)
+          .join(' · ')
+        return (
+          <g
+            key={n.id}
+            className={['calque-noeud-reseau', selectionner && 'interactive', selectionne && 'selectionne'].filter(Boolean).join(' ')}
+            {...(selectionner ? gestesNoeud(n.id) : {})}
+          >
+            <title>{titre}</title>
+            {p.pieton && (
+              <line
+                className="zebras"
+                x1={centre[0] - dy * demi}
+                y1={centre[1] + dx * demi}
+                x2={centre[0] + dy * demi}
+                y2={centre[1] - dx * demi}
+                strokeWidth={Math.max(4, 2.5 / metresParPixel)}
+              />
+            )}
+            {p.carrefour_id && (
+              <circle
+                cx={centre[0]}
+                cy={centre[1]}
+                r={9}
+                className="anneau-carrefour"
+                stroke={ouvert ? COULEURS_RESEAU.carrefourOuvert : COULEURS_RESEAU.carrefour}
+              />
+            )}
+            <circle
+              cx={centre[0]}
+              cy={centre[1]}
+              r={p.feux ? 5 : selectionner || selectionne ? 4 : 2.5}
+              className="pastille"
+              fill={p.feux ? COULEURS_RESEAU.feux : p.degre === 1 ? COULEURS_RESEAU.culDeSac : '#ffffff'}
+            />
+          </g>
         )
       })}
 

@@ -44,7 +44,8 @@ import { basculerConnexion, basculerTraversee, deplacerPoignee, poserNoeud, type
 import { OngletGraphe, type Scenario } from './OngletGraphe'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
 import { OngletProgramme } from './OngletProgramme'
-import { OUTILS, RACCOURCIS, type ActionConfiguration, type OutilCarte } from './actions'
+import { OUTILS, OUTILS_GRAPHE, OUTILS_RESEAU, RACCOURCIS, RACCOURCIS_GRAPHE, type ActionConfiguration, type OutilCarte } from './actions'
+import type { OutilVoies } from '../reseau/CalqueRues'
 import { PopupBranche, PopupFeu, PopupLiaison, PopupNoeud, PopupVoie, ReglageAnneau } from './PopupsConfiguration'
 import { feuxDesLignes, geometrieEnregistree, lignesPourMoteur, plansSaisis } from './programme'
 
@@ -54,6 +55,7 @@ const AUCUNE_CONNEXION: Connexion[] = []
 const AUCUN_FEU: string[] = []
 const AUCUNE_LIGNE: never[] = []
 const AUCUNE_SOURCE: Record<string, SourceBranche> = {}
+const AUCUNE_TRACE: Record<string, LonLat[]> = {}
 
 /** Ce qui s'enregistre : sans les champs déduits (sens des branches). */
 const pourEnregistrer = (brouillon: Brouillon) => ({
@@ -67,8 +69,14 @@ const pourEnregistrer = (brouillon: Brouillon) => ({
 
 /** Ce que la carte doit dessiner pendant la configuration. */
 export interface AffichageConfiguration {
+  /** Carrefour bâti sur le réseau : ses voies se modifient avec l'éditeur des voies (docs/RESEAU.md §7). */
+  graphe: boolean
+  /** Outil de l'éditeur des voies (carrefour bâti sur le réseau) ; `autre` : outil propre au carrefour. */
+  outilGraphe: OutilVoies | null
   branches: Branche[]
   connexions: Connexion[]
+  /** Chemin réel des connexions (« de>vers ») d'un carrefour bâti sur le réseau. */
+  traces: Record<string, LonLat[]>
   /** Nœuds de l'anneau d'un giratoire ; null pour un carrefour ordinaire. */
   anneau: Anneau | null
   /** Outil actif sur le calque ; null : dessin seul. */
@@ -99,6 +107,12 @@ type Popup =
   | { type: 'feu'; feu: FeuResume; position: LonLat }
 
 const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>> = {
+  tracer: {
+    titre: 'Tracer une rue',
+    aides: ['Clic sur un nœud, une rue ou un point libre, puis les points de la rue', 'Entrée : finir', '⌫ : retirer le dernier point'],
+  },
+  couper: { titre: 'Couper une rue', aides: ['Clic sur une rue : un nœud y est posé (ligne d’arrêt, passage piéton, voie qui s’ajoute)'] },
+  noeuds: { titre: 'Nœuds du carrefour', aides: ['Clic sur un nœud : l’ajouter au carrefour ou l’en retirer'] },
   ajuster: { titre: 'Caler les voies', aides: ['Glisser les extrémités des voies et des passages sur le marquage de la photo'] },
   connecter: { titre: 'Relier les voies', aides: ['Glisser d’une voie entrante vers une voie sortante', 'Clic sur une liaison : la retirer'] },
   feux: { titre: 'Poser les feux', aides: ['Glisser chaque feu jusqu’à son mât', 'Clic sur le point creux : position OSM'] },
@@ -164,6 +178,11 @@ interface Props {
   onSupprimer: () => void
   /** Quitte la configuration ; les modifications non enregistrées restent dans la liste des brouillons. */
   onFermer: () => void
+  /**
+   * Échap, d'abord pour l'éditeur des voies (tracé en cours, popup d'un tronçon ou d'un nœud) :
+   * true s'il a défait quelque chose.
+   */
+  onEchapVoies?: () => boolean
 }
 
 /** Le focus est dans un champ : les raccourcis d'une lettre ne doivent pas s'y déclencher. */
@@ -176,7 +195,7 @@ const focusLibre = () => {
   return !actif || actif === document.body || actif.classList.contains('maplibregl-canvas')
 }
 
-export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneauBas, onModifierFeux, onSupprimer, onFermer }: Props) {
+export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneauBas, onModifierFeux, onSupprimer, onFermer, onEchapVoies }: Props) {
   const queryClient = useQueryClient()
   const [outil, setOutil] = useState<OutilCarte>('selection')
   const [popup, setPopup] = useState<Popup | null>(null)
@@ -206,15 +225,18 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   })
   const champImport = useRef<HTMLInputElement>(null)
   const enregistre: BranchesCarrefour | undefined = branchesEnregistrees.data
+  /** Carrefour bâti sur le réseau : ses branches se déduisent de ses nœuds, sans brouillon. */
+  const graphe = enregistre?.graphe ?? false
   const configuration: Brouillon = useMemo(
     () =>
-      brouillonBranches ?? {
+      (!graphe && brouillonBranches) || {
         branches: enregistre?.branches ?? AUCUNE_BRANCHE,
         connexions: enregistre?.connexions ?? AUCUNE_CONNEXION,
         anneau: enregistre?.anneau ?? null,
       },
-    [brouillonBranches, enregistre],
+    [graphe, brouillonBranches, enregistre],
   )
+  const traces = enregistre?.traces ?? AUCUNE_TRACE
   const branches = configuration.branches
   const giratoire = carrefour.nature === 'giratoire'
   const centre: LonLat = useMemo(() => enregistre?.centre ?? [0, 0], [enregistre])
@@ -474,10 +496,13 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   useEffect(
     () =>
       onAffichage({
+        graphe,
+        outilGraphe: graphe ? ((OUTILS_RESEAU as readonly string[]).includes(outil) ? (outil as OutilVoies) : 'autre') : null,
         branches,
         connexions: configuration.connexions,
+        traces,
         anneau: configuration.anneau,
-        mode: cadrage ? null : outil,
+        mode: graphe ? (outil === 'feux' ? 'feux' : null) : cadrage ? null : (outil as ModeEdition),
         feuxSurlignes,
         connexionsSurlignees,
         feux,
@@ -487,8 +512,10 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         cadreIa: zoneIa && libelleZoneIa ? { emprise: zoneIa, libelle: libelleZoneIa } : null,
       }),
     [
+      graphe,
       branches,
       configuration.connexions,
+      traces,
       configuration.anneau,
       outil,
       cadrage,
@@ -530,6 +557,8 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
 
   const choisirOutil = (suivant: OutilCarte) => {
     if (suivant === 'noeud' && !giratoire) return
+    // Les outils du réseau et ceux des branches dessinées à la main ne vont pas ensemble.
+    if (graphe !== (OUTILS_GRAPHE.some((o) => o.outil === suivant))) return
     setOutil(suivant)
     setPopup(null)
   }
@@ -542,6 +571,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   }
 
   const executer = (action: ActionConfiguration) => {
+    if (graphe && (action === 'osm' || action === 'ia' || action === 'json')) return
     if (action === 'osm') return detecter()
     if (action === 'ia') return genererIa()
     if (action === 'json') return champImport.current?.click()
@@ -555,6 +585,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   const echap = () => {
     if (cadrage) return setCadrage(null)
     if (popup) return setPopup(null)
+    if (graphe && onEchapVoies?.()) return
     if (ligneActive) return setLigneActive(null)
     if (outil !== 'selection') return setOutil('selection')
     onFermer()
@@ -576,7 +607,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       e.preventDefault()
       return executer('plan')
     }
-    const action = RACCOURCIS[e.key.toLowerCase()]
+    const action = (graphe ? RACCOURCIS_GRAPHE : RACCOURCIS)[e.key.toLowerCase()]
     if (action) executer(action)
   })
   useEffect(() => {
@@ -728,7 +759,12 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
                 {modifications} modification{modifications > 1 ? 's' : ''} à enregistrer
               </Badge>
             )}
-            {giratoire && (configuration.anneau?.noeuds.length ?? 0) < NOEUDS_MIN && branchesEnregistrees.isSuccess && (
+            {graphe && (
+              <Badge colorPalette="purple" title="Branches, voies et liaisons se déduisent de ses nœuds et de leurs voies">
+                Sur le réseau
+              </Badge>
+            )}
+            {!graphe && giratoire && (configuration.anneau?.noeuds.length ?? 0) < NOEUDS_MIN && branchesEnregistrees.isSuccess && (
               <Badge colorPalette="orange" title="Outil Nœud (N), ou détection OSM (O)">
                 Nœuds d’anneau à poser
               </Badge>
@@ -761,15 +797,30 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
             <Chiffre valeur={resultat ? `${Math.round(resultat.cycle_s)} s` : '—'} libelle="cycle" />
           </HStack>
         )}
-        {(giratoire || configuration.anneau) && (
+        {!graphe && (giratoire || configuration.anneau) && (
           <Box mt="2">
             <ReglageAnneau brouillon={configuration} onChanger={setBrouillonBranches} onOutil={choisirOutil} />
           </Box>
         )}
         {branchesEnregistrees.isSuccess && branches.length === 0 && (
           <Indice mt="2">
-            Aucune branche : <Kbd>O</Kbd> pour les détecter depuis OSM
+            {graphe ? (
+              <>
+                Aucune rue n’entre dans le carrefour : <Kbd>N</Kbd> pour ajouter ses nœuds
+              </>
+            ) : (
+              <>
+                Aucune branche : <Kbd>O</Kbd> pour les détecter depuis OSM, ou semez le réseau (outil Voies) et
+                recomposez le carrefour
+              </>
+            )}
           </Indice>
+        )}
+        {graphe && branches.length > 0 && (
+          <Aide mt="2">
+            Branches et liaisons se déduisent du réseau : déplacez, coupez ou reliez ses voies sur la photo ; <Kbd>N</Kbd>{' '}
+            ajoute ou retire des nœuds.
+          </Aide>
         )}
         {cadrage && (
           <CadrageIa
@@ -841,20 +892,24 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         bottom={panneauOuvert ? `calc(${hauteurPanneau} + 16px)` : '22px'}
         zIndex="3"
       >
-        {OUTILS.filter((o) => giratoire || !o.giratoire).map((o) => (
+        {(graphe ? OUTILS_GRAPHE : OUTILS.filter((o) => giratoire || !o.giratoire)).map((o) => (
           <BarreOutils.Outil key={o.outil} {...o} actif={outil === o.outil} onClick={() => choisirOutil(o.outil)} />
         ))}
         <BarreOutils.Separateur />
-        <BarreOutils.Outil glyphe="⟳" libelle="OSM" raccourci="O" disabled={detection.isPending} onClick={detecter} />
-        <BarreOutils.Outil
-          glyphe="✦"
-          libelle="IA"
-          raccourci="I"
-          disabled={iaEnFile || demandeIa.isPending}
-          title="Générer avec OSM + IA : régler le cadre de la photo IGN, puis la détection OSM corrigée par Claude (~1 min, en file)"
-          onClick={genererIa}
-        />
-        <BarreOutils.Outil glyphe="⇪" libelle="JSON" title="Importer un JSON { branches, connexions }" onClick={() => champImport.current?.click()} />
+        {!graphe && (
+          <>
+            <BarreOutils.Outil glyphe="⟳" libelle="OSM" raccourci="O" disabled={detection.isPending} onClick={detecter} />
+            <BarreOutils.Outil
+              glyphe="✦"
+              libelle="IA"
+              raccourci="I"
+              disabled={iaEnFile || demandeIa.isPending}
+              title="Générer avec OSM + IA : régler le cadre de la photo IGN, puis la détection OSM corrigée par Claude (~1 min, en file)"
+              onClick={genererIa}
+            />
+            <BarreOutils.Outil glyphe="⇪" libelle="JSON" title="Importer un JSON { branches, connexions }" onClick={() => champImport.current?.click()} />
+          </>
+        )}
         <BarreOutils.Outil
           glyphe="▭"
           libelle="Plan"

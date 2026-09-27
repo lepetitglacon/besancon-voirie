@@ -8,6 +8,16 @@ export const COULEURS_RESEAU = {
   manuel: '#a3e635',
   selection: '#ffffff',
   carrefour: '#7c5cff',
+  /** Carrefour ouvert : ses nœuds. */
+  carrefourOuvert: '#f97316',
+  /** Ligne d'arrêt à feux. */
+  feux: '#e0561e',
+  /** Passage piéton. */
+  pieton: '#f8fafc',
+  /** Voies réservées. */
+  velo: '#22c55e',
+  bus: '#e11d48',
+  tram: '#a855f7',
   culDeSac: '#ef4444',
   trace: '#f472b6',
 } as const

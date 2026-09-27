@@ -59,6 +59,8 @@ interface PropsCourbe {
   /** Bout de la voie entrante, point amont (pour la tangente), bout de la voie sortante, point aval. */
   entree: [XY, XY]
   sortie: [XY, XY]
+  /** Chemin réel à travers un carrefour de plusieurs nœuds, à la place de la courbe entre les deux voies. */
+  trace?: readonly XY[]
   couleur: string
   etat: EtatCourbe
   feu?: EtatFeu
@@ -67,8 +69,8 @@ interface PropsCourbe {
   onClic?: (e: MouseEvent<SVGElement>) => void
 }
 
-export function Courbe({ entree, sortie, couleur, etat, feu, titre, onSurvol, onClic }: PropsCourbe) {
-  const chemin = cheminConnexion(entree, sortie)
+export function Courbe({ entree, sortie, trace, couleur, etat, feu, titre, onSurvol, onClic }: PropsCourbe) {
+  const chemin = trace && trace.length >= 2 ? d(trace) : cheminConnexion(entree, sortie)
   const interactive = onSurvol !== undefined
   return (
     <g className={classes('calque-courbe', etat, feu && `feu-${feu}`)}>

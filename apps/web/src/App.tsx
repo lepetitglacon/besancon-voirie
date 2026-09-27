@@ -7,7 +7,7 @@ import { useMap } from 'react-map-gl/maplibre'
 import { api } from './api'
 import { abandonnerBrouillons, useBrouillons, type BrouillonsCarrefour } from './configuration/brouillons'
 import { CarteSuivi } from './configuration/CarteSuivi'
-import { MENU_CONFIGURATION, type ActionConfiguration } from './configuration/actions'
+import { MENU_CONFIGURATION, MENU_GRAPHE, type ActionConfiguration } from './configuration/actions'
 import {
   ConfigurationCarrefour,
   hauteurPanneau,
@@ -46,6 +46,7 @@ import type { OutilVoies } from './reseau/CalqueRues'
 import { CoucheReseau } from './reseau/CoucheReseau'
 import { EnTeteReseau } from './reseau/EnTeteReseau'
 import { useModeReseau, ZOOM_VOIES } from './reseau/modeReseau'
+import { PopupNoeud } from './reseau/PopupNoeud'
 import { PopupTroncon } from './reseau/PopupTroncon'
 
 /** Le flux Ginko est mis en cache 10 s par l'API. */
@@ -114,16 +115,16 @@ function App() {
     /** Proposition IA à charger à l'ouverture (« Ouvrir » d'une notification). */
     ouvrirAnalyseIa?: { id: string }
   }) | null>(null)
-  // Éditeur des voies du réseau, hors configuration d'un carrefour.
-  const editeur = modeReseau && configuration === null
-  const reseau = useModeReseau({ actif: editeur, bbox, zoom })
   const [panneauBasOuvert, setPanneauBasOuvert] = useState(false)
   /** Carrefour dont la fiche temps réel est ouverte. */
   const [ficheTempsReel, setFicheTempsReel] = useState<CarrefourChoisi | null>(null)
   const brouillons = useBrouillons()
   const [affichageConfiguration, setAffichageConfiguration] = useState<AffichageConfiguration>({
+    graphe: false,
+    outilGraphe: null,
     branches: [],
     connexions: [],
+    traces: {},
     anneau: null,
     mode: null,
     feuxSurlignes: [],
@@ -133,6 +134,16 @@ function App() {
     selection: null,
     ancre: null,
     cadreIa: null,
+  })
+  // Éditeur des voies : seul (outil Voies), ou dans un carrefour ouvert bâti sur le réseau.
+  const carrefourGraphe = configuration && affichageConfiguration.graphe ? configuration.carrefour : null
+  const editeur = (modeReseau && configuration === null) || carrefourGraphe !== null
+  const reseau = useModeReseau({
+    actif: editeur,
+    bbox,
+    zoom,
+    carrefourOuvert: carrefourGraphe && { id: carrefourGraphe.id, nom: carrefourGraphe.nom },
+    nomCarrefour: (id) => carrefours.data?.features.find((f) => f.id === id)?.properties.nom ?? 'un autre carrefour',
   })
   const [ciblePopup, setCiblePopup] = useState<HTMLElement | null>(null)
   const [pointMenu, setPointMenu] = useState<LonLat | null>(null)
@@ -147,7 +158,7 @@ function App() {
     (de, vers) => panneauConfiguration.current?.connecter(de, vers),
     [],
   )
-  const outilEditeur: OutilVoies | null = editeur ? reseau.outil : null
+  const outilEditeur: OutilVoies | null = !editeur ? null : configuration ? affichageConfiguration.outilGraphe : reseau.outil
   const dessinerZoneIa = useCallback<ConfigurationCarrefourHandle['dessinerZoneIa']>(
     (emprise) => panneauConfiguration.current?.dessinerZoneIa(emprise),
     [],
@@ -281,6 +292,11 @@ function App() {
     setConfiguration(choix)
   }
   const reprendre = (b: BrouillonsCarrefour) => configurer({ carrefour: b.carrefour, position: b.position })
+  /** Ouvre un carrefour de la carte d'après son identifiant (depuis la popup d'un nœud). */
+  const configurerCarrefour = (id: string) => {
+    const objet = carrefours.data?.features.find((f) => f.id === id)
+    if (objet) configurer({ carrefour: objet.properties, position: objet.geometry.coordinates as [number, number] })
+  }
 
   const confirmerSuppression = (carrefour: CarrefourResume) => {
     if (window.confirm(`Supprimer « ${carrefour.nom} » ? Ses feux redeviendront libres.`)) supprimer.mutate(carrefour)
@@ -392,7 +408,9 @@ function App() {
     ...(tempsReel
       ? []
       : configuration
-        ? MENU_CONFIGURATION
+        ? affichageConfiguration.graphe
+          ? MENU_GRAPHE
+          : MENU_CONFIGURATION
         : [{ valeur: 'composer', glyphe: '⌖', libelle: 'Composer un carrefour', raccourci: 'N' }, { type: 'separateur' as const }]),
     { type: 'separateur' },
     { valeur: 'centrer', glyphe: '✥', libelle: 'Centrer la carte ici' },
@@ -417,7 +435,8 @@ function App() {
             carrefours={carrefours.data}
             afficherCarrefours={mode !== 'brut' || brut.carrefours || edition !== null || configuration !== null}
             tempsReel={tempsReel}
-            fond={fond}
+            // Éditeur des voies : on cale nœuds et voies sur la photo IGN, vue de dessus.
+            fond={editeur ? { ...fond, fond: 'satellite', relief3d: false } : fond}
             feux={feux.data}
             edition={
               edition && {
@@ -428,14 +447,17 @@ function App() {
             }
             onEmprise={changerEmprise}
             reseauActif={modeReseau && !configuration}
-            curseur={modeReseau && !configuration && reseau.outil === 'tracer' ? 'crosshair' : undefined}
+            curseur={outilEditeur === 'tracer' || outilEditeur === 'couper' ? 'crosshair' : undefined}
             rues={
               editeur && zoom >= ZOOM_VOIES && reseau.donnees.data
                 ? {
                     reseau: reseau.donnees.data,
                     outil: outilEditeur,
-                    selection: reseau.selection?.id ?? null,
-                    onClicTroncon: reseau.selectionner,
+                    selection: reseau.selection,
+                    carrefourOuvert: carrefourGraphe?.id ?? null,
+                    onClicNoeud: (id, position) => reseau.selectionner('noeud', id, position),
+                    onClicTroncon: (id, position) => reseau.clic(position, { type: 'troncon', id }, () => false, outilEditeur ?? 'autre'),
+                    onDeplacerNoeud: (id, position) => reseau.modifierNoeud(id, { position }),
                     onBasculerLiaison: reseau.basculerLiaison,
                   }
                 : null
@@ -484,21 +506,45 @@ function App() {
                 trace={reseau.trace}
                 onClic={(position, cible, memePoint) => reseau.clic(position, cible, memePoint, outilEditeur ?? 'autre')}
                 popup={
-                  outilEditeur === 'selection' && reseau.selection && reseau.troncon
-                    ? {
-                        position: reseau.selection.position,
-                        contenu: (
-                          <PopupTroncon
-                            key={reseau.troncon.id}
-                            troncon={reseau.troncon}
-                            enregistrement={{ enCours: reseau.modification.isPending, erreur: reseau.modification.error?.message ?? null }}
-                            onModifier={reseau.modifier}
-                            onSupprimer={reseau.supprimer}
-                            onFermer={reseau.fermerSelection}
-                          />
-                        ),
-                      }
-                    : null
+                  outilEditeur !== 'selection' || !reseau.selection
+                    ? null
+                    : reseau.troncon
+                      ? {
+                          position: reseau.selection.position,
+                          contenu: (
+                            <PopupTroncon
+                              key={reseau.troncon.id}
+                              troncon={reseau.troncon}
+                              enregistrement={{ enCours: reseau.modification.isPending, erreur: reseau.modification.error?.message ?? null }}
+                              onModifier={reseau.modifier}
+                              onSupprimer={reseau.supprimer}
+                              onCouper={() => {
+                                reseau.couper(reseau.troncon!.id, reseau.selection!.position)
+                                reseau.fermerSelection()
+                              }}
+                              onFermer={reseau.fermerSelection}
+                            />
+                          ),
+                        }
+                      : reseau.noeud
+                        ? {
+                            position: reseau.selection.position,
+                            contenu: (
+                              <PopupNoeud
+                                key={reseau.noeud.id}
+                                noeud={reseau.noeud}
+                                carrefourOuvert={carrefourGraphe && { id: carrefourGraphe.id, nom: carrefourGraphe.nom }}
+                                nomCarrefour={(id) => carrefours.data?.features.find((f) => f.id === id)?.properties.nom ?? 'carrefour'}
+                                enregistrement={{ enCours: reseau.modificationNoeud.isPending, erreur: reseau.modificationNoeud.error?.message ?? null }}
+                                onModifier={(m) => reseau.modifierNoeud(reseau.noeud!.id, m)}
+                                onLiaisonsParDefaut={() => reseau.liaisonsParDefaut(reseau.noeud!.id)}
+                                onFusionner={() => reseau.fusionner(reseau.noeud!.id)}
+                                onOuvrirCarrefour={configurerCarrefour}
+                                onFermer={reseau.fermerSelection}
+                              />
+                            ),
+                          }
+                        : null
                 }
               />
             )}
@@ -524,6 +570,7 @@ function App() {
           }}
           onSupprimer={() => confirmerSuppression(configuration.carrefour)}
           onFermer={() => setConfiguration(null)}
+          onEchapVoies={reseau.echap}
         />
       ) : tempsReel ? (
         <CarteEnTete
@@ -661,6 +708,13 @@ function App() {
                   raccourci="T"
                   actif={reseau.outil === 'tracer'}
                   onClick={() => reseau.choisirOutil('tracer')}
+                />
+                <BarreOutils.Outil
+                  glyphe="✂"
+                  libelle="Couper"
+                  raccourci="X"
+                  actif={reseau.outil === 'couper'}
+                  onClick={() => reseau.choisirOutil('couper')}
                 />
                 <BarreOutils.Outil
                   glyphe="↝"

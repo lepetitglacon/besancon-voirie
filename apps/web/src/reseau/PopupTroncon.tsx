@@ -1,20 +1,56 @@
 /**
- * Popup d'un tronçon du réseau : nom, voies par sens, vitesse, sens du tracé. Chaque changement
- * est enregistré aussitôt.
+ * Popup d'un tronçon du réseau : nom, voies par sens et leur type (générale, bus, vélo, tram),
+ * vitesse, sens du tracé, coupe. Chaque changement est enregistré aussitôt.
  */
 import { Badge, Button, HStack, Input, Stack, Text } from '@chakra-ui/react'
-import { vitesseParDefaut } from '@voirie/engine'
-import type { ModificationTroncon } from '@voirie/schema'
+import { typesVoies, vitesseParDefaut } from '@voirie/engine'
+import type { ModificationTroncon, TypeVoie } from '@voirie/schema'
 import { useState } from 'react'
 import type { Troncon } from '../api'
-import { Aide, BarreOutils, Compteur, Message, PopupCarte, Section } from '../ds'
+import { Aide, BarreOutils, Compteur, Message, PopupCarte, Section, Selecteur } from '../ds'
 
 interface Props {
   troncon: Troncon
   enregistrement: { enCours: boolean; erreur: string | null }
   onModifier: (modification: ModificationTroncon) => void
   onSupprimer: () => void
+  /** Coupe le tronçon là où on a cliqué : un nœud y est posé. */
+  onCouper: () => void
   onFermer: () => void
+}
+
+const TYPES: Array<{ valeur: TypeVoie; libelle: string }> = [
+  { valeur: 'generale', libelle: 'Générale' },
+  { valeur: 'bus', libelle: 'Bus' },
+  { valeur: 'velo', libelle: 'Vélo' },
+  { valeur: 'tram', libelle: 'Tram' },
+]
+
+/** Type de chaque voie d'un sens, de gauche à droite pour le conducteur. */
+function TypesDuSens({ libelle, types, onChanger }: { libelle: string; types: TypeVoie[]; onChanger: (types: TypeVoie[]) => void }) {
+  if (types.length === 0) return null
+  return (
+    <HStack gap="1.5" wrap="wrap">
+      <Text textStyle="xs" color="fg.muted" w="14">
+        {libelle}
+      </Text>
+      {types.map((type, rang) => (
+        <Selecteur
+          key={rang}
+          size="xs"
+          aria-label={`${libelle}, voie ${rang + 1}`}
+          valeur={type}
+          onChange={(v) => onChanger(types.map((t, i) => (i === rang ? (v as TypeVoie) : t)))}
+        >
+          {TYPES.map((t) => (
+            <option key={t.valeur} value={t.valeur}>
+              {t.libelle}
+            </option>
+          ))}
+        </Selecteur>
+      ))}
+    </HStack>
+  )
 }
 
 const ORIGINES = {
@@ -23,7 +59,7 @@ const ORIGINES = {
   manuel: { libelle: 'Tracé à la main', couleur: 'green' },
 } as const
 
-export function PopupTroncon({ troncon, enregistrement, onModifier, onSupprimer, onFermer }: Props) {
+export function PopupTroncon({ troncon, enregistrement, onModifier, onSupprimer, onCouper, onFermer }: Props) {
   const t = troncon.properties
   const [nom, setNom] = useState<string | null>(null)
   const origine = ORIGINES[t.source === 'manuel' ? 'manuel' : t.modifie ? 'modifie' : 'osm']
@@ -59,6 +95,9 @@ export function PopupTroncon({ troncon, enregistrement, onModifier, onSupprimer,
             Supprimer
           </Button>
           <BarreOutils.Espace />
+          <Button title="Poser un nœud ici : ligne d’arrêt, début d’une voie de présélection, passage piéton" onClick={onCouper}>
+            ✂ Couper ici
+          </Button>
           <Button title="Retourner le sens du tracé : les voies des deux sens s'échangent" onClick={() => onModifier({ inverser: true })}>
             ⇄ Inverser
           </Button>
@@ -99,6 +138,12 @@ export function PopupTroncon({ troncon, enregistrement, onModifier, onSupprimer,
             />
           </HStack>
           <Aide>0 voie : sens interdit. Les chevrons sur la carte montrent le sens du tracé.</Aide>
+        </Stack>
+      </Section>
+      <Section libelle="Types de voies (de gauche à droite)">
+        <Stack gap="1.5">
+          <TypesDuSens libelle="Tracé (>)" types={typesVoies(t.voies_avant, t.types_avant)} onChanger={(types) => onModifier({ types_avant: types })} />
+          <TypesDuSens libelle="Inverse (<)" types={typesVoies(t.voies_arriere, t.types_arriere)} onChanger={(types) => onModifier({ types_arriere: types })} />
         </Stack>
       </Section>
       <Section libelle="Vitesse">
