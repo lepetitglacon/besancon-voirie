@@ -20,6 +20,7 @@ import {
   surArc,
   trajetGiratoire,
   traverseIlot,
+  voiesRaccordees,
   type Anneau,
   type PassageAnneau,
   type TrajetGiratoire,
@@ -111,7 +112,7 @@ function trajetsDesConnexions(geometrie: GeometrieCarrefour, repere: Repere): Tr
     if (!anneau || traverseIlot(types?.get(connexion.de), types?.get(connexion.vers))) {
       return [{ mouvement, trajectoire: { ...base, courbe: courbeConnexionXY(entree, sortie, repere) } }];
     }
-    const trajet = trajetGiratoire(entree, sortie, anneau, repere);
+    const trajet = trajetGiratoire(entree, sortie, anneau, repere, voiesRaccordees(connexion, geometrie.voies.keys(), anneau));
     const anneauEntier: PassageAnneau = {
       debut: trajet.debut,
       longueur: trajet.longueur,

@@ -9,6 +9,7 @@
  */
 import { LARGEUR_VOIE_M, repereLocal, type LonLat, type Repere, type Segment, type XY } from './geometrie.js';
 import { normaliserAngle } from './branches.js';
+import type { Connexion } from './connexions.js';
 
 export interface Anneau {
   /** Centre de l'îlot. */
@@ -36,8 +37,43 @@ const EPSILON_DEG = 1e-6;
 /** Distance entre le centre de l'îlot et la ligne d'arrêt des voies entrantes proposées (m). */
 export const distanceArretGiratoire = (anneau: Anneau) => anneau.rayon_m + RECUL_ENTREE_M;
 
-/** Rayon de la trajectoire des véhicules sur l'anneau : le milieu de la chaussée annulaire (m). */
+/** Rayon du milieu de la chaussée annulaire (m) : repère des feux d'anneau et des franchissements. */
 export const rayonCirculation = (anneau: Anneau) => Math.max(anneau.rayon_m - (anneau.voies * LARGEUR_VOIE_M) / 2, 1);
+
+/** Rayon du milieu de la voie `voie` de l'anneau, numérotées depuis l'extérieur (0 = voie extérieure). */
+const rayonVoie = (anneau: Anneau, voie: number) => Math.max(anneau.rayon_m - (voie + 0.5) * LARGEUR_VOIE_M, 1);
+
+/**
+ * Voies de l'anneau au droit des voies raccordées, numérotées depuis l'extérieur : la voie
+ * entrante (ou sortante) la plus à droite donne sur la voie extérieure de l'anneau.
+ */
+export interface VoiesRaccordees {
+  entree: number;
+  sortie: number;
+}
+
+/** Voie de l'anneau au droit de la voie de rang `rang` parmi `nombre` voies de même sens de la branche. */
+export const voieAuDroit = (rang: number, nombre: number, anneau: Anneau) => Math.min(Math.max(nombre - 1 - rang, 0), anneau.voies - 1);
+
+/**
+ * Voies de l'anneau au droit d'une connexion, d'après le rang de ses voies et le nombre de
+ * voies de même sens de leurs branches (`cles` : toutes les clés de voie du carrefour).
+ */
+export function voiesRaccordees(connexion: Connexion, cles: Iterable<string>, anneau: Anneau): VoiesRaccordees {
+  const nombres = new Map<string, number>();
+  for (const cle of cles) {
+    const prefixe = cle.replace(/\d+$/, '');
+    nombres.set(prefixe, (nombres.get(prefixe) ?? 0) + 1);
+  }
+  const auDroit = (cle: string) => {
+    const rang = Number(/\d+$/.exec(cle)?.[0] ?? 0);
+    return voieAuDroit(rang, nombres.get(cle.replace(/\d+$/, '')) ?? 1, anneau);
+  };
+  return { entree: auDroit(connexion.de), sortie: auDroit(connexion.vers) };
+}
+
+/** Degrés parcourus avant la sortie pendant lesquels on se rabat vers la voie de sortie (au plus). */
+const RABATTEMENT_MAX_DEG = 45;
 
 /** Azimut (°) du point `p` vu depuis `centre`, en coordonnées planes. */
 export function azimutXY(centre: XY, p: XY): number {
@@ -86,7 +122,11 @@ export interface TrajetGiratoire {
   /** Du point où la trajectoire quitte l'anneau au bout de la voie sortante. */
   sortie: XY[];
   centre: XY;
+  /** Rayon de la voie de l'anneau suivie. */
   rayon: number;
+  /** Rayon de la voie qui donne sur la sortie : on s'y rabat pendant les `rabattement` derniers degrés. */
+  rayonSortie: number;
+  rabattement: number;
 }
 
 /** Écart (°) entre le bout d'une voie et son raccord à l'anneau : on rejoint l'anneau en tournant. */
@@ -94,18 +134,39 @@ function raccord(distanceAuCentre: number, rayon: number): number {
   return Math.min(Math.max(distanceAuCentre - rayon, 0) / rayon / RAD, RACCORD_MAX_DEG);
 }
 
-export function trajetGiratoire(entree: Segment, sortie: Segment, anneau: Anneau, repere: Repere): TrajetGiratoire {
+/**
+ * Trajet par l'anneau. Sur un anneau à plusieurs voies, on prend la voie extérieure pour les
+ * premières sorties et une voie plus intérieure pour aller plus loin (le tour se partage en
+ * autant de tranches que de voies : sur trois voies, moins d'un tiers de tour, moins de deux
+ * tiers, au-delà), jamais plus extérieure que celle au droit de la voie
+ * entrante ; avant la sortie, on se rabat sur la voie au droit de la voie sortante.
+ */
+export function trajetGiratoire(
+  entree: Segment,
+  sortie: Segment,
+  anneau: Anneau,
+  repere: Repere,
+  raccordees: VoiesRaccordees = { entree: 0, sortie: 0 },
+): TrajetGiratoire {
   const centre = repere.versXY(anneau.centre);
-  const rayon = rayonCirculation(anneau);
+  const milieu = rayonCirculation(anneau);
   const p0 = repere.versXY(entree[0]);
   const p3 = repere.versXY(sortie[0]);
   const directionEntree = unitaire(moins(p0, repere.versXY(entree[1]))); // vers l'anneau
   const directionSortie = unitaire(moins(repere.versXY(sortie[1]), p3)); // en quittant l'anneau
 
-  const debut = (azimutXY(centre, p0) - raccord(Math.hypot(...moins(p0, centre)), rayon) + 360) % 360;
-  const fin = (azimutXY(centre, p3) + raccord(Math.hypot(...moins(p3, centre)), rayon)) % 360;
+  const debut = (azimutXY(centre, p0) - raccord(Math.hypot(...moins(p0, centre)), milieu) + 360) % 360;
+  const fin = (azimutXY(centre, p3) + raccord(Math.hypot(...moins(p3, centre)), milieu)) % 360;
+  // Entrée et sortie au même point : un tour complet (demi-tour sur une branche étroite).
+  const longueur = parcours(debut, fin) || 360;
+  // Tranche d'après l'écart entre la voie entrante et la voie sortante, vues du centre : les
+  // raccords raccourcissent l'arc parcouru, pas la distance entre les branches.
+  const ecart = parcours(azimutXY(centre, p0), azimutXY(centre, p3)) || 360;
+  const selonParcours = Math.min(Math.floor((ecart / 360) * anneau.voies), anneau.voies - 1);
+  const rayon = rayonVoie(anneau, Math.max(selonParcours, raccordees.entree));
+  const rayonSortie = rayonVoie(anneau, raccordees.sortie);
   const p1 = pointAnneau(centre, rayon, debut);
-  const p2 = pointAnneau(centre, rayon, fin);
+  const p2 = pointAnneau(centre, rayonSortie, fin);
   const kEntree = 0.5 * Math.hypot(...moins(p1, p0));
   const kSortie = 0.5 * Math.hypot(...moins(p3, p2));
   const tEntree = tangente(debut);
@@ -119,8 +180,7 @@ export function trajetGiratoire(entree: Segment, sortie: Segment, anneau: Anneau
       POINTS_RACCORD,
     ),
     debut,
-    // Entrée et sortie au même point : un tour complet (demi-tour sur une branche étroite).
-    longueur: parcours(debut, fin) || 360,
+    longueur,
     sortie: bezier(
       p2,
       [p2[0] + tSortie[0] * kSortie, p2[1] + tSortie[1] * kSortie],
@@ -130,7 +190,17 @@ export function trajetGiratoire(entree: Segment, sortie: Segment, anneau: Anneau
     ),
     centre,
     rayon,
+    rayonSortie,
+    rabattement: rayon === rayonSortie ? 0 : Math.min(RABATTEMENT_MAX_DEG, longueur / 3),
   };
+}
+
+/** Rayon du trajet après `parcouru` degrés sur l'anneau : constant, puis rabattement vers la sortie. */
+function rayonA(trajet: TrajetGiratoire, parcouru: number): number {
+  const depart = trajet.longueur - trajet.rabattement;
+  if (trajet.rabattement === 0 || parcouru <= depart) return trajet.rayon;
+  const t = Math.min((parcouru - depart) / trajet.rabattement, 1);
+  return trajet.rayon + (trajet.rayonSortie - trajet.rayon) * t * t * (3 - 2 * t);
 }
 
 /**
@@ -140,9 +210,10 @@ export function trajetGiratoire(entree: Segment, sortie: Segment, anneau: Anneau
 export function courbeTrajet(trajet: TrajetGiratoire, depuis = 0, jusqua = trajet.longueur): XY[] {
   const etendue = jusqua - depuis;
   const pas = Math.max(1, Math.ceil(etendue / PAS_ARC_DEG));
-  const arc = Array.from({ length: pas + 1 }, (_, i) =>
-    pointAnneau(trajet.centre, trajet.rayon, trajet.debut - depuis - (etendue * i) / pas),
-  );
+  const arc = Array.from({ length: pas + 1 }, (_, i) => {
+    const parcouru = depuis + (etendue * i) / pas;
+    return pointAnneau(trajet.centre, rayonA(trajet, parcouru), trajet.debut - parcouru);
+  });
   return [
     ...(depuis <= EPSILON_DEG ? trajet.entree.slice(0, -1) : []),
     ...arc,
@@ -151,9 +222,9 @@ export function courbeTrajet(trajet: TrajetGiratoire, depuis = 0, jusqua = traje
 }
 
 /** Courbe d'une connexion par l'anneau, en lon/lat (pour le dessin). */
-export function courbeGiratoire(entree: Segment, sortie: Segment, anneau: Anneau): LonLat[] {
+export function courbeGiratoire(entree: Segment, sortie: Segment, anneau: Anneau, raccordees?: VoiesRaccordees): LonLat[] {
   const repere = repereLocal(anneau.centre);
-  return courbeTrajet(trajetGiratoire(entree, sortie, anneau, repere)).map(repere.versLonLat);
+  return courbeTrajet(trajetGiratoire(entree, sortie, anneau, repere, raccordees)).map(repere.versLonLat);
 }
 
 /** Contour de l'anneau et de l'îlot, en lon/lat (pour le dessin). */

@@ -14,6 +14,7 @@ import {
   LARGEUR_VOIE_M as LARGEUR_VOIE_REELLE_M,
   repereLocal,
   traverseIlot,
+  voiesRaccordees,
   type LonLat,
   type XY,
 } from '@voirie/engine'
@@ -486,7 +487,11 @@ export function CalqueCarrefour(props: Props) {
             key={cle}
             entree={segmentPx(entree.geom)}
             sortie={segmentPx(sortie.geom)}
-            points={parAnneau ? courbeGiratoire(entree.geom, sortie.geom, apercu.anneau!).map(px) : undefined}
+            points={
+              parAnneau
+                ? courbeGiratoire(entree.geom, sortie.geom, apercu.anneau!, voiesRaccordees(c, voies.keys(), apercu.anneau!)).map(px)
+                : undefined
+            }
             couleur={couleurs.get(c.de) ?? '#ffffff'}
             etat={etatCourbe(cle)}
             feu={feux ? (feux.connexions.get(cle) ?? 'libre') : undefined}

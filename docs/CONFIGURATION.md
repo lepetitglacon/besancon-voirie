@@ -501,7 +501,11 @@ ALTER TABLE ligne_feux ADD COLUMN anneau text;             -- feu d'anneau : bra
 ### Trajectoires (`giratoire.ts`)
 
 Une connexion suit l'anneau : raccord d'entrée (Bézier tangente à la voie puis à l'anneau),
-arc au milieu de la chaussée annulaire, raccord de sortie. Seules les connexions **tram à
+arc sur une voie de l'anneau, raccord de sortie. Sur un anneau à plusieurs voies, la voie
+dépend de la distance à parcourir : voie extérieure pour les premières sorties, plus
+intérieure pour aller plus loin (sur trois voies : moins d'un tiers de tour, moins de deux
+tiers, au-delà). Une voie entrante de gauche ne donne jamais sur une voie plus extérieure que
+celle à son droit ; avant la sortie, on se rabat sur la voie au droit de la voie sortante. Seules les connexions **tram à
 tram** et **bus à bus** (site propre) traversent l'îlot en ligne droite.
 
 Un feu d'anneau se place juste en amont (3 m) du premier point où la branche touche

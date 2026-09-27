@@ -10,6 +10,7 @@ import {
   rayonCirculation,
   trajetGiratoire,
   traverseIlot,
+  voiesRaccordees,
   type Anneau,
 } from './giratoire.js';
 
@@ -61,6 +62,35 @@ describe('trajets par l’anneau', () => {
     const [x0, y0] = courbeTrajet(t)[0]!;
     const bout = repere.versXY(voies.get('S:e0')![0]);
     expect(Math.hypot(x0 - bout[0], y0 - bout[1])).toBeLessThan(1e-9);
+  });
+
+  it('répartit les trajets sur les voies d’un anneau à trois voies, puis se rabat avant la sortie', () => {
+    const large: Anneau = { centre, rayon_m: 25, voies: 3 };
+    const voiesLarges = new Map<string, Segment>();
+    for (const b of branches) {
+      const g = genererVoies(centre, b.azimut, 2, 1, distanceArretGiratoire(large));
+      g.entrantes.forEach((geom, rang) => voiesLarges.set(`${b.code}:e${rang}`, geom));
+      voiesLarges.set(`${b.code}:s0`, g.sortantes[0]!);
+    }
+    const t = (de: string, vers: string) => {
+      const connexion = { de, vers };
+      return trajetGiratoire(voiesLarges.get(de)!, voiesLarges.get(vers)!, large, repere, voiesRaccordees(connexion, voiesLarges.keys(), large));
+    };
+    const rayons = (x: number) => large.rayon_m - (x + 0.5) * 3.25;
+    // Voie entrante de droite : extérieur pour la première sortie, intérieur pour les trois quarts.
+    expect(t('S:e1', 'E:s0').rayon).toBeCloseTo(rayons(0), 6);
+    expect(t('S:e1', 'N:s0').rayon).toBeCloseTo(rayons(1), 6);
+    expect(t('S:e1', 'O:s0').rayon).toBeCloseTo(rayons(2), 6);
+    // Voie entrante de gauche : jamais sur la voie extérieure.
+    expect(t('S:e0', 'E:s0').rayon).toBeCloseTo(rayons(1), 6);
+    // On quitte l'anneau par la voie extérieure, au droit de l'unique voie sortante.
+    const versO = t('S:e1', 'O:s0');
+    expect(versO.rayonSortie).toBeCloseTo(rayons(0), 6);
+    const centreXY = repere.versXY(centre);
+    // Dernier point de l'arc, juste avant le raccord de sortie.
+    const arc = courbeTrajet(versO, 0, versO.longueur - 1e-3);
+    const [x, y] = arc.at(-1)!;
+    expect(Math.hypot(x - centreXY[0], y - centreXY[1])).toBeCloseTo(rayons(0), 3);
   });
 
   it('fait traverser l’îlot au tram et au bus en site propre seulement', () => {
