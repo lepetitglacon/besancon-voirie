@@ -7,7 +7,7 @@
  * relayés au canvas : la carte zoome et se déplace aussi depuis une voie ou une liaison.
  */
 import { cleVoie, flechesParVoie, repereLocal, type LonLat, type Segment, type XY } from '@voirie/engine'
-import type { Branche, Connexion, EmpriseIa, TypeFeu } from '@voirie/schema'
+import type { Branche, Connexion, EmpriseIa, LiensRaccordement, TypeFeu } from '@voirie/schema'
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
 import { useMap } from 'react-map-gl/maplibre'
 import { FLECHES } from '../libelles'
@@ -27,7 +27,9 @@ import {
   type EtatPoignee,
   type EtatVoie,
 } from './elements'
+import type { RaccordementAffiche } from '../raccordements'
 import { useProjection } from './projection'
+import { Raccordements } from './Raccordements'
 
 /**
  * Outil actif sur le calque : « selection » ouvre la popup de l'élément cliqué, « pieton » ajoute
@@ -41,6 +43,7 @@ export type ClicCalque =
   | { type: 'voie'; cle: string; position: LonLat }
   | { type: 'connexion'; de: string; vers: string; position: LonLat }
   | { type: 'branche'; code: string; position: LonLat }
+  | { type: 'raccordement'; cle: string; position: LonLat }
 
 /** Feu du carrefour, déplaçable en mode « feux » pour le poser sur son mât. */
 export interface FeuPlacable {
@@ -77,6 +80,10 @@ interface Props {
   onApercuFeu: (apercu: ApercuFeu | null) => void
   /** Clic sur une voie, une connexion ou le code d'une branche (outils « selection » et « pieton »). */
   onClic?: (clic: ClicCalque) => void
+  /** Bouts des tronçons du réseau raccordés au carrefour, avec leurs liens voie à voie. */
+  raccordements?: RaccordementAffiche[]
+  /** Ajoute ou retire un lien entre une voie de tronçon et une voie de branche (outil Liaison). */
+  onBasculerLien?: (cle: string, sens: keyof LiensRaccordement, paire: [number, number]) => void
   /** Voie tracée en mode « tracer » : [bout côté carrefour, bout éloigné]. */
   onTracer?: (geom: Segment) => void
   /** Élément sélectionné, mis en avant (clé de voie, « de>vers » ou code de branche). */
@@ -128,6 +135,8 @@ export function CalqueCarrefour(props: Props) {
     onTracer,
     selection,
     cadrePhoto,
+    raccordements,
+    onBasculerLien,
   } = props
   const projection = useProjection()
   const { current: carte } = useMap()
@@ -402,6 +411,19 @@ export function CalqueCarrefour(props: Props) {
               feu={feux ? (feux.traversees.get(b.code) ?? 'libre') : undefined}
             />
           ),
+      )}
+
+      {raccordements && raccordements.length > 0 && (
+        <Raccordements
+          raccordements={raccordements}
+          branches={apercu.branches}
+          mode={mode === 'selection' || mode === 'connecter' ? mode : mode === null ? null : 'autre'}
+          projection={projection}
+          largeurVoie={largeurVoie}
+          selection={selection ?? null}
+          onBasculerLien={(r, sens, paire) => onBasculerLien?.(r.cle, sens, paire)}
+          onClic={(r, position) => onClic?.({ type: 'raccordement', cle: r.cle, position })}
+        />
       )}
 
       {[...voies].map(([cle, voie]) => (

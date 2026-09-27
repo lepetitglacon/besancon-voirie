@@ -40,7 +40,14 @@ import { OngletGraphe, type Scenario } from './OngletGraphe'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
 import { OngletProgramme } from './OngletProgramme'
 import { OUTILS, RACCOURCIS, type ActionConfiguration, type OutilCarte } from './actions'
-import { PopupBranche, PopupCarrefour, PopupFeu, PopupLiaison, PopupVoie } from './PopupsConfiguration'
+import { PopupBranche, PopupCarrefour, PopupFeu, PopupLiaison, PopupRaccordement, PopupVoie } from './PopupsConfiguration'
+import {
+  basculerLien,
+  editer,
+  raccordementsAffiches,
+  type BrouillonRaccordements,
+  type RaccordementAffiche,
+} from './raccordements'
 import { feuxDesLignes, geometrieEnregistree, lignesPourMoteur, plansSaisis } from './programme'
 
 /** Références stables : un `[]` littéral relancerait les effets de synchronisation à chaque rendu. */
@@ -48,6 +55,7 @@ const AUCUNE_BRANCHE: Branche[] = []
 const AUCUNE_CONNEXION: Connexion[] = []
 const AUCUN_FEU: string[] = []
 const AUCUNE_LIGNE: never[] = []
+const AUCUN_RACCORDEMENT: never[] = []
 
 /** Ce qui s'enregistre : sans les champs déduits (sens des branches). */
 const pourEnregistrer = (brouillon: Brouillon) => ({
@@ -67,6 +75,8 @@ export interface AffichageConfiguration {
   feuxSurlignes: string[]
   /** Connexions de la ligne de feux active (« de>vers »), mises en avant sur la carte. */
   connexionsSurlignees: string[]
+  /** Bouts des tronçons du réseau raccordés au carrefour (docs/RESEAU.md §4). */
+  raccordements: RaccordementAffiche[]
   /** Lecture du programme : couleur du feu de chaque connexion et passage piéton. */
   feux: { connexions: ReadonlyMap<string, EtatFeu>; traversees: ReadonlyMap<string, EtatFeu> } | null
   /** Élément dont la popup est ouverte (clé de voie, « de>vers » ou code de branche). */
@@ -84,12 +94,16 @@ type Popup =
   | { type: 'voie'; cle: string; position: LonLat }
   | { type: 'connexion'; de: string; vers: string; position: LonLat }
   | { type: 'branche'; code: string; position: LonLat }
+  | { type: 'raccordement'; cle: string; position: LonLat }
   | { type: 'feu'; feu: FeuResume; position: LonLat }
   | { type: 'carrefour'; position: LonLat }
 
 const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>> = {
   ajuster: { titre: 'Caler les voies', aides: ['Glisser les extrémités des voies et des passages sur le marquage de la photo'] },
-  connecter: { titre: 'Relier les voies', aides: ['Glisser d’une voie entrante vers une voie sortante', 'Clic sur une liaison : la retirer'] },
+  connecter: {
+    titre: 'Relier les voies',
+    aides: ['Glisser d’une voie entrante vers une voie sortante', 'Tronçons (rose) : glisser vers une voie de leur branche', 'Clic sur une liaison : la retirer'],
+  },
   feux: { titre: 'Poser les feux', aides: ['Glisser chaque feu jusqu’à son mât', 'Clic sur le point creux : position OSM'] },
   pieton: { titre: 'Passages piétons', aides: ['Clic sur une voie ou un code de branche : ajouter ou retirer son passage'] },
   tracer: {
@@ -131,6 +145,7 @@ export interface ConfigurationCarrefourHandle {
   deplacerPoignee: (poignee: Poignee, position: LonLat) => void
   connecter: (de: string, vers: string) => void
   tracerVoie: (geom: [LonLat, LonLat]) => void
+  basculerLien: (cle: string, sens: 'entree' | 'sortie', paire: [number, number]) => void
   dessinerZoneIa: (emprise: EmpriseIa) => void
   executer: (action: ActionConfiguration) => void
 }
@@ -289,8 +304,30 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     onSuccess: async (resultat) => {
       queryClient.setQueryData(['branches', carrefour.id], resultat)
       setBrouillonBranches(null)
+      // Le cercle du carrefour suit ses voies : les tronçons ont été recoupés et raccordés.
+      await queryClient.invalidateQueries({ queryKey: ['raccordements', carrefour.id] })
+      await queryClient.invalidateQueries({ queryKey: ['reseau'] })
       await queryClient.invalidateQueries({ queryKey: ['lignes', carrefour.id] })
       await queryClient.invalidateQueries({ queryKey: ['programme', carrefour.id] })
+    },
+  })
+
+  // ── Réseau : tronçons raccordés aux branches, liens voie à voie ──
+  const raccordementsEnregistres = useQuery({
+    queryKey: ['raccordements', carrefour.id],
+    queryFn: () => api.raccordements(carrefour.id),
+  })
+  const [brouillonRaccordements, setBrouillonRaccordements] = useState<BrouillonRaccordements | null>(null)
+  const raccordements = useMemo(
+    () => raccordementsAffiches(raccordementsEnregistres.data?.raccordements ?? AUCUN_RACCORDEMENT, brouillonRaccordements, branches),
+    [raccordementsEnregistres.data, brouillonRaccordements, branches],
+  )
+  const enregistrementRaccordements = useMutation({
+    mutationFn: () => api.enregistrerRaccordements(carrefour.id, { raccordements: Object.values(brouillonRaccordements ?? {}) }),
+    onSuccess: async (resultat) => {
+      queryClient.setQueryData(['raccordements', carrefour.id], resultat)
+      setBrouillonRaccordements(null)
+      await queryClient.invalidateQueries({ queryKey: ['reseau'] })
     },
   })
 
@@ -410,7 +447,13 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
 
   // Ce que la carte doit montrer.
   const cleSelection =
-    popup?.type === 'voie' ? popup.cle : popup?.type === 'connexion' ? `${popup.de}>${popup.vers}` : popup?.type === 'branche' ? popup.code : null
+    popup?.type === 'voie' || popup?.type === 'raccordement'
+      ? popup.cle
+      : popup?.type === 'connexion'
+        ? `${popup.de}>${popup.vers}`
+        : popup?.type === 'branche'
+          ? popup.code
+          : null
   const feuxSurlignes =
     onglet === 'lignes' && ligneActive ? (lignes.lignes.find((l) => l.code === ligneActive)?.feux ?? AUCUN_FEU) : AUCUN_FEU
   const mouvementsActifs =
@@ -443,6 +486,7 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
         mode: cadrage ? null : outil,
         feuxSurlignes,
         connexionsSurlignees,
+        raccordements,
         feux,
         selection: cleSelection,
         ancre: popup?.position ?? null,
@@ -455,6 +499,7 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
       cadrage,
       feuxSurlignes,
       connexionsSurlignees,
+      raccordements,
       feux,
       cleSelection,
       popup?.position,
@@ -464,18 +509,32 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
     ],
   )
 
-  const erreur = [detection, cadreAuto, demandeIa, chargementIa, importJson, enregistrementBranches, enregistrementLignes, enregistrementProgramme].find((m) => m.error)?.error
+  const erreur = [
+    detection,
+    cadreAuto,
+    demandeIa,
+    chargementIa,
+    importJson,
+    enregistrementBranches,
+    enregistrementRaccordements,
+    enregistrementLignes,
+    enregistrementProgramme,
+  ].find((m) => m.error)?.error
 
-  const modifications = [brouillonBranches, brouillonLignes, brouillonProgramme].filter((b) => b !== null).length
-  const enregistrementEnCours = [enregistrementBranches, enregistrementLignes, enregistrementProgramme].some((m) => m.isPending)
+  const modifications = [brouillonBranches, brouillonRaccordements, brouillonLignes, brouillonProgramme].filter((b) => b !== null).length
+  const enregistrementEnCours = [enregistrementBranches, enregistrementRaccordements, enregistrementLignes, enregistrementProgramme].some(
+    (m) => m.isPending,
+  )
+  const sansBranche = raccordements.filter((r) => r.branche === null).length
   const sansLiaison = branches.flatMap((b) =>
     voiesDe(b, 'entrante').filter((v) => !configuration.connexions.some((c) => c.de === cleVoie(b.code, 'entrante', v.rang))),
   ).length
 
-  /** Enregistre tout ce qui a changé : branches, puis lignes, puis programme (sauf s'il est en erreur). */
+  /** Enregistre tout ce qui a changé : branches, raccordements, lignes, puis programme (sauf s'il est en erreur). */
   const enregistrer = async () => {
     try {
       if (brouillonBranches) await enregistrementBranches.mutateAsync()
+      if (brouillonRaccordements) await enregistrementRaccordements.mutateAsync()
       if (brouillonLignes) await enregistrementLignes.mutateAsync()
       if (brouillonProgramme && !erreurProgramme) await enregistrementProgramme.mutateAsync()
     } catch {
@@ -550,6 +609,10 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
   useImperativeHandle(ref, () => ({
     deplacerPoignee: (poignee, position) => setBrouillonBranches(deplacerPoignee(configuration, poignee, position)),
     connecter: (de, vers) => setBrouillonBranches(basculerConnexion(configuration, de, vers)),
+    basculerLien: (cle, sens, paire) => {
+      const r = raccordements.find((x) => x.cle === cle)
+      if (r) setBrouillonRaccordements(editer(brouillonRaccordements, r, { liens: basculerLien(r.liens, sens, paire) }))
+    },
     tracerVoie: (geom) => {
       const trace = tracerVoie(configuration, geom, centre)
       if (!trace) {
@@ -638,6 +701,17 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
         onRenommer={(code) => setPopup({ ...popup, code })}
         onFermer={fermerPopup}
       />
+    ) : popup?.type === 'raccordement' ? (
+      <PopupRaccordement
+        raccordement={raccordements.find((r) => r.cle === popup.cle)}
+        branches={branches}
+        onChanger={(changement) => {
+          const r = raccordements.find((x) => x.cle === popup.cle)
+          if (r) setBrouillonRaccordements(editer(brouillonRaccordements, r, changement))
+        }}
+        onOutil={choisirOutil}
+        onFermer={fermerPopup}
+      />
     ) : popup?.type === 'feu' ? (
       <PopupFeu
         feu={popup.feu}
@@ -675,7 +749,9 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
         ? `liaison ${popup.de} → ${popup.vers}`
         : popup?.type === 'branche'
           ? `branche ${popup.code}`
-          : popup?.type === 'feu'
+          : popup?.type === 'raccordement'
+            ? `tronçon ${raccordements.find((r) => r.cle === popup.cle)?.nom ?? ''}`
+            : popup?.type === 'feu'
             ? 'feu'
             : popup?.type === 'carrefour'
               ? 'carrefour'
@@ -704,6 +780,11 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
             {modifications > 0 && (
               <Badge colorPalette="orange">
                 {modifications} modification{modifications > 1 ? 's' : ''} à enregistrer
+              </Badge>
+            )}
+            {sansBranche > 0 && (
+              <Badge colorPalette="orange" title="Changer sa branche : clic sur le tronçon (rose)">
+                {sansBranche} tronçon{sansBranche > 1 ? 's' : ''} sans branche
               </Badge>
             )}
             {sansLiaison > 0 && (

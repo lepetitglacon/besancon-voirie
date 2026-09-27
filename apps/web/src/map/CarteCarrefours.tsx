@@ -82,7 +82,11 @@ interface Props {
   feux: FeuxGeoJson | undefined
   /** null hors édition ; en édition, les feux sélectionnés et le carrefour modifié (null si nouveau). */
   edition: { selection: string[]; carrefourId: string | null; modeRectangle: boolean } | null
-  onEmprise: (bbox: Bbox) => void
+  onEmprise: (bbox: Bbox, zoom: number) => void
+  /** Mode réseau : la couche réseau gère les clics, les bulles des carrefours et des feux sont coupées. */
+  reseauActif?: boolean
+  /** Curseur imposé (tracé d'un tronçon). */
+  curseur?: string
   onBasculerFeu: (feu: FeuResume) => void
   /** Feux couverts par un rectangle tracé en mode composition. */
   onAjouterFeux: (feux: FeuResume[]) => void
@@ -105,6 +109,8 @@ interface Props {
   /** Glisser-déposer dans l'éditeur de configuration. */
   onDeplacerPoignee: (poignee: Poignee, position: LonLat) => void
   onConnecter: (de: string, vers: string) => void
+  /** Lien voie à voie entre un tronçon raccordé et une branche : ajouté, ou retiré s'il existe. */
+  onBasculerLien: (cle: string, sens: 'entree' | 'sortie', paire: [number, number]) => void
   /** Voie tracée à la main dans le carrefour configuré : [bout côté carrefour, bout éloigné]. */
   onTracerVoie: (geom: [LonLat, LonLat]) => void
   /** Zone de la photo IA tracée sur la carte : [ouest, sud, est, nord]. */
@@ -200,6 +206,7 @@ export function CarteCarrefours(props: Props) {
   }
 
   const cliquer = (evenement: MapLayerMouseEvent) => {
+    if (props.reseauActif) return
     const objet = evenement.features?.[0]
     const { lng: longitude, lat: latitude } = evenement.lngLat
     if (configuration) {
@@ -233,7 +240,7 @@ export function CarteCarrefours(props: Props) {
       hash
       attributionControl={{ compact: true }}
       interactiveLayerIds={['feux', 'carrefours']}
-      cursor={traceActif ? 'crosshair' : survol ? 'pointer' : 'grab'}
+      cursor={props.curseur ?? (traceActif ? 'crosshair' : survol ? 'pointer' : 'grab')}
       dragPan={!traceActif}
       boxZoom={edition === null}
       onMouseDown={commencerTrace}
@@ -246,9 +253,9 @@ export function CarteCarrefours(props: Props) {
       onLoad={(evenement) => {
         // Attribution repliée (bouton « i ») : dépliée, elle passerait sous la barre d'outils.
         evenement.target.getContainer().querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show')
-        props.onEmprise(emprise(evenement.target))
+        props.onEmprise(emprise(evenement.target), evenement.target.getZoom())
       }}
-      onMoveEnd={(evenement) => props.onEmprise(emprise(evenement.target))}
+      onMoveEnd={(evenement) => props.onEmprise(emprise(evenement.target), evenement.target.getZoom())}
     >
       <ControleZoom position="absolute" top="4" right="4" zIndex="1" />
       <FondDeCarte {...fond} />
@@ -294,6 +301,8 @@ export function CarteCarrefours(props: Props) {
           onDeplacer={props.onDeplacerPoignee}
           onConnecter={props.onConnecter}
           onTracer={props.onTracerVoie}
+          raccordements={configuration.raccordements}
+          onBasculerLien={props.onBasculerLien}
           feuxPlacables={feuxPlacables}
           onPlacerFeu={props.onPlacerFeu}
           onApercuFeu={setApercuFeu}
@@ -308,7 +317,7 @@ export function CarteCarrefours(props: Props) {
         </PopupSurCarte>
       )}
 
-      {bulle && !edition && !configuration && (
+      {bulle && !edition && !configuration && !props.reseauActif && (
         <PopupSurCarte longitude={bulle.longitude} latitude={bulle.latitude} closeOnClick={false} onClose={() => setBulle(undefined)}>
           {bulle.type === 'carrefour' ? (
             <PopupCarte

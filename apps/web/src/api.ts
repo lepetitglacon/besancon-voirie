@@ -17,10 +17,15 @@ import type {
   FeuxGeoJson,
   HistoriqueTroncons,
   LignesCarrefour,
+  ModificationTroncon,
   ModifierCarrefour,
   NatureCarrefour,
+  NouveauTroncon,
   ProgrammeCarrefour,
+  RaccordementsCarrefour,
+  ReseauGeoJson,
   ReseauTram,
+  SaisieRaccordements,
   TramsTempsReel,
   TypeJour,
 } from '@voirie/schema'
@@ -102,4 +107,23 @@ export const api = {
       `/api/tram/historique/troncons?typeJour=${typeJour}${heure === null ? '' : `&heure=${heure}`}`,
     ),
   historiqueEtat: () => requete<EtatHistoriqueTram>('/api/tram/historique/etat'),
+
+  // ── Réseau routier (docs/RESEAU.md) ──
+  reseau: (bbox: Bbox) => requete<ReseauGeoJson>(`/api/reseau?bbox=${parametreBbox(bbox)}`),
+  genererReseau: () =>
+    requete<{ voies_osm: number; noeuds: number; troncons: number; conserves: number; carrefours: number }>('/api/reseau/generer', {
+      method: 'POST',
+    }),
+  creerTroncon: (nouveau: NouveauTroncon) =>
+    requete<Troncon>('/api/reseau/troncons', { method: 'POST', body: JSON.stringify(nouveau) }),
+  modifierTroncon: (id: string, modification: ModificationTroncon) =>
+    requete<Troncon>(`/api/reseau/troncons/${id}`, { method: 'PATCH', body: JSON.stringify(modification) }),
+  supprimerTroncon: (id: string) => requete<void>(`/api/reseau/troncons/${id}`, { method: 'DELETE' }),
+  /** Lien de téléchargement d'un fichier de l'export SUMO (de l'emprise, ou de toute la ville). */
+  urlSumo: (fichier: string, bbox?: Bbox) => `/api/reseau/sumo/${fichier}${bbox ? `?bbox=${parametreBbox(bbox)}` : ''}`,
+  raccordements: (carrefourId: string) => requete<RaccordementsCarrefour>(`/api/carrefours/${carrefourId}/raccordements`),
+  enregistrerRaccordements: (carrefourId: string, saisie: SaisieRaccordements) =>
+    requete<RaccordementsCarrefour>(`/api/carrefours/${carrefourId}/raccordements`, { method: 'PUT', body: JSON.stringify(saisie) }),
 }
+
+export type Troncon = ReseauGeoJson['troncons']['features'][number]

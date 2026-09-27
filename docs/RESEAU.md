@@ -163,4 +163,33 @@ et `sumolib` sait revenir en lon/lat (`net.convertXY2LonLat`).
 
 ## 7. Interface
 
-À venir dans ce worktree : mode « Réseau » sur la carte, et liens voie à voie dans l'éditeur du carrefour.
+### Mode « Réseau » de la carte (⌇, touche <kbd>R</kbd>)
+
+À partir du zoom 14, les tronçons de la vue sont dessinés à la largeur de leurs voies : bleu
+pour OSM, orange pour un tronçon OSM corrigé, vert pour un tronçon tracé à la main. Les nœuds
+apparaissent au zoom 15 (rouge : cul-de-sac, violet : carrefour configuré), avec des chevrons
+dans le sens de circulation des sens uniques.
+
+- **↖ Sélection** (<kbd>V</kbd>) : un clic sur un tronçon ouvre sa popup. Nom, voies dans le
+  sens du tracé et dans l'autre (0 : sens interdit), vitesse (vide : celle du type de voie),
+  « Inverser », « Supprimer ». Chaque changement est enregistré aussitôt. Pour un bout
+  raccordé à un carrefour, « Configurer » ouvre son éditeur.
+- **＋ Tracer** (<kbd>T</kbd>) : cliquer le départ (un nœud, un tronçon, qui sera coupé à cet
+  endroit, ou un point libre), les points de la rue, puis l'arrivée sur un nœud ou un tronçon.
+  <kbd>Entrée</kbd> (ou un second clic sur le dernier point) finit sur un point libre ;
+  <kbd>⌫</kbd> retire le dernier point, <kbd>Échap</kbd> annule. Le tronçon est créé avec une
+  voie par sens. Tracé jusqu'au centre d'un carrefour configuré, il s'arrête sur son cercle et se
+  raccorde à la branche de même direction.
+- Carte d'en-tête : légende, **⟳ Générer depuis OSM** (garde les corrections) et liens
+  d'**export SUMO** de la vue ou de toute la ville.
+
+### Dans l'éditeur du carrefour
+
+Les tronçons raccordés arrivent sur le cercle du carrefour, voies en rose pointillé, reliés aux
+voies des branches ([CONFIGURATION.md](CONFIGURATION.md) §3). Outil **Liaison** : glisser d'une
+voie du tronçon qui arrive vers le bout d'une voie entrante de sa branche, ou du bout d'une voie
+sortante vers une voie du tronçon qui repart ; refaire le geste ou cliquer un lien le retire.
+Les liens proposés sont en pointillé, les liens saisis en trait plein. Un clic sur le tronçon
+(outil Sélection) ouvre sa popup : branche (ou aucune), retour aux liens proposés. Le badge
+« tronçon sans branche » signale un bout qu'aucune branche ne prolonge. Tout s'enregistre avec
+le reste de la configuration (Enregistrer).

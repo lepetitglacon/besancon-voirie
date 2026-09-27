@@ -533,7 +533,8 @@ métropole. Un simple mail au service Mobilité peut les obtenir, facultatif. Le
 - [ ] Rapport actuel vs optimisé sur l'axe pilote.
 
 ### Phase 2 — SUMO
-- [ ] Réseau SUMO de l'axe pilote depuis OSM, puis corrections.
+- [x] Réseau routier de toute la ville : tronçons générés depuis OSM, corrigés et complétés à la main, raccordés voie à voie aux carrefours configurés ; export SUMO plain XML pour netconvert — voir [docs/RESEAU.md](docs/RESEAU.md).
+- [ ] Réseau SUMO de l'axe pilote (netconvert sur l'export), puis corrections.
 - [ ] Convertisseur plan de feux → `tlLogic` (+ offsets, WAUT), association lignes ↔ liens.
 - [ ] Demande plausible, puis calée sur des comptages.
 - [ ] Scénarios actuel / optimisé / `tlsCoordinator` ; indicateurs ; 10 graines.

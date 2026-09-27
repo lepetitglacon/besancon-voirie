@@ -3,7 +3,8 @@
 > Document de référence technique. Le contexte, les phases et la méthode sont dans le
 > [README](../README.md). Ce document décrit **comment** le projet est construit. La
 > configuration d'un carrefour (branches, voies, lignes de feux, programme) est détaillée
-> dans [CONFIGURATION.md](CONFIGURATION.md).
+> dans [CONFIGURATION.md](CONFIGURATION.md), le réseau routier (tronçons, raccordements aux
+> carrefours, export SUMO) dans [RESEAU.md](RESEAU.md).
 
 ## Sommaire
 
@@ -332,6 +333,10 @@ CREATE TABLE tram_passage (             -- une rame est passée à un arrêt
 -- de la même course), avec l'heure locale et le type de jour (semaine / samedi / dimanche).
 ```
 
+Réseau routier ([RESEAU.md](RESEAU.md)) : `noeud` (intersection OSM, point posé à la main, ou
+carrefour configuré) et `troncon` (entre deux nœuds, voies par sens, vitesse, branche et liens voie
+à voie à chaque bout raccordé à un carrefour), générés depuis `osm_way` puis corrigés à la main.
+
 Les schémas Drizzle (`apps/api/src/db/schema.ts`) reflètent ces tables. Drizzle gère
 `geometry(point)` nativement. Pour `LineString`, on passe par un `customType` qui lit et
 écrit du GeoJSON (`ST_AsGeoJSON` / `ST_GeomFromGeoJSON`).
@@ -341,7 +346,7 @@ Les schémas Drizzle (`apps/api/src/db/schema.ts`) reflètent ces tables. Drizzl
 | Table | Contenu | Usage |
 |---|---|---|
 | `osm_signal` | Nœuds `highway=traffic_signals`, `crossing=traffic_signals` + tags | Synchronisation de la table `feu` |
-| `osm_way` | Voies `highway=*` : `lanes`, `maxspeed`, `oneway`, `name` | Branches, affichage, export SUMO |
+| `osm_way` | Voies `highway=*` : `lanes`, `maxspeed`, `oneway`, `name` | Branches, génération du réseau (`noeud`, `troncon`) |
 | `osm_tram` | `railway=tram` | Drapeau `pres_tram` |
 | `osm_route_edge` / `osm_route_vertex` | Réseau découpé aux intersections, topologie pgRouting | Distances de corridor |
 
@@ -456,6 +461,7 @@ Bande passante = mesure de l'intersection, sur le cercle [0, C), de ces interval
 | `TramModule` | Tram en temps réel : GTFS et GTFS-RT Ginko, mis en cache (§8.1) ; collecte des passages et historique (§8.2) |
 | `JobsModule` | pg-boss : publication des jobs (recalculs, simulations) |
 | `FeuxModule` | Feux de l'emprise de la carte |
+| `ReseauModule` | Réseau routier : tronçons et nœuds, génération depuis OSM, raccordements aux carrefours, export SUMO plain XML ([RESEAU.md](RESEAU.md)) |
 | Scripts (`apps/api/scripts`) | `prepare-db.ts`, `osm.ts import` (Node 24, sans Nest) |
 
 ### 7.2 Endpoints
@@ -482,6 +488,9 @@ Public :
 | GET | `/api/tram/historique/etat` | Nombre de passages enregistrés, premier et dernier, collecte active ou non |
 | GET | `/api/exports/carrefours.geojson` | Export ODbL |
 | GET | `/api/exports/carrefours.gpkg?srid=2154` | Export Lambert 93 |
+| GET | `/api/reseau?bbox=…` | Tronçons et nœuds du réseau routier ([RESEAU.md](RESEAU.md) §6) |
+| GET | `/api/reseau/sumo/:fichier` | Export SUMO plain XML (`reseau.nod.xml`, `.edg.xml`, `.con.xml`, `reseau.netccfg`) |
+| GET | `/api/carrefours/:id/raccordements` | Tronçons raccordés aux branches, liens voie à voie |
 
 Admin (cookie de session, un seul compte) :
 
@@ -495,6 +504,8 @@ Admin (cookie de session, un seul compte) :
 | PUT | `/api/carrefours/:id/branches` | Remplace branches et voies (`EDITION_LOCALE`) |
 | PUT | `/api/carrefours/:id/lignes` | Remplace lignes de feux, feux physiques et conflits admis (`EDITION_LOCALE`) |
 | PUT | `/api/carrefours/:id/programme` | Remplace les plans ; cycle et diagramme calculés depuis les étapes (`EDITION_LOCALE`) |
+| POST / PATCH / DELETE | `/api/reseau/generer`, `/api/reseau/troncons[/:id]` | Génère le réseau depuis OSM, trace, corrige ou supprime un tronçon (`EDITION_LOCALE`) |
+| PUT | `/api/carrefours/:id/raccordements` | Branche et liens voie à voie des tronçons raccordés (`EDITION_LOCALE`) |
 | PUT | `/api/admin/corridors/:id` | Création/édition, recalcul des distances |
 | POST | `/api/admin/simulations` | Phase 2 : met un job en file |
 
@@ -615,6 +626,9 @@ du temps, ni la fiabilité réelle des estimations. L'API enregistre donc chaque
 - **Fond de carte** : satellite par défaut, avec les orthophotos IGN de la Géoplateforme
   (Licence Ouverte, sans clé, ~20 cm/pixel). On garde par-dessus les libellés du plan OpenFreeMap,
   et on masque ses surfaces et ses routes. Le plan seul reste disponible.
+- **Réseau** (outil ⌇, touche <kbd>R</kbd>) : tous les tronçons de la vue à la largeur de leurs
+  voies, corrigeables (voies par sens, vitesse, sens), et un outil pour tracer ceux qui manquent
+  ([RESEAU.md](RESEAU.md) §7).
 - **Carte graphique** : les bâtiments sont masqués par défaut, et la 3D (bâtiments en relief,
   carte inclinable) est désactivée par défaut. Sans 3D, les bâtiments restent à plat et
   l'inclinaison est bloquée. La boucle d'animation des rames n'envoie de données à MapLibre
@@ -661,9 +675,13 @@ Visiteur ouvre /corridors/:slug
 
 ## 10. Simulation SUMO (phase 2)
 
+Le réseau routier s'exporte déjà en SUMO plain XML (`pnpm reseau:sumo`, [RESEAU.md](RESEAU.md) §5) :
+tronçons corrigés à la main, carrefours à feux avec leurs voies, leurs connexions et leurs liens
+voie à voie avec les tronçons. C'est l'entrée de l'étape 2 ci-dessous.
+
 ```text
 POST /api/admin/simulations ─▶ pg-boss « simulation » ─▶ apps/worker
-  1. Extraire la zone du corridor depuis osm_way (ST_Buffer de corridor.geom) → .osm
+  1. Exporter le réseau de la zone du corridor (exporterSumo, emprise de corridor.geom)
   2. netconvert → réseau SUMO (.net.xml)
   3. Associer les lignes de feux aux liens du tlLogic (branche + mouvement → indices de lien),
      avec une table de correspondance stockée et corrigeable dans l'admin

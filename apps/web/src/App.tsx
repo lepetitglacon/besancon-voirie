@@ -35,6 +35,10 @@ import { CoucheTrams, type CouchesTram } from './map/CoucheTrams'
 import type { OptionsFond } from './map/FondDeCarte'
 import { usePreference } from './preferences'
 import { PALIERS_PERTE } from './tram/pertes'
+import { CoucheReseau } from './reseau/CoucheReseau'
+import { EnTeteReseau } from './reseau/EnTeteReseau'
+import { useModeReseau } from './reseau/modeReseau'
+import { PopupTroncon } from './reseau/PopupTroncon'
 
 /** Le flux Ginko est mis en cache 10 s par l'API. */
 const RAFRAICHISSEMENT_TRAMS_MS = 15_000
@@ -67,6 +71,9 @@ function typeJour(date: Date): TypeJour {
 function App() {
   const queryClient = useQueryClient()
   const [bbox, setBbox] = useState<Bbox>()
+  const [zoom, setZoom] = useState(0)
+  const [modeReseau, setModeReseau] = useState(false)
+  const reseau = useModeReseau({ actif: modeReseau, bbox, zoom })
   const [mode, setMode] = usePreference<Mode>('mode', 'carte')
   const [fond, setFond] = usePreference<OptionsFond>('fond', FOND_DEFAUT)
   const [trams, setTrams] = usePreference<boolean>('trams', true)
@@ -88,6 +95,7 @@ function App() {
     mode: null,
     feuxSurlignes: [],
     connexionsSurlignees: [],
+    raccordements: [],
     feux: null,
     selection: null,
     ancre: null,
@@ -104,6 +112,10 @@ function App() {
   )
   const connecter = useCallback<ConfigurationCarrefourHandle['connecter']>(
     (de, vers) => panneauConfiguration.current?.connecter(de, vers),
+    [],
+  )
+  const basculerLien = useCallback<ConfigurationCarrefourHandle['basculerLien']>(
+    (cle, sens, paire) => panneauConfiguration.current?.basculerLien(cle, sens, paire),
     [],
   )
   const tracerVoie = useCallback<ConfigurationCarrefourHandle['tracerVoie']>(
@@ -247,15 +259,33 @@ function App() {
   }, [])
   useNotificationsIa(analysesIa.data, ouvrirAnalyseIa)
 
-  const composer = () =>
+  const composer = () => {
+    setModeReseau(false)
     demarrer({ carrefourId: null, selection: [], nature: 'carrefour', nomSaisi: null, modeRectangle: true })
+  }
+
+  /** Ouvre la configuration d'un carrefour de la vue (depuis un tronçon qui y est raccordé). */
+  const configurerCarrefour = (carrefourId: string) => {
+    const objet = carrefours.data?.features.find((f) => f.id === carrefourId)
+    if (!objet) return
+    setModeReseau(false)
+    setConfiguration({ carrefour: objet.properties, position: objet.geometry.coordinates })
+  }
 
   // Raccourcis hors configuration (la configuration gère les siens).
   const touche = useEffectEvent((e: KeyboardEvent) => {
     if (configuration || e.ctrlKey || e.metaKey || e.altKey) return
     if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
     const lettre = e.key.toLowerCase()
-    if (!edition) return lettre === 'n' && composer()
+    if (modeReseau) {
+      if (!reseau.clavier(e) && e.key === 'Escape') setModeReseau(false)
+      if (e.key === 'Backspace' || e.key === 'Enter') e.preventDefault()
+      return
+    }
+    if (!edition) {
+      if (lettre === 'r') return setModeReseau(true)
+      return lettre === 'n' && composer()
+    }
     if (e.key === 'Escape') return setEdition(null)
     if (lettre === 'r' || lettre === 'v') setEdition({ ...edition, modeRectangle: lettre === 'r' })
   })
@@ -299,7 +329,12 @@ function App() {
                 modeRectangle: edition.modeRectangle,
               }
             }
-            onEmprise={setBbox}
+            onEmprise={(emprise, niveau) => {
+              setBbox(emprise)
+              setZoom(niveau)
+            }}
+            reseauActif={modeReseau && !configuration}
+            curseur={modeReseau && reseau.outil === 'tracer' ? 'crosshair' : undefined}
             onBasculerFeu={basculerFeu}
             onAjouterFeux={ajouterFeux}
             onComposerDepuis={(feu) =>
@@ -331,6 +366,7 @@ function App() {
             onDeplacerPoignee={deplacerPoignee}
             onConnecter={connecter}
             onTracerVoie={tracerVoie}
+            onBasculerLien={basculerLien}
             onDessinerZoneIa={dessinerZoneIa}
             onPlacerFeu={placerFeu}
             onSupprimer={(carrefour) => {
@@ -344,6 +380,34 @@ function App() {
             )}
             {tramAffiche && reseauTram.data && (
               <CoucheTrams reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
+            )}
+            {modeReseau && !configuration && (
+              <CoucheReseau
+                donnees={reseau.visible ? reseau.donnees.data : undefined}
+                outil={reseau.outil}
+                selection={reseau.selection?.id ?? null}
+                trace={reseau.trace}
+                onClic={reseau.clic}
+                popup={
+                  reseau.outil === 'selection' && reseau.selection && reseau.troncon
+                    ? {
+                        position: reseau.selection.position,
+                        contenu: (
+                          <PopupTroncon
+                            key={reseau.troncon.id}
+                            troncon={reseau.troncon}
+                            nomCarrefour={(id) => carrefours.data?.features.find((f) => f.id === id)?.properties.nom ?? 'carrefour'}
+                            enregistrement={{ enCours: reseau.modification.isPending, erreur: reseau.modification.error?.message ?? null }}
+                            onModifier={reseau.modifier}
+                            onSupprimer={reseau.supprimer}
+                            onConfigurer={configurerCarrefour}
+                            onFermer={reseau.fermerSelection}
+                          />
+                        ),
+                      }
+                    : null
+                }
+              />
             )}
           </CarteCarrefours>
         </Box>
@@ -370,7 +434,15 @@ function App() {
             w="340px"
             maxW="calc(100vw - 24px)"
             surtitre="Besançon Voirie"
-            titre={edition ? (edition.carrefourId ? 'Modifier le carrefour' : 'Composer un carrefour') : 'Inventaire citoyen des feux tricolores'}
+            titre={
+              edition
+                ? edition.carrefourId
+                  ? 'Modifier le carrefour'
+                  : 'Composer un carrefour'
+                : modeReseau
+                  ? 'Réseau routier'
+                  : 'Inventaire citoyen des feux tricolores'
+            }
             badges={
               <>
                 {sante.isSuccess && <Badge colorPalette="green">API connectée</Badge>}
@@ -391,7 +463,17 @@ function App() {
                 />
               </Box>
             )}
-            {!edition && analysesIa.data && analysesIa.data.length > 0 && (
+            {modeReseau && !edition && (
+              <EnTeteReseau
+                outil={reseau.outil}
+                visible={reseau.visible}
+                nbTroncons={reseau.donnees.data?.troncons.features.length}
+                tronque={reseau.donnees.data?.tronque ?? false}
+                bbox={bbox}
+                generation={{ enCours: reseau.generation.isPending, onGenerer: () => reseau.generation.mutate() }}
+              />
+            )}
+            {!edition && !modeReseau && analysesIa.data && analysesIa.data.length > 0 && (
               <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
                 <FileIa analyses={analysesIa.data} onOuvrir={ouvrirAnalyseIa} />
               </Box>
@@ -433,10 +515,30 @@ function App() {
                   onClick={() => setEdition({ ...edition, modeRectangle: true })}
                 />
               </>
+            ) : modeReseau ? (
+              <>
+                <BarreOutils.Outil
+                  glyphe="↖"
+                  libelle="Sélection"
+                  raccourci="V"
+                  actif={reseau.outil === 'selection'}
+                  onClick={() => reseau.choisirOutil('selection')}
+                />
+                <BarreOutils.Outil
+                  glyphe="＋"
+                  libelle="Tracer"
+                  raccourci="T"
+                  actif={reseau.outil === 'tracer'}
+                  onClick={() => reseau.choisirOutil('tracer')}
+                />
+                <BarreOutils.Separateur />
+                <BarreOutils.Outil glyphe="×" libelle="Quitter" raccourci="Échap" onClick={() => setModeReseau(false)} />
+              </>
             ) : (
               <>
                 <BarreOutils.Outil glyphe="↖" libelle="Sélection" raccourci="V" actif />
                 <BarreOutils.Outil glyphe="⌖" libelle="Carrefour" raccourci="N" onClick={composer} />
+                <BarreOutils.Outil glyphe="⌇" libelle="Réseau" raccourci="R" onClick={() => setModeReseau(true)} />
               </>
             )}
           </BarreOutils.Root>
