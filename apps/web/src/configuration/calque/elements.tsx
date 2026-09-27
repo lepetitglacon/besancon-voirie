@@ -59,8 +59,6 @@ interface PropsCourbe {
   /** Bout de la voie entrante, point amont (pour la tangente), bout de la voie sortante, point aval. */
   entree: [XY, XY]
   sortie: [XY, XY]
-  /** Tracé imposé (giratoire : la trajectoire contourne l'îlot) ; sinon, courbe entre les deux voies. */
-  points?: readonly XY[]
   couleur: string
   etat: EtatCourbe
   feu?: EtatFeu
@@ -69,8 +67,8 @@ interface PropsCourbe {
   onClic?: (e: MouseEvent<SVGElement>) => void
 }
 
-export function Courbe({ entree, sortie, points, couleur, etat, feu, titre, onSurvol, onClic }: PropsCourbe) {
-  const chemin = points ? d(points) : cheminConnexion(entree, sortie)
+export function Courbe({ entree, sortie, couleur, etat, feu, titre, onSurvol, onClic }: PropsCourbe) {
+  const chemin = cheminConnexion(entree, sortie)
   const interactive = onSurvol !== undefined
   return (
     <g className={classes('calque-courbe', etat, feu && `feu-${feu}`)}>
@@ -91,27 +89,20 @@ export function Courbe({ entree, sortie, points, couleur, etat, feu, titre, onSu
   )
 }
 
-/** Chaussée annulaire d'un giratoire : entre le bord extérieur et l'îlot. */
-export function AnneauGiratoire({ exterieur, ilot }: { exterieur: readonly XY[]; ilot: readonly XY[] }) {
-  return (
-    <g className="calque-anneau">
-      <path className="chaussee" d={`${d(exterieur)} Z ${d(ilot)} Z`} fillRule="evenodd" />
-      <path className="ilot" d={`${d(ilot)} Z`} />
-    </g>
-  )
+/** Tronçon d'anneau d'un giratoire, entre deux nœuds : la chaussée, à sa largeur réelle. */
+export function TronconAnneau({ trace, largeur }: { trace: readonly XY[]; largeur: number }) {
+  return <path className="calque-troncon" d={d(trace)} strokeWidth={Math.max(largeur, 3)} />
 }
 
-/**
- * Feu d'anneau : barre en travers de la chaussée annulaire, à la couleur du feu pendant la
- * lecture d'un programme, avec le code de sa ligne côté îlot.
- */
-export function FeuAnneau({ de, a, etiquette, code, feu, surligne }: { de: XY; a: XY; etiquette: XY; code: string; feu?: EtatFeu; surligne: boolean }) {
+/** Nœud d'anneau (mini-carrefour), avec son code ; cliquable pour ouvrir ses réglages. */
+export function NoeudAnneau({ centre, code, onClic }: { centre: XY; code: string; onClic?: (e: MouseEvent<SVGElement>) => void }) {
   return (
-    <g className={classes('calque-feu-anneau', feu && `feu-${feu}`, surligne && 'surligne')}>
-      <path className="barre" d={d([de, a])} />
-      <text x={etiquette[0]} y={etiquette[1]} textAnchor="middle" dominantBaseline="middle">
+    <g className={classes('calque-noeud', onClic && 'interactive')} onClick={onClic}>
+      <circle cx={centre[0]} cy={centre[1]} r={8} />
+      <text x={centre[0]} y={centre[1]} textAnchor="middle" dominantBaseline="central">
         {code}
       </text>
+      <title>Nœud {code}</title>
     </g>
   )
 }

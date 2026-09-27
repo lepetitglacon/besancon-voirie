@@ -6,7 +6,7 @@ import {
   contexteProgramme,
   degagementsRetenus,
   etatLigne,
-  feuxAnneau as positionsFeuxAnneau,
+  NOEUDS_MIN,
   repereLocal,
   simulerGraphe,
   validerGraphe,
@@ -37,14 +37,14 @@ import { Aide, BandeauMode, BarreOutils, CarteEnTete, Chiffre, Indice, Message, 
 import { demanderNotificationsSysteme, enFile, useAnalysesIa } from './analysesIa'
 import { lireBrouillons, modifierBrouillons, useBrouillonsCarrefour, type ModificationsBrouillons } from './brouillons'
 import { Chrono } from './FileIa'
-import type { ClicCalque, FeuAnneauAffiche, ModeEdition } from './calque/CalqueCarrefour'
+import type { ClicCalque, ModeEdition } from './calque/CalqueCarrefour'
 import type { EtatFeu } from './calque/elements'
-import { basculerConnexion, basculerTraversee, deplacerPoignee, voiesDe, type Brouillon, type Poignee } from './modele'
+import { basculerConnexion, basculerTraversee, deplacerPoignee, poserNoeud, type Brouillon, type Poignee, voiesDe } from './modele'
 import { OngletGraphe, type Scenario } from './OngletGraphe'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
 import { OngletProgramme } from './OngletProgramme'
 import { OUTILS, RACCOURCIS, type ActionConfiguration, type OutilCarte } from './actions'
-import { PopupBranche, PopupFeu, PopupLiaison, PopupVoie, ReglageAnneau } from './PopupsConfiguration'
+import { PopupBranche, PopupFeu, PopupLiaison, PopupNoeud, PopupVoie, ReglageAnneau } from './PopupsConfiguration'
 import { feuxDesLignes, geometrieEnregistree, lignesPourMoteur, plansSaisis } from './programme'
 
 /** Références stables : un `[]` littéral relancerait les effets de synchronisation à chaque rendu. */
@@ -52,7 +52,6 @@ const AUCUNE_BRANCHE: Branche[] = []
 const AUCUNE_CONNEXION: Connexion[] = []
 const AUCUN_FEU: string[] = []
 const AUCUNE_LIGNE: never[] = []
-const AUCUN_FEU_ANNEAU: FeuAnneauAffiche[] = []
 const AUCUNE_SOURCE: Record<string, SourceBranche> = {}
 
 /** Ce qui s'enregistre : sans les champs déduits (sens des branches). */
@@ -69,10 +68,8 @@ const pourEnregistrer = (brouillon: Brouillon) => ({
 export interface AffichageConfiguration {
   branches: Branche[]
   connexions: Connexion[]
-  /** Anneau d'un giratoire ; null pour un carrefour ordinaire. */
+  /** Nœuds de l'anneau d'un giratoire ; null pour un carrefour ordinaire. */
   anneau: Anneau | null
-  /** Feux d'anneau des lignes de feux, avec leur couleur pendant la lecture. */
-  feuxAnneau: FeuAnneauAffiche[]
   /** Outil actif sur le calque ; null : dessin seul. */
   mode: ModeEdition | null
   feuxSurlignes: string[]
@@ -97,6 +94,7 @@ type Popup =
   | { type: 'voie'; cle: string; position: LonLat }
   | { type: 'connexion'; de: string; vers: string; position: LonLat }
   | { type: 'branche'; code: string; position: LonLat }
+  | { type: 'noeud'; code: string; position: LonLat }
   | { type: 'feu'; feu: FeuResume; position: LonLat }
 
 const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>> = {
@@ -104,6 +102,10 @@ const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>>
   connecter: { titre: 'Relier les voies', aides: ['Glisser d’une voie entrante vers une voie sortante', 'Clic sur une liaison : la retirer'] },
   feux: { titre: 'Poser les feux', aides: ['Glisser chaque feu jusqu’à son mât', 'Clic sur le point creux : position OSM'] },
   pieton: { titre: 'Passages piétons', aides: ['Clic sur une voie ou un code de branche : ajouter ou retirer son passage'] },
+  noeud: {
+    titre: 'Nœuds de l’anneau',
+    aides: ['Clic sur la carte : poser un nœud là où une rue (ou le tram) touche l’anneau', 'Glisser un nœud : le caler ; clic : ses réglages'],
+  },
 }
 
 /** Hauteur du panneau bas « Plan de feux », en % de la fenêtre. */
@@ -135,7 +137,8 @@ const LAMPES: Record<EtatFeu, EtatLampe | null> = { vert: 'vert', jaune: 'orange
 export interface ConfigurationCarrefourHandle {
   clicFeu: (feu: FeuResume, position: LonLat) => void
   clicCalque: (clic: ClicCalque) => void
-  clicCarte: () => void
+  /** Clic sur la carte hors des éléments du calque : pose un nœud avec l'outil Nœud. */
+  clicCarte: (position: LonLat) => void
   deplacerPoignee: (poignee: Poignee, position: LonLat) => void
   connecter: (de: string, vers: string) => void
   dessinerZoneIa: (emprise: EmpriseIa) => void
@@ -212,6 +215,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
     [brouillonBranches, enregistre],
   )
   const branches = configuration.branches
+  const giratoire = carrefour.nature === 'giratoire'
   const centre: LonLat = useMemo(() => enregistre?.centre ?? [0, 0], [enregistre])
 
   const detection = useMutation({
@@ -457,23 +461,6 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
     return feuxDesLignes(new Map(lignesFeux.map((l, i) => [l.code, etats[i]!])), lignesFeux, connexionsEnregistrees)
   }, [etatsLignes, lignesFeux, connexionsEnregistrees])
 
-  // Feux d'anneau : placés sur l'anneau du brouillon, à la couleur de leur ligne pendant la lecture.
-  const lignesAnneau = lignes.lignes.flatMap((l) => (l.anneau ? [`${l.code}:${l.anneau}`] : [])).join(',')
-  const feuxAnneauAffiches = useMemo(() => {
-    if (!configuration.anneau || !lignesAnneau) return AUCUN_FEU_ANNEAU
-    const paires = lignesAnneau.split(',').map((p) => p.split(':') as [string, string])
-    const positions = positionsFeuxAnneau(
-      geometrieEnregistree({ centre, ...configuration }),
-      paires.map(([, branche]) => branche),
-    )
-    const etats = etatsLignes ? (etatsLignes.split(',') as EtatFeu[]) : []
-    const etatDe = new Map(lignesFeux.map((l, i) => [l.code, etats[i] ?? null]))
-    return paires.flatMap(([code, branche]): FeuAnneauAffiche[] => {
-      const azimut = positions.get(branche)
-      return azimut === undefined ? [] : [{ code, azimut, etat: etatDe.get(code) ?? null, surligne: onglet === 'lignes' && ligneActive === code }]
-    })
-  }, [configuration, centre, lignesAnneau, etatsLignes, lignesFeux, onglet, ligneActive])
-
   const libelleZoneIa = dimensionsIa && `Photo IA · ${Math.round(dimensionsIa.largeur_m)} × ${Math.round(dimensionsIa.hauteur_m)} m`
   useEffect(
     () =>
@@ -481,7 +468,6 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         branches,
         connexions: configuration.connexions,
         anneau: configuration.anneau,
-        feuxAnneau: feuxAnneauAffiches,
         mode: cadrage ? null : outil,
         feuxSurlignes,
         connexionsSurlignees,
@@ -495,7 +481,6 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       branches,
       configuration.connexions,
       configuration.anneau,
-      feuxAnneauAffiches,
       outil,
       cadrage,
       feuxSurlignes,
@@ -535,6 +520,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
 
 
   const choisirOutil = (suivant: OutilCarte) => {
+    if (suivant === 'noeud' && !giratoire) return
     setOutil(suivant)
     setPopup(null)
   }
@@ -617,7 +603,10 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       const code = clic.type === 'voie' ? clic.cle.split(':')[0] : clic.type === 'branche' ? clic.code : undefined
       if (code) setBrouillonBranches(basculerTraversee(configuration, code, centre))
     },
-    clicCarte: () => setPopup(null),
+    clicCarte: (position) => {
+      if (outil === 'noeud' && giratoire) return setBrouillonBranches(poserNoeud(configuration, position))
+      setPopup(null)
+    },
     executer,
   }))
 
@@ -663,6 +652,8 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         onLignes={() => ouvrirOnglet('lignes')}
         onFermer={fermerPopup}
       />
+    ) : popup?.type === 'noeud' ? (
+      <PopupNoeud code={popup.code} brouillon={configuration} onChanger={setBrouillonBranches} onOutil={choisirOutil} onFermer={fermerPopup} />
     ) : popup?.type === 'branche' ? (
       <PopupBranche
         code={popup.code}
@@ -696,6 +687,8 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         ? `liaison ${popup.de} → ${popup.vers}`
         : popup?.type === 'branche'
           ? `branche ${popup.code}`
+          : popup?.type === 'noeud'
+            ? `nœud ${popup.code}`
           : popup?.type === 'feu'
             ? 'feu'
             : null
@@ -703,9 +696,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
     ? { titre: 'Zone de la photo IA', aides: ['Glisser sur la carte pour dessiner la zone : l’IA ne voit rien en dehors', 'Entrée : lancer'] }
     : onglet === 'lignes' && ligneActive
       ? { titre: `Feux de ${ligneActive}`, aides: ['Clic sur un feu du carrefour : l’ajouter ou le retirer'] }
-      : outil === 'ajuster' && configuration.anneau
-        ? { titre: 'Caler les voies et l’anneau', aides: [...CONSIGNES.ajuster!.aides, 'Points bleus : centre de l’îlot et bord de l’anneau (rayon)'] }
-        : CONSIGNES[outil]
+      : CONSIGNES[outil]
 
   return (
     <>
@@ -728,9 +719,9 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
                 {modifications} modification{modifications > 1 ? 's' : ''} à enregistrer
               </Badge>
             )}
-            {carrefour.nature === 'giratoire' && !configuration.anneau && branchesEnregistrees.isSuccess && (
-              <Badge colorPalette="orange" title="Section Anneau ci-dessous, ou détection OSM (O)">
-                Anneau à dessiner
+            {giratoire && (configuration.anneau?.noeuds.length ?? 0) < NOEUDS_MIN && branchesEnregistrees.isSuccess && (
+              <Badge colorPalette="orange" title="Outil Nœud (N), ou détection OSM (O)">
+                Nœuds d’anneau à poser
               </Badge>
             )}
             {sansLiaison > 0 && (
@@ -761,9 +752,9 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
             <Chiffre valeur={resultat ? `${Math.round(resultat.cycle_s)} s` : '—'} libelle="cycle" />
           </HStack>
         )}
-        {(carrefour.nature === 'giratoire' || configuration.anneau) && (
+        {(giratoire || configuration.anneau) && (
           <Box mt="2">
-            <ReglageAnneau brouillon={configuration} centre={centre} onChanger={setBrouillonBranches} onOutil={choisirOutil} />
+            <ReglageAnneau brouillon={configuration} onChanger={setBrouillonBranches} onOutil={choisirOutil} />
           </Box>
         )}
         {branchesEnregistrees.isSuccess && branches.length === 0 && (
@@ -841,7 +832,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         bottom={panneauOuvert ? `calc(${hauteurPanneau} + 16px)` : '22px'}
         zIndex="3"
       >
-        {OUTILS.map((o) => (
+        {OUTILS.filter((o) => giratoire || !o.giratoire).map((o) => (
           <BarreOutils.Outil key={o.outil} {...o} actif={outil === o.outil} onClick={() => choisirOutil(o.outil)} />
         ))}
         <BarreOutils.Separateur />

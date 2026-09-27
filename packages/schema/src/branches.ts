@@ -92,13 +92,17 @@ export type Connexion = z.infer<typeof Connexion>;
 
 export const ConfigurationBranches = z
   .object({
-    branches: z.array(Branche).max(12),
+    /** Rues (12 au plus) et, dans un giratoire, tronçons d'anneau (un par nœud, 16 au plus). */
+    branches: z.array(Branche).max(28),
     connexions: z.array(Connexion).max(300).default([]),
     /** Anneau d'un giratoire ; null pour un carrefour ordinaire. */
     anneau: Anneau.nullable().default(null),
   })
   .superRefine(({ branches, connexions, anneau }, ctx) => {
     const codes = branches.map((b) => b.code);
+    if (branches.filter((b) => !b.troncon).length > 12) {
+      ctx.addIssue({ code: 'custom', path: ['branches'], message: '12 rues au plus' });
+    }
     const noeuds = new Set(anneau?.noeuds.map((n) => n.code));
     branches.forEach((b, i) => {
       if (b.noeud && !noeuds.has(b.noeud)) {
