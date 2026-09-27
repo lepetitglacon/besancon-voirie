@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Mouvement } from './feux.js';
+import { Mouvement, type LigneFeux } from './feux.js';
 
 export const SensBranche = z.enum(['entrant', 'sortant', 'double']);
 export type SensBranche = z.infer<typeof SensBranche>;
@@ -180,6 +180,8 @@ export type ConfianceIa = z.infer<typeof ConfianceIa>;
 
 /** Proposition OSM corrigée par l'IA d'après l'orthophoto IGN, non enregistrée. */
 export interface DetectionBranchesIa extends DetectionBranches {
+  /** Lignes de feux proposées d'après ce que commande chaque feu vu sur la photo, non enregistrées. */
+  lignes: LigneFeux[];
   ia: {
     /** Remarques générales de l'IA : ce qu'elle n'a pas pu voir, ce qu'elle a supposé. */
     remarques: string;

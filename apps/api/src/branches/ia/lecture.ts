@@ -15,10 +15,12 @@ import {
 import {
   ConfianceIa,
   ConfigurationBranches,
+  ConfigurationLignes,
   TypeVoie,
   type Branche,
   type Connexion,
   type DetectionBranches,
+  type LigneFeux,
   type TypeFeu,
   type Voie,
 } from '@voirie/schema';
@@ -62,8 +64,23 @@ const NoeudLu = z.object({
   voies: z.number().int().min(1).max(4),
 });
 
+/**
+ * Ce que commande un feu du carrefour (numéroté F1, F2… dans la consigne) : les voies
+ * entrantes d'une branche, l'anneau d'un giratoire devant un nœud, ou un passage piéton.
+ */
+const FeuLu = z.object({
+  feu: z.string(),
+  /** Feu d'entrée : branche dont il arrête les voies entrantes ; feu piéton : branche dont il protège le passage. */
+  branche: z.string().nullable(),
+  /** Giratoire, feu d'anneau : numéro du nœud devant lequel il arrête l'anneau. */
+  noeud: z.number().int().nullable(),
+});
+export type FeuLu = z.infer<typeof FeuLu>;
+
 export const LectureIa = z.object({
   branches: z.array(BrancheLue),
+  /** Ce que commande chaque feu reconnu sur la photo ; ceux qu'on ne sait pas situer sont omis. */
+  feux: z.array(FeuLu).optional(),
   connexions: z.array(z.object({ de: z.string(), vers: z.string() })),
   /** Giratoire : la boucle de nœuds corrigée d'après la photo ; absente ou null sinon. */
   anneau: z.object({ noeuds: z.array(NoeudLu) }).nullable().optional(),
@@ -81,6 +98,7 @@ export function schemaJsonLecture(): string {
 }
 
 export interface FeuContexte {
+  id: string;
   numero: number;
   type: TypeFeu;
   position: LonLat;
@@ -208,6 +226,7 @@ La proposition corrigée d'après la photo, au même format :
 - traversee : le passage piéton qui coupe la branche, d'un trottoir à l'autre (null s'il n'y en a pas).
 - azimut : du centre du carrefour vers la branche, en degrés depuis le nord, sens horaire (0 = haut de l'image, 90 = droite).
 - connexions : { de: "BRANCHE:e<rang>", vers: "BRANCHE:s<rang>" } pour chaque mouvement autorisé, d'après les flèches au sol, sinon d'après les tags turn:lanes, sinon d'après ce qui est plausible (pas de tourne-à-gauche depuis une voie de droite).
+- feux : pour chaque feu OSM (F1, F2…) que tu sais situer sur la photo, ce qu'il commande. Feu véhicules d'une entrée : { feu, branche: code de la branche dont il arrête les voies entrantes, noeud: null }.${contexte.giratoire ? " Feu sur l'anneau : { feu, branche: null, noeud: numéro du nœud devant lequel il arrête la circulation de l'anneau }." : ''} Feu piéton : { feu, branche: code de la branche dont il protège le passage piéton, noeud: null }. Feu du tram ou d'un bus en site propre : { feu, branche: sa branche, noeud: null }. N'invente rien : omets un feu que tu ne sais pas situer.
 - confiance par branche : haute si le marquage est bien visible, basse s'il est caché (arbres, ombres, véhicules) ou déduit.
 - remarques : courtes, en français. Dis ce que tu as vu, ce que tu as supposé et ce que tu n'as pas pu voir. N'invente pas un marquage caché.`;
 }
@@ -222,6 +241,10 @@ export interface ResultatLecture {
   ecartees: string[];
   /** Giratoire : d'où viennent les nœuds de l'anneau (null hors giratoire, ou sans nœuds). */
   noeuds: 'ia' | 'osm' | null;
+  /** Lignes de feux proposées d'après ce que commande chaque feu vu sur la photo. */
+  lignes: LigneFeux[];
+  /** Feux que l'IA a situés mais dont on n'a pas tiré de ligne, avec la raison. */
+  feuxIgnores: string[];
 }
 
 const normaliserAzimut = (a: number) => Math.round((((a % 360) + 360) % 360) * 10) / 10;
@@ -232,6 +255,7 @@ export function configurationDepuisLecture(
   cadre: CadrePhoto,
   detection: DetectionBranches,
   giratoire = detection.anneau !== null,
+  feux: readonly FeuContexte[] = [],
 ): ResultatLecture {
   const axesOsm = new Map(detection.branches.map((b) => [b.code, b.geom]));
   const ll = (p: Pixel) => versLonLat(cadre, p);
@@ -286,8 +310,11 @@ export function configurationDepuisLecture(
   const anneau = normalises?.anneau ?? (giratoire ? detection.anneau : null);
   const noeuds = normalises ? 'ia' : anneau ? 'osm' : null;
   let retenues = connexions;
+  // Numéro de nœud de l'IA → code retenu : ses propres nœuds, sinon ceux d'OSM numérotés dans l'ordre.
+  const codeLu = normalises
+    ? new Map(lus.map((n, i) => [n.numero, normalises.codes[i]]))
+    : new Map(anneau?.noeuds.map((n, i) => [i + 1, n.code]));
   if (anneau) {
-    const codeLu = new Map(lus.map((n, i) => [n.numero, normalises?.codes[i]]));
     const noeudOsm = new Map(detection.branches.filter((b) => !b.troncon).map((b) => [b.code, b.noeud]));
     const repere = repereLocal(anneau.noeuds[0]!.position);
     const plusProche = (b: Branche) => {
@@ -326,12 +353,114 @@ export function configurationDepuisLecture(
     const erreurs = resultat.error.issues.map((i) => `${i.path.join('.')} : ${i.message}`);
     throw new Error(`Proposition de l'IA invalide : ${erreurs.join(' ; ')}`);
   }
+  const { lignes, ignores: feuxIgnores } = lignesDepuisLecture(lecture.feux ?? [], feux, resultat.data, (numero) => codeLu.get(numero));
   return {
     configuration: resultat.data,
+    lignes,
+    feuxIgnores,
     branches: Object.fromEntries(
       lecture.branches.map((b) => [b.code.trim().toUpperCase(), { confiance: b.confiance, remarques: b.remarques }]),
     ),
     ecartees,
     noeuds,
   };
+}
+
+/** Feux qui commandent la même chose, future ligne de feux ; `ordre` range les lignes d'un même préfixe. */
+interface GroupeFeux {
+  prefixe: string;
+  ordre: number;
+  signal: LigneFeux['signal'];
+  mouvements: string[];
+  traverse: string | null;
+  feux: string[];
+}
+
+/** Branche parcourue par le tram ou un bus en site propre : toutes ses voies le sont. */
+const sitePropre = (b: Branche) => b.voies.length > 0 && b.voies.every((v) => v.type === 'tram' || v.type === 'bus');
+
+/**
+ * Lignes de feux proposées d'après ce que commande chaque feu lu sur la photo : une ligne par
+ * branche d'entrée (tous ses mouvements), par nœud d'anneau (la circulation qui arrive au
+ * nœud par l'anneau : elle continue ou sort) et par passage piéton ; les feux qui commandent
+ * la même chose se regroupent dans la même ligne. Codes : F (véhicules), T (tram, bus en
+ * site propre), A (anneau), P (piétons).
+ */
+export function lignesDepuisLecture(
+  lus: readonly FeuLu[],
+  feux: readonly FeuContexte[],
+  configuration: ConfigurationBranches,
+  codeNoeud: (numero: number) => string | undefined,
+): { lignes: LigneFeux[]; ignores: string[] } {
+  const { branches, connexions, anneau } = configuration;
+  const mouvements = [...new Set(connexions.map((c) => `${c.de.split(':')[0]}>${c.vers.split(':')[0]}`))];
+  const depuis = (origine: string) => mouvements.filter((m) => m.startsWith(`${origine}>`));
+  const ignores: string[] = [];
+  const groupes = new Map<string, GroupeFeux>();
+  const ajouter = (cle: string, groupe: Omit<GroupeFeux, 'feux'>, feu: string) => {
+    const existant = groupes.get(cle) ?? { ...groupe, feux: [] };
+    if (!existant.feux.includes(feu)) existant.feux.push(feu);
+    groupes.set(cle, existant);
+  };
+
+  for (const lu of lus) {
+    const numero = Number(/^F?(\d+)$/i.exec(lu.feu.trim())?.[1]);
+    const feu = feux.find((f) => f.numero === numero);
+    if (!feu) {
+      ignores.push(`${lu.feu} : feu inconnu`);
+      continue;
+    }
+    const code = lu.branche?.trim().toUpperCase() ?? null;
+    const branche = code ? branches.find((b) => b.code === code && !b.troncon) : undefined;
+    if (feu.type === 'pieton') {
+      if (!branche?.traversee) {
+        ignores.push(`${lu.feu} : pas de passage piéton sur la branche ${code ?? '?'}`);
+        continue;
+      }
+      ajouter(`pieton:${branche.code}`, { prefixe: 'P', ordre: branche.azimut, signal: 'R12', mouvements: [], traverse: branche.code }, feu.id);
+      continue;
+    }
+    if (lu.noeud !== null && anneau) {
+      const noeud = codeNoeud(lu.noeud);
+      const index = anneau.noeuds.findIndex((n) => n.code === noeud);
+      if (index < 0) {
+        ignores.push(`${lu.feu} : nœud ${lu.noeud} inconnu`);
+        continue;
+      }
+      const precedent = anneau.noeuds[(index - 1 + anneau.noeuds.length) % anneau.noeuds.length]!;
+      const arrivee = `R${precedent.code}`;
+      const commandes = depuis(arrivee);
+      if (commandes.length === 0) {
+        ignores.push(`${lu.feu} : aucune liaison au nœud ${noeud}`);
+        continue;
+      }
+      ajouter(`anneau:${noeud}`, { prefixe: 'A', ordre: index, signal: 'R11v', mouvements: commandes, traverse: null }, feu.id);
+      continue;
+    }
+    if (!branche) {
+      ignores.push(`${lu.feu} : branche ${code ?? '?'} inconnue`);
+      continue;
+    }
+    const commandes = depuis(branche.code);
+    if (commandes.length === 0) {
+      ignores.push(`${lu.feu} : aucune liaison depuis la branche ${branche.code}`);
+      continue;
+    }
+    const tc = sitePropre(branche);
+    ajouter(`entree:${branche.code}`, { prefixe: tc ? 'T' : 'F', ordre: branche.azimut, signal: tc ? 'R17' : 'R11v', mouvements: commandes, traverse: null }, feu.id);
+  }
+
+  const numeros = new Map<string, number>();
+  const lignes = [...groupes.values()]
+    .sort((a, b) => a.prefixe.localeCompare(b.prefixe) || a.ordre - b.ordre)
+    .map((g): LigneFeux => {
+      const n = (numeros.get(g.prefixe) ?? 0) + 1;
+      numeros.set(g.prefixe, n);
+      return { code: `${g.prefixe}${n}`, signal: g.signal, mouvements: g.mouvements, traverse: g.traverse, feux: g.feux };
+    });
+  const valide = ConfigurationLignes.safeParse({ lignes });
+  if (!valide.success) {
+    return { lignes: [], ignores: [...ignores, `lignes proposées invalides : ${valide.error.issues.map((i) => i.message).join(', ')}`] };
+  }
+  return { lignes: valide.data.lignes, ignores };
 }

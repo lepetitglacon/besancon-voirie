@@ -127,6 +127,15 @@ connexions (`flechesParVoie`, `mouvementsDepuisConnexions`), côté API comme c�
    `ConfigurationBranches`, comme un `PUT`. Elle arrive dans l'éditeur comme celle d'OSM ; la
    popup de chaque branche porte le badge « Lu sur la photo par l'IA », la confiance de l'IA et
    ses remarques, la carte d'en-tête ses remarques générales.
+5. **Lignes de feux** : l'IA dit aussi ce que commande chaque feu du carrefour (F1, F2… de la
+   consigne) : les voies entrantes d'une branche, l'anneau d'un giratoire devant un nœud (§7),
+   ou un passage piéton. Le serveur en tire des lignes proposées (`lignesDepuisLecture`) :
+   une par branche d'entrée (tous ses mouvements, F ou T pour le tram et le bus en site
+   propre), par nœud d'anneau (la circulation qui y arrive par l'anneau, qu'elle continue ou
+   sorte : A) et par passage piéton (P). Les feux qui commandent la même chose se regroupent
+   dans une ligne, avec leurs feux physiques. Ces lignes arrivent en brouillon dans l'onglet
+   Lignes de feux (on confirme si le carrefour en a déjà) et s'enregistrent après les
+   branches ; les feux qu'on n'a pas su rattacher sont cités dans les remarques.
 
 **File d'attente.** ✦ IA met le carrefour en file (`analyse_ia`) et rend la main tout de
 suite : on peut en demander plusieurs et continuer à travailler. Un travailleur de l'API
@@ -582,7 +591,8 @@ Le serveur nettoie la boucle (`normaliserNoeuds`) : nœuds à moins de 6 m fusio
 circulation rétabli, complément jusqu'à quatre au milieu des plus longs tronçons. S'il reste
 moins de trois nœuds, il garde ceux d'OSM ; une rue sans nœud valable rejoint le plus proche.
 Les tronçons et les liaisons aux nœuds se reconstruisent à partir de ces nœuds ; de l'IA, on
-ne garde que les liaisons du tram ou du bus qui traverse l'îlot. Les remarques disent d'où
+ne garde que les liaisons du tram ou du bus qui traverse l'îlot. Les feux que l'IA situe devant un
+nœud deviennent des feux d'anneau proposés (ligne A sur la circulation qui arrive au nœud). Les remarques disent d'où
 viennent les nœuds (photo ou OSM). Un giratoire absent d'OSM reçoit ainsi ses nœuds de la
 photo.
 
@@ -627,3 +637,4 @@ Les flèches sont donc **surtout à saisir à la main** : la détection propose,
 | `config-ia` | Proposition « OSM + IA » : orthophoto IGN lue par Claude Code sur le serveur, import d'un JSON de branches |
 | `giratoires` | Giratoires (§7), première version : anneau circulaire (remplacée par `giratoires-noeuds`) |
 | `giratoires-noeuds` | Giratoires (§7) par nœuds, comme dans TM:PE : nœuds posés sur la photo ou détectés dans OSM, tronçons d'anneau, liaisons à chaque nœud, feux d'anneau en lignes ordinaires |
+| `feux-ia` | Lignes de feux proposées par l'IA d'après ce que commande chaque feu vu sur la photo : entrées, feux d'anneau, piétons, tram |

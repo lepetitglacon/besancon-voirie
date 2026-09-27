@@ -129,7 +129,7 @@ describe('consigne', () => {
         cadre,
         giratoire: false,
         detection,
-        feux: [{ numero: 1, type: 'vehicule', position: centre, tags: { highway: 'traffic_signals', note: 'x' } }],
+        feux: [{ id: '00000000-0000-4000-8000-000000000001', numero: 1, type: 'vehicule', position: centre, tags: { highway: 'traffic_signals', note: 'x' } }],
         voiesOsm: [],
       },
       '/tmp/orthophoto.jpg',
@@ -242,5 +242,51 @@ describe('giratoire : nœuds lus sur la photo', () => {
     expect(texte).toContain('## Giratoire');
     expect(texte).toContain('quatre nœuds au moins');
     expect(texte).toContain('à deux nœuds différents');
+  });
+  describe('lignes de feux proposées', () => {
+    const id = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
+    const feux = [
+      { id: id(1), numero: 1, type: 'vehicule' as const, position: centre, tags: {} },
+      { id: id(2), numero: 2, type: 'vehicule' as const, position: centre, tags: {} },
+      { id: id(3), numero: 3, type: 'pieton' as const, position: centre, tags: {} },
+      { id: id(4), numero: 4, type: 'vehicule' as const, position: centre, tags: {} },
+      { id: id(5), numero: 5, type: 'vehicule' as const, position: centre, tags: {} },
+    ];
+    const avecFeux: LectureIa = {
+      ...lue,
+      feux: [
+        { feu: 'F1', branche: 's', noeud: null }, // entrée S
+        { feu: 'F5', branche: 'S', noeud: null }, // deuxième tête de la même entrée
+        { feu: 'F2', branche: null, noeud: 4 }, // anneau, devant le nœud sud
+        { feu: 'F4', branche: 'T', noeud: null }, // tram
+        { feu: 'F3', branche: 'S', noeud: null }, // piéton, mais S n'a pas de passage
+        { feu: 'F9', branche: 'S', noeud: null }, // feu inconnu
+      ],
+    };
+
+    it('should propose one line per entry, ring node and tram, grouping the heads that show the same thing', () => {
+      const { configuration, lignes } = configurationDepuisLecture(avecFeux, cadre, giratoire, true, feux);
+      expect(lignes.map((l) => [l.code, l.signal])).toEqual([
+        ['A1', 'R11v'],
+        ['F1', 'R11v'],
+        ['T1', 'R17'],
+      ]);
+      const [anneau, entree, tram] = lignes;
+      expect(entree!.feux).toEqual([id(1), id(5)]);
+      expect(entree!.mouvements.every((m) => m.startsWith('S>'))).toBe(true);
+      expect(tram!.mouvements).toEqual(['T>T']);
+      // Feu d'anneau : la circulation qui arrive au nœud sud par l'anneau, qu'elle continue ou sorte.
+      const s = configuration.branches.find((b) => b.code === 'S')!;
+      const arrivee = anneau!.mouvements[0]!.split('>')[0]!;
+      expect(anneau!.mouvements).toContain(`${arrivee}>S`);
+      expect(configuration.branches.find((b) => b.code === arrivee)!.troncon).toBe(true);
+      expect(anneau!.feux).toEqual([id(2)]);
+      expect(s.noeud).not.toBeNull();
+    });
+
+    it('should report the lights it could not turn into a line', () => {
+      const { feuxIgnores } = configurationDepuisLecture(avecFeux, cadre, giratoire, true, feux);
+      expect(feuxIgnores).toEqual(['F3 : pas de passage piéton sur la branche S', 'F9 : feu inconnu']);
+    });
   });
 });

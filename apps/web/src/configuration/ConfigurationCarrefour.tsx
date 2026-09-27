@@ -24,6 +24,7 @@ import {
   type Connexion,
   type EmpriseIa,
   type FeuResume,
+  type LignesCarrefour,
   type PlanSaisi,
   type SourceBranche,
 } from '@voirie/schema'
@@ -273,10 +274,18 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       return analyse.resultat
     },
     onSuccess: async (proposition) => {
+      // Lignes de feux proposées d'après les feux vus sur la photo (absentes des analyses plus anciennes).
+      const lignesProposees = proposition.lignes ?? []
+      const enregistrees = queryClient.getQueryData<LignesCarrefour>(['lignes', carrefour.id])?.lignes ?? []
+      const avecLignes =
+        lignesProposees.length > 0 &&
+        (enregistrees.length === 0 ||
+          window.confirm(`Remplacer aussi les lignes de feux par les ${lignesProposees.length} proposées par l’IA ?`))
       modifier({
         branches: { branches: proposition.branches, connexions: proposition.connexions, anneau: proposition.anneau },
         sources: proposition.sources,
         analyseIa: proposition.ia,
+        ...(avecLignes ? { lignes: { lignes: lignesProposees, conflits_admis: [] } } : {}),
       })
       await queryClient.invalidateQueries({ queryKey: ['analyses-ia'] })
     },
