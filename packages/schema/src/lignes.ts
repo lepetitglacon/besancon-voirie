@@ -27,7 +27,7 @@ export type ConfigurationLignes = z.infer<typeof ConfigurationLignes>;
 export interface ConflitLignes {
   a: string;
   b: string;
-  nature: 'croisement' | 'convergence' | 'pieton';
+  nature: 'croisement' | 'insertion' | 'convergence' | 'pieton';
   cause: [string, string];
   admis: boolean;
 }

@@ -11,7 +11,6 @@ import {
   type ResultatProgramme,
 } from '@voirie/engine';
 import {
-  typeLigne,
   type ArcGraphe,
   type ConfigurationProgramme,
   type Etape,
@@ -22,7 +21,7 @@ import {
 } from '@voirie/schema';
 import { BranchesService, geometrieDe } from '../branches/branches.service.js';
 import { DRIZZLE, type Db } from '../db/db.module.js';
-import { LignesService } from '../lignes/lignes.service.js';
+import { LignesService, pourConflits } from '../lignes/lignes.service.js';
 
 /** Cycle maximal accepté par le modèle des plans de feux (PlanCycle). */
 const CYCLE_MAX_S = 300;
@@ -52,7 +51,7 @@ export class ProgrammeService {
     const configuration = await this.branches.lire(carrefourId); // 404 si carrefour inconnu
     const { lignes, conflits_admis } = await this.lignes.lire(carrefourId);
     return contexteProgramme(
-      lignes.map((l) => ({ code: l.code, type: typeLigne(l.signal), mouvements: l.mouvements, traverse: l.traverse })),
+      lignes.map(pourConflits),
       geometrieDe(configuration),
       conflits_admis,
     );

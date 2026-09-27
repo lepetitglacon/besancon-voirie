@@ -4,6 +4,7 @@ import { Aide } from '../ds'
 
 const SYMBOLES: Record<ConflitLignes['nature'] | 'admis', { symbole: string; titre: string; couleur: string }> = {
   croisement: { symbole: '✕', titre: 'Trajectoires qui se croisent', couleur: 'conflit.croisement' },
+  insertion: { symbole: '↪', titre: 'Insertion sur l’anneau', couleur: 'conflit.insertion' },
   convergence: { symbole: '⋎', titre: 'Même sortie', couleur: 'conflit.convergence' },
   pieton: { symbole: 'P', titre: 'Traversée piétonne', couleur: 'conflit.pieton' },
   admis: { symbole: '✓', titre: 'Conflit admis', couleur: 'conflit.admis' },
@@ -67,7 +68,7 @@ export function MatriceConflits({ codes, conflits, onBasculerAdmis }: Props) {
           ))}
         </Table.Body>
       </Table.Root>
-      <Aide>✕ croisement · ⋎ même sortie · P piétons · ✓ conflit admis (vert simultané toléré)</Aide>
+      <Aide>✕ croisement · ↪ insertion sur l’anneau · ⋎ même sortie · P piétons · ✓ conflit admis (vert simultané toléré)</Aide>
     </>
   )
 }

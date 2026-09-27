@@ -15,8 +15,9 @@
 4. [Étape 2 — Lignes de feux et conflits](#4-étape-2--lignes-de-feux-et-conflits)
 5. [Étape 3 — Programme par étapes](#5-étape-3--programme-par-étapes)
 6. [Étape 4 — Graphe des étapes et simulation](#6-étape-4--graphe-des-étapes-et-simulation)
-7. [Ce qu'OSM fournit déjà](#7-ce-quosm-fournit-déjà)
-8. [Découpage en worktrees](#8-découpage-en-worktrees)
+7. [Giratoires](#7-giratoires)
+8. [Ce qu'OSM fournit déjà](#8-ce-quosm-fournit-déjà)
+9. [Découpage en worktrees](#9-découpage-en-worktrees)
 
 ---
 
@@ -103,8 +104,7 @@ connexions (`flechesParVoie`, `mouvementsDepuisConnexions`), côté API comme c�
 
 ### Proposition OSM + IA
 
-**✦ IA** (barre d'outils de la configuration, touche <kbd>I</kbd>, popup du carrefour ou menu
-contextuel) part de la détection OSM et la fait corriger par Claude d'après la photo aérienne
+**✦ IA** (barre d'outils de la configuration, touche <kbd>I</kbd> ou menu contextuel) part de la détection OSM et la fait corriger par Claude d'après la photo aérienne
 (`apps/api/src/branches/ia/`) :
 
 0. **Zone de la photo** : avant la mise en file, la carte montre le cadre de la photo, le reste
@@ -136,17 +136,30 @@ un redémarrage de l'API est remise en file et relancée. Un carrefour déjà en
 ajouté une seconde fois.
 
 Dans l'application :
-- une liste « ✦ Propositions IA » dans la carte d'en-tête de l'accueil : en attente (avec la
+- une liste « ✦ Propositions IA » dans la carte de suivi, en bas à droite : en attente (avec la
   place dans la file), en cours (chrono), prête (« Ouvrir »), en échec (motif au survol) ; « × »
   annule une demande ou retire une ligne ;
 - dans la carte d'en-tête du carrefour configuré : où en est son analyse, et « Charger » quand
   elle est prête ;
-- à la fin de chaque analyse, une notification « Proposition IA prête » avec un bouton
+- à la fin de chaque analyse, une notification (en bas à gauche) « Proposition IA prête » avec un bouton
   « Ouvrir », plus une notification système si l'onglet est en arrière-plan (permission
   demandée au premier ajout) ;
 - « Ouvrir » recentre la carte sur le carrefour, ouvre sa configuration et charge la proposition
   comme brouillon (confirmation si des modifications ne sont pas enregistrées). La proposition
   est alors marquée consultée : elle quitte la liste au bout d'une heure.
+
+### Ouverture d'un carrefour et brouillons
+
+Un clic sur un carrefour (son disque ou l'un de ses feux) ouvre directement sa configuration,
+à la place de celle qui était ouverte, sauf pendant le tracé de la zone IA ou le choix des feux
+d'une ligne. La carte d'en-tête résume le carrefour : nature, nombre de feux, statut de la
+programmation, tram à proximité, avec « Feux » (ajouter ou retirer des feux) et « Supprimer ».
+
+Les modifications non enregistrées (branches, lignes de feux, programme) sont gardées par
+carrefour (`configuration/brouillons.ts`) : quitter la configuration ou passer à un autre
+carrefour ne les perd pas. La carte de suivi, en bas à droite, liste les carrefours concernés :
+« Reprendre » rouvre la configuration avec ses brouillons, « × » les abandonne. Ils vivent en
+mémoire : le navigateur demande confirmation avant de fermer ou recharger la page.
 
 Variables (`.env`) : `IA_CLAUDE_CMD` (commande, `claude` par défaut ; Claude Code doit être
 installé et connecté sur le serveur), `IA_MODELE` (`opus` par défaut), `IA_PARALLELE` (2),
@@ -268,6 +281,7 @@ Bézier du bout de sa voie entrante au bout de sa voie sortante, dans un repère
 | Tourne-à-gauche contre tout-droit d'en face | `croisement` |
 | Deux voies qui rejoignent des voies de sortie différentes d'une même rue | compatibles |
 | Passage piéton coupé par une trajectoire | `pieton` |
+| Giratoire : une entrée s'insère devant la circulation de l'anneau | `insertion` (§7) |
 
 Deux lignes sont en conflit si l'un de leurs mouvements l'est. Un conflit peut être **admis**
 à la main : les deux lignes pourront être au vert ensemble. Exemples : tourne-à-droite avec
@@ -463,7 +477,122 @@ C'est l'outil pour comparer des variantes de graphe sur un même scénario, en a
   curseur et lecture qui pilotent les feux sur la carte, tableau des attentes, journal
   cliquable.
 
-## 7. Ce qu'OSM fournit déjà
+## 7. Giratoires
+
+### À Besançon
+
+Recensement du 27/09/2026 dans OSM : 147 giratoires (`junction=roundabout` ou `circular`),
+dont **6 ont des feux véhicules** à moins de 25 m (17 feux sur 359). Ce sont surtout des
+anneaux **coupés par un transport en site propre** : des feux posés sur l'anneau arrêtent la
+circulation quand le tram ou le bus traverse l'îlot.
+
+| Giratoire | Rayon | Feux (sur l'anneau / autour) | Traversé par |
+|---|---|---|---|
+| Mitterrand × Salvador Allende (Planoise) | 36 m, 3 voies | 4 / 4 | tram |
+| Rue de Belfort × chemin du Fort Benoît | 17 m | 2 / 0 | tram |
+| Avenue de Bourgogne × Salvador Allende | 20 m | 2 / 0 | tram |
+| Léo Lagrange × Trépillot × Charles Weiss | 15 m | 2 / 0 | bus en site propre |
+| Joachim du Bellay × René Char | 14 m | 0 / 2 | bus en site propre |
+| Rue de Dole × Alexandre Ribot | 10 m | 0 / 1 | — |
+
+Rayon : cercle de même aire que l'enveloppe du tracé OSM, qui suit le milieu de la chaussée.
+
+### Modèle (comme OSM, SUMO et TM:PE)
+
+Un giratoire est un carrefour de nature `giratoire`, avec un **anneau** : une chaussée à sens
+unique autour de l'îlot, où l'on tourne dans le sens antihoraire vu du ciel. Chaque branche
+s'y insère en un point. C'est le modèle d'OSM (l'anneau est une voie `junction=roundabout`),
+de SUMO (`netconvert` donne la priorité à l'anneau) et de TM:PE (une boucle de tronçons à
+sens unique, chaque raccord étant un nœud) : la phase 2 s'y branche sans traduction.
+
+```sql
+ALTER TYPE nature_carrefour ADD VALUE 'giratoire';
+ALTER TABLE carrefour  ADD COLUMN anneau jsonb;            -- { centre: [lon, lat], rayon_m, voies }
+CREATE TYPE priorite_entree AS ENUM ('cedez_le_passage', 'stop', 'priorite_a_droite');
+ALTER TABLE branche    ADD COLUMN priorite_entree priorite_entree;  -- null = cédez-le-passage
+ALTER TABLE ligne_feux ADD COLUMN anneau text;             -- feu d'anneau : branche juste en aval
+```
+
+- **Anneau** : centre de l'îlot, rayon du bord extérieur de la chaussée, nombre de voies.
+  Il s'enregistre avec les branches (`PUT /branches`, champ `anneau`).
+- **Branches** : leur azimut et leurs voies se comptent depuis le centre de l'îlot ; les
+  voies proposées s'arrêtent 2 m avant le bord de l'anneau.
+- **Priorité d'une entrée** : cédez-le-passage à l'anneau par défaut, stop, ou priorité à
+  droite (anneau non prioritaire, type place de l'Étoile). C'est un attribut, pas une
+  supposition. Une entrée à feux garde ce régime quand ses feux sont éteints ou au jaune
+  clignotant.
+- **Feu d'anneau** : une ligne de feux qui ne commande aucun mouvement. Elle arrête la
+  circulation de l'anneau juste en amont d'une branche. Code A1, A2…
+
+### Trajectoires (`giratoire.ts`)
+
+Une connexion suit l'anneau : raccord d'entrée (Bézier tangente à la voie puis à l'anneau),
+arc sur une voie de l'anneau, raccord de sortie. Sur un anneau à plusieurs voies, la voie
+dépend de la distance à parcourir : voie extérieure pour les premières sorties, plus
+intérieure pour aller plus loin (sur trois voies : moins d'un tiers de tour, moins de deux
+tiers, au-delà). Une voie entrante de gauche ne donne jamais sur une voie plus extérieure que
+celle à son droit ; avant la sortie, on se rabat sur la voie au droit de la voie sortante. Seules les connexions **tram à
+tram** et **bus à bus** (site propre) traversent l'îlot en ligne droite.
+
+Un feu d'anneau se place juste en amont (3 m) du premier point où la branche touche
+l'anneau : l'insertion de ses voies entrantes, ou le franchissement du tram ou du bus qui en
+vient ou y va. Il est donc entre la sortie et l'entrée de la branche : on peut toujours
+quitter l'anneau vers cette branche.
+
+Les trajectoires commandées par chaque ligne (`trajectoiresDesLignes`) :
+
+- **Ligne d'entrée** : les trajectoires de ses mouvements, coupées au premier feu d'anneau
+  qu'elles rencontrent (elles y attendent).
+- **Feu d'anneau** : la circulation qui passe devant lui, depuis sa ligne d'arrêt jusqu'au
+  feu d'anneau suivant, ou jusqu'à sa sortie.
+
+### Conflits
+
+| Cas | Résultat |
+|---|---|
+| Une entrée s'insère là où une autre trajectoire circule sur l'anneau | `insertion` |
+| Feu d'anneau et entrée juste en aval | `insertion` |
+| Trajectoire arrêtée par un feu d'anneau et entrée en aval de ce feu | compatibles |
+| Tram (ou bus) qui traverse l'îlot et circulation de l'anneau | `croisement` |
+| Trajectoire qui sort avant l'entrée suivante | compatibles |
+| Deux trajectoires vers la même voie de sortie | `convergence` |
+
+Rouge de dégagement d'une insertion : le point de conflit est celui où l'entrant rejoint
+l'anneau ; un feu d'anneau compte ses trajets depuis sa propre ligne d'arrêt, sur l'anneau.
+
+Les mouvements sans feux ne sont signalés que pour les entrées dont un autre mouvement a des
+feux : une entrée sans feux cède le passage, c'est normal.
+
+### Détection OSM
+
+Pour un carrefour de nature `giratoire`, `GET /branches/detection` :
+
+1. prend l'anneau OSM le plus proche (60 m au plus) : voies `junction=roundabout` reliées,
+   centre et rayon de leur enveloppe, plus une demi-largeur de chaussée ; voies = `lanes` ;
+2. cherche les branches sur un cercle 15 m au-delà de l'anneau, sans compter l'anneau
+   lui-même ;
+3. propose toutes les connexions de chaque entrée vers chaque sortie, demi-tour compris :
+   les flèches d'OSM manquent presque toujours aux entrées de giratoire.
+
+Le tram n'est pas détecté (comme pour les carrefours ordinaires) : ses voies s'ajoutent à la
+main, en type `tram`. La proposition OSM + IA reçoit l'anneau et la consigne de ne pas en
+faire une branche.
+
+### Ce qu'on ne reprend pas de TM:PE
+
+La configuration rapide des ronds-points de TM:PE contient des réglages faits pour l'IA du
+jeu, pas des règles françaises :
+
+- **entrer dans un carrefour encombré** : interdit en vrai (ne pas s'engager si l'on risque
+  d'y rester bloqué) ;
+- **pas de changement de voie sur l'anneau** : ce n'est pas une règle ; on se rabat avant de
+  sortir ;
+- **suppression des passages piétons** : en France, ils sont reculés d'environ 5 m de
+  l'anneau, pas supprimés ;
+- **flèches automatiques aux entrées** (voie de droite pour la première sortie) : rares ici ;
+  les connexions restent une proposition à corriger.
+
+## 8. Ce qu'OSM fournit déjà
 
 Mesuré le 26/09/2026 autour des 359 feux véhicules (voies circulables à moins de 15 m) :
 
@@ -478,7 +607,7 @@ Mesuré le 26/09/2026 autour des 359 feux véhicules (voies circulables à moins
 
 Les flèches sont donc **surtout à saisir à la main** : la détection propose, on corrige.
 
-## 8. Découpage en worktrees
+## 9. Découpage en worktrees
 
 | Worktree | Contenu |
 |---|---|
@@ -488,3 +617,4 @@ Les flèches sont donc **surtout à saisir à la main** : la détection propose,
 | `config-graphes` | Étape 4 : graphe des étapes (étapes sur appel, priorité tram, arcs conditionnels) et simulation d'un scénario de demandes |
 | `config-recalage` | Feux posés sur leur mât sur la photo, position OSM conservée |
 | `config-ia` | Proposition « OSM + IA » : orthophoto IGN lue par Claude Code sur le serveur, import d'un JSON de branches |
+| `giratoires` | Giratoires (§7) : anneau détecté dans OSM et calé sur la photo, priorité des entrées, trajectoires par l'anneau, feux d'anneau, conflits d'insertion |

@@ -47,7 +47,7 @@ function cleDeNom(nom: string): string {
  * Nom proposé pour un carrefour à partir des rues proches, déjà triées par importance puis
  * distance : trois noms distincts au plus, joints par « × ».
  */
-export function proposerNom(noms: readonly string[], nature: 'carrefour' | 'traversee_pietonne' = 'carrefour'): string {
+export function proposerNom(noms: readonly string[], nature: 'carrefour' | 'giratoire' | 'traversee_pietonne' = 'carrefour'): string {
   const vus = new Set<string>();
   const retenus: string[] = [];
   for (const nom of noms) {
@@ -60,5 +60,6 @@ export function proposerNom(noms: readonly string[], nature: 'carrefour' | 'trav
   if (nature === 'traversee_pietonne') {
     return ['Traversée piétonne', retenus[0]].filter(Boolean).join(', ');
   }
+  if (nature === 'giratoire') return retenus.length ? `Giratoire ${retenus.join(' × ')}` : 'Giratoire sans nom';
   return retenus.length ? retenus.join(' × ') : 'Carrefour sans nom';
 }

@@ -57,6 +57,7 @@ export function PanneauEdition({ edition, enregistrement, onChanger, onEnregistr
           onChange={(valeur) => onChanger({ ...edition, nature: valeur as NatureCarrefour })}
         >
           <option value="carrefour">Carrefour à feux</option>
+          <option value="giratoire">Giratoire à feux</option>
           <option value="traversee_pietonne">Traversée piétonne à feux</option>
         </Selecteur>
       </Field.Root>

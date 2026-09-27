@@ -517,6 +517,7 @@ métropole. Un simple mail au service Mobilité peut les obtenir, facultatif. Le
 - [x] Fond de carte « Satellite » (orthophotos IGN) pour vérifier voies et marquages.
 - [x] Configuration, étape 3 : plans de feux et plages horaires, programme par étapes, jaune et rouges de dégagement calculés sur la géométrie, diagramme de feux, lecture du cycle sur la carte.
 - [x] Configuration, étape 4 : graphe des étapes (étapes sur appel, priorité tram, arcs conditionnels) et simulation d'un scénario de demandes (attentes, journal, lecture sur la carte).
+- [x] Giratoires à feux : anneau (OSM, calé sur la photo), priorité des entrées, feux d'anneau, conflits d'insertion — voir [docs/CONFIGURATION.md §7](docs/CONFIGURATION.md#7-giratoires).
 - [ ] Comparer le diagramme de feux aux relevés terrain (après le chrono).
 - [x] Carte MapLibre : carrefours colorés par statut, bulle avec nom, nature et tram.
 - [ ] Fiche carrefour avec diagramme de feux ; calcul des branches (`ST_Azimuth`).

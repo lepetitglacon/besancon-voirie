@@ -11,10 +11,12 @@
  * d_entrant : trajet de la ligne d'arrêt au point de conflit pour l'usager qui arrive.
  * Le véhicule qui dégage a franchi sa ligne d'arrêt au plus tard à la fin du jaune.
  * Un piéton qui dégage part du trottoir le plus éloigné du point de conflit ; un piéton qui
- * arrive part du plus proche. On garde le pire des points de conflit, arrondi à la seconde
+ * arrive part du plus proche. Dans un giratoire, le point de conflit d'une insertion est le
+ * point où la trajectoire entrante rejoint l'anneau, et un feu d'anneau compte ses trajets
+ * depuis sa propre ligne d'arrêt, sur l'anneau. On garde le pire des points de conflit, arrondi à la seconde
  * supérieure.
  */
-import { matriceConflits, trajectoiresParMouvement, type GeometrieCarrefour, type LigneConflits } from './conflits.js';
+import { matriceConflits, pointsDeConflitTrajectoires, trajectoiresDesLignes, type GeometrieCarrefour, type LigneConflits } from './conflits.js';
 import { intersectionsPolylignes, longueurPolyligne, repereLocal, type XY } from './geometrie.js';
 import { PARAMETRES_CERTU } from './parametres.js';
 
@@ -54,11 +56,11 @@ export function degagementsCalcules(
   parametres: Parametres = PARAMETRES_CERTU,
 ): Degagement[] {
   const repere = repereLocal(geometrie.centre);
-  const parMouvement = trajectoiresParMouvement(geometrie);
+  const parLigne = trajectoiresDesLignes(lignes, geometrie);
   const parCode = new Map(lignes.map((l) => [l.code, l]));
   const vitesse = (l: LigneDegagement) =>
     l.vitesse_ms ?? (l.type === 'pieton' ? parametres.vitessePietons : parametres.vitesseVehicules);
-  const courbes = (l: LigneDegagement) => l.mouvements.flatMap((m) => parMouvement.get(m) ?? []);
+  const courbes = (l: LigneDegagement) => parLigne.get(l.code) ?? [];
   const traversee = (l: LigneDegagement): XY[] | null => {
     const segment = l.traverse ? geometrie.traversees.get(l.traverse) : undefined;
     return segment ? segment.map(repere.versXY) : null;
@@ -81,11 +83,7 @@ export function degagementsCalcules(
       );
     }
     return courbes(sortant).flatMap((ts) =>
-      courbes(entrant).flatMap((te) => {
-        if (ts.de === te.de) return [];
-        if (ts.vers === te.vers) return [{ sortant: longueurPolyligne(ts.courbe), entrant: longueurPolyligne(te.courbe) }];
-        return intersectionsPolylignes(ts.courbe, te.courbe).map(({ da, db }) => ({ sortant: da, entrant: db }));
-      }),
+      courbes(entrant).flatMap((te) => pointsDeConflitTrajectoires(ts, te).map(({ da, db }) => ({ sortant: da, entrant: db }))),
     );
   };
 

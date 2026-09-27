@@ -12,8 +12,12 @@ export const COULEURS = {
 
 const estTraversee: ExpressionSpecification = ['==', ['get', 'nature'], 'traversee_pietonne']
 
-/** Carrefours : disques pleins de loin, halos discrets de près pour laisser voir les feux. */
-export function coucheCarrefours(edition: boolean): CircleLayerSpecification {
+/**
+ * Carrefours : disques pleins de loin, halos discrets de près pour laisser voir les feux.
+ * Le carrefour ouvert est cerclé de bleu.
+ */
+export function coucheCarrefours(edition: boolean, selection: string | null): CircleLayerSpecification {
+  const selectionne: ExpressionSpecification = ['==', ['get', 'id'], selection ?? '']
   return {
     id: 'carrefours',
     type: 'circle',
@@ -30,8 +34,8 @@ export function coucheCarrefours(edition: boolean): CircleLayerSpecification {
         COULEURS.statut.non_releve,
       ],
       'circle-opacity': ['interpolate', ['linear'], ['zoom'], 14, edition ? 0.4 : 0.9, 16, 0.18],
-      'circle-stroke-width': 1.5,
-      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': ['case', selectionne, 3, 1.5],
+      'circle-stroke-color': ['case', selectionne, COULEURS.selection, '#ffffff'],
     },
   }
 }

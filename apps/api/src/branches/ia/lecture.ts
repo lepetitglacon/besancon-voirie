@@ -125,7 +125,18 @@ export function consigne(contexte: ContexteIa, fichier: string): string {
     tags: tagsUtiles(v.tags),
     trace_px: v.coordonnees.map((c) => px(cadre, c)),
   }));
-  const centre = px(cadre, contexte.detection.centre);
+  const { anneau } = contexte.detection;
+  const centre = px(cadre, anneau?.centre ?? contexte.detection.centre);
+  const giratoire = anneau
+    ? `
+## Giratoire
+Ce carrefour est un giratoire. Anneau d'après OSM : centre de l'îlot ${JSON.stringify(centre)}, rayon extérieur ${Math.round(anneau.rayon_m / cadre.metres_par_px)} px (${anneau.rayon_m} m), ${anneau.voies} voie(s). On y tourne dans le sens inverse des aiguilles d'une montre.
+- L'anneau n'est pas une branche : ne crée des branches que pour les rues qui s'y raccordent, et pour le tram ou un site propre bus qui traverse l'îlot.
+- Les voies entrantes s'arrêtent à la ligne de cédez-le-passage (ou au feu), au bord de l'anneau ; les sortantes partent du bord de l'anneau.
+- Connexions : chaque voie entrante mène à toutes les sorties, demi-tour compris, sauf marquage contraire. Tram et bus en site propre : seulement vers leur propre voie de l'autre côté de l'îlot.
+- Dis dans les remarques si l'anneau d'OSM ne correspond pas à la photo (centre, rayon, nombre de voies), et si des feux se trouvent sur l'anneau lui-même.
+`
+    : '';
   return `Configure les voies du carrefour à feux photographié.
 
 ## Image (outil Read)
@@ -134,14 +145,14 @@ ${fichier} : orthophoto IGN, ${cadre.largeur_px}×${cadre.hauteur_px} px, nord e
 Lis le marquage au sol avec attention : lignes d'arrêt, lignes de voie, flèches, passages piétons, îlots, marquages bus ou vélo.
 
 ## Données OpenStreetMap (coordonnées en pixels de l'image)
-Centre du carrefour : ${JSON.stringify(centre)}.
+Centre du carrefour${anneau ? ' (centre de l’îlot)' : ''} : ${JSON.stringify(centre)}.
 Feux OSM, numérotés F1, F2… (OSM les place en général au milieu de la chaussée, au niveau de la ligne d'arrêt) :
 ${JSON.stringify(feux)}
 Voies OSM autour du carrefour (trace dans le sens de dessin de la voie OSM ; oneway=yes : circulation dans ce sens) :
 ${JSON.stringify(voiesOsm)}
-
+${giratoire}
 ## Proposition OSM à corriger
-Elle vient des tags OSM et de règles par défaut : voies parallèles à l'axe, 3,25 m de large, ligne d'arrêt à 15 m du centre. Elle est souvent fausse sur le nombre de voies, leur position et les flèches.
+Elle vient des tags OSM et de règles par défaut : voies parallèles à l'axe, 3,25 m de large, ligne d'arrêt à ${anneau ? 'deux mètres du bord de l’anneau' : '15 m du centre'}. Elle est souvent fausse sur le nombre de voies, leur position et les flèches.
 ${JSON.stringify(propositionEnPixels(cadre, contexte.detection))}
 
 ## Ce que tu dois renvoyer
@@ -194,6 +205,7 @@ export function configurationDepuisLecture(lecture: LectureIa, cadre: CadrePhoto
       geom: axesOsm.get(code) ?? (loin ? [detection.centre, loin] : null),
       voies: toutes,
       traversee: b.traversee ? [ll(b.traversee.debut), ll(b.traversee.fin)] : null,
+      priorite_entree: null,
     };
   });
 
@@ -214,7 +226,7 @@ export function configurationDepuisLecture(lecture: LectureIa, cadre: CadrePhoto
     connexions.push({ de, vers });
   }
 
-  const resultat = ConfigurationBranches.safeParse({ branches, connexions });
+  const resultat = ConfigurationBranches.safeParse({ branches, connexions, anneau: detection.anneau });
   if (!resultat.success) {
     const erreurs = resultat.error.issues.map((i) => `${i.path.join('.')} : ${i.message}`);
     throw new Error(`Proposition de l'IA invalide : ${erreurs.join(' ; ')}`);

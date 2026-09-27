@@ -30,6 +30,24 @@ export const Voie = z.object({
 });
 export type Voie = z.infer<typeof Voie>;
 
+/**
+ * Régime d'une entrée de giratoire hors feux (docs/CONFIGURATION.md §7) : cédez-le-passage à
+ * l'anneau (règle par défaut), stop, ou priorité à droite (anneau non prioritaire). Une entrée
+ * à feux garde ce régime quand les feux sont éteints ou au jaune clignotant.
+ */
+export const PrioriteEntree = z.enum(['cedez_le_passage', 'stop', 'priorite_a_droite']);
+export type PrioriteEntree = z.infer<typeof PrioriteEntree>;
+
+/** Anneau d'un giratoire : chaussée annulaire à sens unique autour de l'îlot. */
+export const Anneau = z.object({
+  /** Centre de l'îlot. */
+  centre: LonLat,
+  /** Rayon du bord extérieur de la chaussée annulaire (m). */
+  rayon_m: z.number().min(4).max(150),
+  voies: z.number().int().min(1).max(4),
+});
+export type Anneau = z.infer<typeof Anneau>;
+
 const CodeBranche = z.string().trim().regex(/^[A-Z0-9]{1,4}$/, 'Code en majuscules, 4 caractères au plus (N, NE, S2…)');
 
 export const Branche = z
@@ -44,6 +62,8 @@ export const Branche = z
     voies: z.array(Voie).max(16),
     /** Passage piéton en travers de la branche, d'un trottoir à l'autre. */
     traversee: SegmentGeo.nullable().default(null),
+    /** Giratoire : régime de l'entrée hors feux ; null = cédez-le-passage. */
+    priorite_entree: PrioriteEntree.nullable().default(null),
   })
   .superRefine((branche, ctx) => {
     for (const sens of SensVoie.options) {
@@ -65,6 +85,8 @@ export const ConfigurationBranches = z
   .object({
     branches: z.array(Branche).max(12),
     connexions: z.array(Connexion).max(300).default([]),
+    /** Anneau d'un giratoire ; null pour un carrefour ordinaire. */
+    anneau: Anneau.nullable().default(null),
   })
   .superRefine(({ branches, connexions }, ctx) => {
     const codes = branches.map((b) => b.code);
@@ -106,6 +128,8 @@ export interface BranchesCarrefour {
   centre: [number, number];
   branches: BrancheLue[];
   connexions: Connexion[];
+  /** Anneau d'un giratoire ; null pour un carrefour ordinaire. */
+  anneau: Anneau | null;
   /** Mouvements déduits des connexions. */
   mouvements: MouvementCarrefour[];
   /** Flèches de chaque voie entrante (clé de voie → directions), déduites des connexions. */

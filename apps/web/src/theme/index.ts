@@ -129,6 +129,7 @@ const config = defineConfig({
         },
         conflit: {
           croisement: { value: CONFLIT.croisement },
+          insertion: { value: CONFLIT.insertion },
           convergence: { value: CONFLIT.convergence },
           pieton: { value: CONFLIT.pieton },
           admis: { value: CONFLIT.admis },

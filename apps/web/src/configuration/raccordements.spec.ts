@@ -17,6 +17,7 @@ function branche(code: string, azimut: number, entrantes: number, sortantes: num
       ...g.sortantes.map((geom, rang) => ({ sens: 'sortante' as const, rang, type: 'generale' as const, geom })),
     ],
     traversee: null,
+    priorite_entree: null,
   }
 }
 

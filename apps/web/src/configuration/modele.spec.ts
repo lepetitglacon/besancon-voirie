@@ -1,12 +1,16 @@
-import { genererVoies, repereLocal, type LonLat, type Segment } from '@voirie/engine'
+import { distanceArretGiratoire, genererVoies, repereLocal, type LonLat, type Segment } from '@voirie/engine'
 import type { Branche } from '@voirie/schema'
 import { describe, expect, it } from 'vitest'
 import {
   ajouterVoie,
   basculerConnexion,
   basculerTraversee,
+  changerPrioriteEntree,
+  creerAnneau,
   deplacerPoignee,
   deplacerVoie,
+  regenererVoies,
+  retirerAnneau,
   renommerBranche,
   retirerVoie,
   supprimerBranche,
@@ -31,6 +35,7 @@ function branche(code: string, azimut: number, entrantes: number, sortantes: num
       ...g.sortantes.map((geom, rang) => ({ sens: 'sortante' as const, rang, type: 'generale' as const, geom })),
     ],
     traversee: g.traversee,
+    priorite_entree: null,
   }
 }
 
@@ -40,6 +45,7 @@ const depart: Brouillon = {
     { de: 'S:e0', vers: 'N:s0' },
     { de: 'N:e0', vers: 'S:s0' },
   ],
+  anneau: null,
 }
 
 describe('opérations du brouillon', () => {
@@ -70,7 +76,7 @@ describe('opérations du brouillon', () => {
   })
 
   it('supprime une branche et ses connexions', () => {
-    expect(supprimerBranche(depart, 'N')).toEqual({ branches: [depart.branches[0]], connexions: [] })
+    expect(supprimerBranche(depart, 'N')).toEqual({ branches: [depart.branches[0]], connexions: [], anneau: null })
   })
 
   it('ajoute puis retire une connexion par le même geste', () => {
@@ -140,5 +146,37 @@ describe('voies tracées à la main', () => {
     expect(voiesDe(resultat.brouillon.branches[0]!, 'entrante')).toEqual([])
     expect(voiesDe(resultat.brouillon.branches[0]!, 'sortante').map((v) => v.rang)).toEqual([0, 1])
     expect(resultat.brouillon.connexions).toEqual([{ de: 'N:e0', vers: 'S:s1' }])
+  })
+})
+
+describe('giratoire', () => {
+  const giratoire = creerAnneau(depart, centre)
+  const distance = (a: LonLat, b: LonLat) => Math.hypot(...repereLocal(a).versXY(b))
+
+  it('replace les voies au bord de l’anneau, depuis le centre de l’îlot', () => {
+    const decale = deplacerPoignee(giratoire, { role: 'anneau', point: 'centre' }, [6.0301, 47.2501])
+    const replace = regenererVoies(decale, 'S', centre)
+    const entree = voiesDe(replace.branches[0]!, 'entrante')[0]!
+    expect(distance(decale.anneau!.centre, entree.geom[0])).toBeGreaterThan(distanceArretGiratoire(decale.anneau!) - 0.01)
+    expect(distance(decale.anneau!.centre, entree.geom[0])).toBeLessThan(distanceArretGiratoire(decale.anneau!) + 2)
+  })
+
+  it('règle le rayon en tirant le bord de l’anneau, dans les bornes du schéma', () => {
+    const [x, y] = [20, 0]
+    const bord = repereLocal(centre).versLonLat([x, y])
+    expect(deplacerPoignee(giratoire, { role: 'anneau', point: 'bord' }, bord).anneau!.rayon_m).toBe(20)
+    expect(deplacerPoignee(giratoire, { role: 'anneau', point: 'bord' }, centre).anneau!.rayon_m).toBe(4)
+  })
+
+  it('enregistre le cédez-le-passage comme règle par défaut, et l’oublie sans anneau', () => {
+    const stop = changerPrioriteEntree(giratoire, 'S', 'stop')
+    expect(stop.branches[0]!.priorite_entree).toBe('stop')
+    expect(changerPrioriteEntree(stop, 'S', 'cedez_le_passage').branches[0]!.priorite_entree).toBeNull()
+    expect(retirerAnneau(stop).branches[0]!.priorite_entree).toBeNull()
+  })
+
+  it('garde l’anneau quand on renomme ou supprime une branche', () => {
+    expect(renommerBranche(giratoire, 'S', 'S2').anneau).toEqual(giratoire.anneau)
+    expect(supprimerBranche(giratoire, 'S').anneau).toEqual(giratoire.anneau)
   })
 })

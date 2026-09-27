@@ -110,8 +110,15 @@
     {
       "idx": 15,
       "version": "7",
-      "when": 1790476439257,
-      "tag": "20260927023359_reseau",
+      "when": 1790475746788,
+      "tag": "20260927022226_giratoires",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1790477954462,
+      "tag": "20260927025914_reseau",
       "breakpoints": true
     }
   ]

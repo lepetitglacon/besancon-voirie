@@ -22,6 +22,7 @@ export const STATUT = {
 /** Natures de conflit entre deux lignes de feux. */
 export const CONFLIT = {
   croisement: '#e2453c',
+  insertion: '#d63384',
   convergence: '#f08a24',
   pieton: '#7c5cff',
   admis: '#2fbf6a',

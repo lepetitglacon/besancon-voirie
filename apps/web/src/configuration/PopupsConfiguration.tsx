@@ -1,6 +1,6 @@
 /**
  * Popups de la configuration d'un carrefour : un clic sur un élément de la carte (voie, liaison,
- * feu, code de branche, carrefour) ouvre une popup courte ancrée à cet élément.
+ * feu, code de branche) ouvre une popup courte ancrée à cet élément.
  */
 import { Badge, Button, HStack, Input, Stack, Text } from '@chakra-ui/react'
 import {
@@ -17,6 +17,7 @@ import {
   type BranchesCarrefour,
   type ConfianceIa,
   type FeuResume,
+  type PrioriteEntree,
   type SensVoie,
   type SourceBranche,
   type TypeVoie,
@@ -25,7 +26,6 @@ import {
   Aide,
   BarreOutils,
   Bascule,
-  Chiffre,
   Compteur,
   LigneConflit,
   Pastille,
@@ -41,11 +41,15 @@ import {
   ajouterVoie,
   basculerConnexion,
   basculerTraversee,
+  changerPrioriteEntree,
   changerTypeVoie,
+  changerVoiesAnneau,
   couleursVoies,
+  creerAnneau,
   deplacerVoie,
   regenererVoies,
   renommerBranche,
+  retirerAnneau,
   retirerVoie,
   supprimerBranche,
   supprimerVoie,
@@ -64,8 +68,16 @@ const TYPES: Array<{ valeur: TypeVoie; libelle: string }> = [
   { valeur: 'tram', libelle: 'Tram' },
 ]
 
+/** Régimes d'une entrée de giratoire hors feux (panneaux AB3a, AB4, ou aucun). */
+const PRIORITES: Array<{ valeur: PrioriteEntree; libelle: string }> = [
+  { valeur: 'cedez_le_passage', libelle: 'Cédez' },
+  { valeur: 'stop', libelle: 'Stop' },
+  { valeur: 'priorite_a_droite', libelle: 'Priorité à droite' },
+]
+
 const NATURES_CONFLIT = {
   croisement: { titre: 'trajectoires qui se croisent', couleur: 'conflit.croisement' },
+  insertion: { titre: 'insertion sur l’anneau', couleur: 'conflit.insertion' },
   convergence: { titre: 'même sortie', couleur: 'conflit.convergence' },
   pieton: { titre: 'traversée piétonne', couleur: 'conflit.pieton' },
 } as const
@@ -524,6 +536,21 @@ export function PopupBranche({ code, brouillon, centre, source, ia, onChanger, o
           </HStack>
         ))}
       </Section>
+      {brouillon.anneau && (
+        <Section libelle="Entrée sur l’anneau (hors feux)">
+          <Segments
+            fitted
+            aria-label="Régime de l’entrée"
+            valeur={branche.priorite_entree ?? 'cedez_le_passage'}
+            onChange={(priorite) => onChanger(changerPrioriteEntree(brouillon, code, priorite))}
+            options={PRIORITES}
+          />
+          <Aide>
+            Cédez-le-passage à l’anneau par défaut ; priorité à droite si l’anneau n’est pas prioritaire. Une entrée à
+            feux garde ce régime quand ses feux sont éteints ou au jaune clignotant.
+          </Aide>
+        </Section>
+      )}
       <HStack justify="space-between" pt="2.5" borderTopWidth="1px" borderColor="border.muted">
         <Text>Passage piéton</Text>
         <Bascule coche={branche.traversee !== null} onChange={() => onChanger(basculerTraversee(brouillon, code, centre))} />
@@ -551,48 +578,50 @@ const SOURCES: Record<SourceBranche, { couleur: string; libelle: string }> = {
 }
 const CONFIANCES: Record<ConfianceIa, string> = { haute: 'green', moyenne: 'orange', basse: 'red' }
 
-// ── Carrefour ──
+// ── Anneau d'un giratoire (carte d'en-tête) ──
 
-interface PropsCarrefour {
-  nom: string
+interface PropsAnneau {
   brouillon: Brouillon
-  /** Durée du cycle du plan actif, null sans programme calculé. */
-  cycle: number | null
-  detectionEnCours: boolean
-  onDetecter: () => void
-  /** Une analyse OSM + IA de ce carrefour est déjà en file ou en cours. */
-  iaEnFile: boolean
-  onGenererIa: () => void
-  onPlan: () => void
-  onFermer: () => void
+  centre: LonLat
+  onChanger: (brouillon: Brouillon) => void
+  onOutil: (outil: OutilCarte) => void
 }
 
-export function PopupCarrefour({ nom, brouillon, cycle, detectionEnCours, onDetecter, iaEnFile, onGenererIa, onPlan, onFermer }: PropsCarrefour) {
+/** Anneau d'un giratoire : le dessiner, régler ses voies, le caler sur la photo ou le retirer. */
+export function ReglageAnneau({ brouillon, centre, onChanger, onOutil }: PropsAnneau) {
+  const { anneau } = brouillon
   return (
-    <PopupCarte
-      titre={nom}
-      soustitre="Carrefour à feux"
-      onFermer={onFermer}
-      pied={
+    <Section libelle="Anneau">
+      {anneau ? (
         <>
-          <BarreOutils.Espace />
-          <Button variant="solid" onClick={onPlan}>
-            Plan de feux (Tab)
-          </Button>
+          <HStack justify="space-between">
+            <Text>Voies sur l’anneau</Text>
+            <Compteur
+              taille="xs"
+              aria-label="Voies sur l’anneau"
+              min={1}
+              max={4}
+              valeur={anneau.voies}
+              onChange={(n) => onChanger(changerVoiesAnneau(brouillon, n ?? 1))}
+            />
+          </HStack>
+          <HStack justify="space-between">
+            <Aide>Rayon extérieur : {anneau.rayon_m} m</Aide>
+            <HStack gap="1">
+              <Button variant="lien" size="xs" onClick={() => onOutil('ajuster')}>
+                Caler (L)
+              </Button>
+              <Button variant="lien" size="xs" colorPalette="red" onClick={() => onChanger(retirerAnneau(brouillon))}>
+                Retirer
+              </Button>
+            </HStack>
+          </HStack>
         </>
-      }
-    >
-      <HStack gap="2">
-        <Chiffre valeur={brouillon.branches.length} libelle="branches" />
-        <Chiffre valeur={brouillon.connexions.length} libelle="liaisons" />
-        <Chiffre valeur={cycle === null ? '—' : `${Math.round(cycle)} s`} libelle="cycle" />
-      </HStack>
-      <Button loading={detectionEnCours} loadingText="Détection…" onClick={onDetecter}>
-        Détecter les branches depuis OSM (O)
-      </Button>
-      <Button disabled={iaEnFile} onClick={onGenererIa} title="La détection OSM, corrigée par Claude d’après la photo aérienne IGN (~1 min, en file d’attente)">
-        {iaEnFile ? '✦ Analyse IA en file…' : '✦ Générer avec OSM + IA (I)'}
-      </Button>
-    </PopupCarte>
+      ) : (
+        <Button size="xs" onClick={() => onChanger(creerAnneau(brouillon, centre))}>
+          Dessiner l’anneau
+        </Button>
+      )}
+    </Section>
   )
 }

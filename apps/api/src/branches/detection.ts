@@ -159,3 +159,19 @@ export function proposerBranches(passages: Passage[], centre: [number, number]):
   });
   return { branches, sources };
 }
+
+/**
+ * Connexions proposées dans un giratoire : chaque voie entrante mène à toutes les branches
+ * qui ont une sortie, demi-tour compris ; on sort par la voie de même rang, ou la plus à
+ * droite s'il y en a moins. Les flèches d'OSM ne servent pas : elles manquent presque
+ * toujours aux entrées de giratoire.
+ */
+export function connexionsGiratoire(branches: readonly BrancheProposee[]): Array<{ de: string; vers: string }> {
+  return branches.flatMap((origine) =>
+    origine.fleches.flatMap((_, rang) =>
+      branches
+        .filter((b) => b.sortantes > 0)
+        .map((sortie) => ({ de: `${origine.code}:e${rang}`, vers: `${sortie.code}:s${Math.min(rang, sortie.sortantes - 1)}` })),
+    ),
+  );
+}

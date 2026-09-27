@@ -22,7 +22,7 @@ export function Chrono({ depuis }: { depuis: string }) {
 export function EtatAnalyse({ analyse }: { analyse: AnalyseIa }) {
   switch (analyse.statut) {
     case 'en_attente':
-      return <Badge colorPalette="gray">en attente{analyse.rang ? ` · n° ${analyse.rang}` : ''}</Badge>
+      return <Badge colorPalette="gray" alignSelf="start">en attente{analyse.rang ? ` · n° ${analyse.rang}` : ''}</Badge>
     case 'en_cours':
       return (
         <HStack gap="1.5">
@@ -31,10 +31,10 @@ export function EtatAnalyse({ analyse }: { analyse: AnalyseIa }) {
         </HStack>
       )
     case 'terminee':
-      return <Badge colorPalette={analyse.consultee_le ? 'gray' : 'green'}>{analyse.consultee_le ? 'ouverte' : 'prête'}</Badge>
+      return <Badge colorPalette={analyse.consultee_le ? 'gray' : 'green'} alignSelf="start">{analyse.consultee_le ? 'ouverte' : 'prête'}</Badge>
     case 'echec':
       return (
-        <Badge colorPalette="red" title={analyse.erreur ?? undefined}>
+        <Badge colorPalette="red" alignSelf="start" title={analyse.erreur ?? undefined}>
           échec
         </Badge>
       )

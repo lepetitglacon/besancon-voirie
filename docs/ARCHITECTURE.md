@@ -189,7 +189,8 @@ CREATE TABLE carrefour (
   geom          geometry(Point, 4326) NOT NULL,
   statut        statut_carrefour NOT NULL DEFAULT 'non_releve',
   controleur    jsonb NOT NULL DEFAULT '{}',   -- mode, priorite_tc, appel_pieton, feu_recompense
-  nature        nature_carrefour NOT NULL DEFAULT 'carrefour', -- ou traversee_pietonne
+  nature        nature_carrefour NOT NULL DEFAULT 'carrefour', -- ou giratoire, traversee_pietonne
+  anneau        jsonb,                           -- giratoire : { centre, rayon_m, voies } (CONFIGURATION.md §7)
   pres_tram     boolean NOT NULL DEFAULT false, -- recalculé à chaque composition
   cree_le       timestamptz NOT NULL DEFAULT now(),
   modifie_le    timestamptz NOT NULL DEFAULT now()
@@ -229,6 +230,7 @@ CREATE TABLE ligne_feux (
   mouvements    text[] NOT NULL DEFAULT '{}',   -- tout_droit, droite, gauche
   voies         smallint,
   traverse      text,                           -- piétons : branche traversée
+  anneau        text,                           -- giratoire : feu d'anneau, en amont de cette branche
   geom          geometry(Point, 4326),          -- position de la ligne d'arrêt (optionnelle)
   UNIQUE (carrefour_id, code)
 );
