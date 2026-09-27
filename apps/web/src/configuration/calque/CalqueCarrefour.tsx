@@ -3,11 +3,13 @@
  * connexions et poignées sont des composants React (états en classes CSS, événements pointeur
  * natifs). Le SVG est rendu dans le conteneur de la carte mais hors de son canvas : MapLibre ne
  * voit pas les gestes faits sur les éléments interactifs, et le fond du calque laisse passer
- * les clics vers la carte (pointer-events: none).
+ * les clics vers la carte (pointer-events: none). La molette, elle, est relayée au canvas : la
+ * carte continue de zoomer quand le pointeur passe sur une voie ou une poignée.
  */
 import { cleVoie, flechesParVoie, repereLocal, type LonLat, type XY } from '@voirie/engine'
 import type { Branche, Connexion, TypeFeu } from '@voirie/schema'
-import { useEffect, useMemo, useState, type MouseEvent, type PointerEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
+import { useMap } from 'react-map-gl/maplibre'
 import { FLECHES } from '../libelles'
 import { couleursVoies, deplacerPoignee, voiesDe, type Poignee as PoigneeModele } from '../modele'
 import {
@@ -103,6 +105,8 @@ export function CalqueCarrefour(props: Props) {
   const { branches, connexions, mode, surlignees, feux, onDeplacer, onConnecter, feuxPlacables, onPlacerFeu, onApercuFeu, onClic, selection } =
     props
   const projection = useProjection()
+  const { current: carte } = useMap()
+  const refSvg = useRef<SVGSVGElement>(null)
   const [survol, setSurvol] = useState<Survol>(null)
   const [glisse, setGlisse] = useState<Glisse | null>(null)
 
@@ -111,6 +115,21 @@ export function CalqueCarrefour(props: Props) {
     [glisse],
   )
   useEffect(() => onApercuFeu(apercuFeu), [apercuFeu, onApercuFeu])
+
+  // MapLibre n'écoute la molette que sur son conteneur de canvas : on lui renvoie celle reçue par
+  // les éléments du calque. Écouteur natif non passif, pour bloquer aussi le zoom du navigateur
+  // (pincement du pavé tactile = molette + ctrl).
+  useEffect(() => {
+    const svg = refSvg.current
+    const canvas = carte?.getCanvas()
+    if (!svg || !canvas) return
+    const relayer = (e: WheelEvent) => {
+      e.preventDefault()
+      canvas.dispatchEvent(new WheelEvent('wheel', e))
+    }
+    svg.addEventListener('wheel', relayer, { passive: false })
+    return () => svg.removeEventListener('wheel', relayer)
+  }, [carte])
 
   // Pendant un ajustement, on dessine le brouillon avec la poignée déjà déplacée : les voies
   // et leurs connexions suivent le pointeur en direct.
@@ -316,7 +335,7 @@ export function CalqueCarrefour(props: Props) {
   const cible = cibleEnCours ? voies.get(cibleEnCours) : undefined
 
   return (
-    <svg className={`calque-carrefour ${mode ?? 'lecture'}`} aria-label="Configuration du carrefour">
+    <svg ref={refSvg} className={`calque-carrefour ${mode ?? 'lecture'}`} aria-label="Configuration du carrefour">
       {apercu.branches.map(
         (b) => b.traversee && (
             <PassagePieton
