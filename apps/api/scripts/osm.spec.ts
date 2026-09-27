@@ -39,6 +39,8 @@ describe('trierElements', () => {
     expect(donnees.horodatage).toBe('2026-09-26T10:00:00Z');
     expect(donnees.commune.contours).toHaveLength(1);
     expect(donnees.signaux.map((s) => s.id)).toEqual([2, 3]);
+    // Un feu piéton est aussi un passage piéton ; un stop n'est ni l'un ni l'autre.
+    expect(donnees.passages.map((p) => p.id)).toEqual([3]);
     expect(donnees.voies.map((v) => v.id)).toEqual([5]);
     expect(donnees.trams.map((t) => t.id)).toEqual([6]);
     expect(donnees.voies[0]!.coords[0]).toEqual([6.03, 47.25]);

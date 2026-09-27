@@ -56,6 +56,12 @@ manuelle**. Les détections depuis OSM ne sont que des propositions que l'on cor
 
 ## 3. Étape 1 — Branches, voies et connexions
 
+> 💡 **Carrefour bâti sur le réseau** (il a des nœuds : [RESEAU.md §4](RESEAU.md#4-carrefours-bâtis-sur-le-réseau)) :
+> branches, voies, passages et connexions ne se dessinent pas ici, ils se déduisent de ses nœuds
+> et de leurs voies, qu'on corrige avec l'éditeur des voies. Les tables ci-dessous sont alors
+> écrites par le serveur ; ce qui suit (dessin, détection OSM, IA, JSON) vaut pour un carrefour
+> sans nœud.
+
 ### Modèle
 
 ```sql
@@ -506,6 +512,10 @@ circulation quand le tram ou le bus traverse l'îlot.
 Rayon : cercle de même aire que l'enveloppe du tracé OSM, qui suit le milieu de la chaussée.
 
 ### Modèle : des nœuds, comme dans TM:PE
+
+> 💡 Sur le réseau ([RESEAU.md §4](RESEAU.md#4-carrefours-bâtis-sur-le-réseau)), un giratoire prend
+> les nœuds réels de son anneau OSM ; un feu d'anneau est un nœud à feux qui ouvre une branche
+> interne (R1, R2…). Ce qui suit décrit le giratoire dessiné à la main (`carrefour.anneau`).
 
 Un giratoire est un carrefour de nature `giratoire` dont l'anneau est une **boucle de
 nœuds** posés sur la photo, dans l'ordre de circulation (antihoraire vu du ciel). On ne

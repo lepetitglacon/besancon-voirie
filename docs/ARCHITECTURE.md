@@ -3,8 +3,8 @@
 > Document de référence technique. Le contexte, les phases et la méthode sont dans le
 > [README](../README.md). Ce document décrit **comment** le projet est construit. La
 > configuration d'un carrefour (branches, voies, lignes de feux, programme) est détaillée
-> dans [CONFIGURATION.md](CONFIGURATION.md), le réseau routier (tronçons, raccordements aux
-> carrefours, export SUMO) dans [RESEAU.md](RESEAU.md).
+> dans [CONFIGURATION.md](CONFIGURATION.md), le réseau routier (nœuds, tronçons, liaisons,
+> carrefours bâtis sur ses nœuds, export SUMO) dans [RESEAU.md](RESEAU.md).
 
 ## Sommaire
 
@@ -346,9 +346,11 @@ CREATE TABLE tram_passage (             -- une rame est passée à un arrêt
 -- de la même course), avec l'heure locale et le type de jour (semaine / samedi / dimanche).
 ```
 
-Réseau routier ([RESEAU.md](RESEAU.md)) : `noeud` (intersection OSM, point posé à la main, ou
-carrefour configuré) et `troncon` (entre deux nœuds, voies par sens, vitesse, branche et liens voie
-à voie à chaque bout raccordé à un carrefour), générés depuis `osm_way` puis corrigés à la main.
+Réseau routier ([RESEAU.md](RESEAU.md)) : `noeud` (intersection, feu ou passage piéton OSM, point
+posé à la main ; `carrefour_id` : le carrefour dont il fait partie, plusieurs nœuds par carrefour)
+et `troncon` (entre deux nœuds, voies par sens et leur type, vitesse, provenance OSM), semés une
+fois depuis OSM puis corrigés à la main. Pour un carrefour qui a des nœuds, `branche`, `voie` et
+`connexion` (avec `connexion.trace`) sont écrites par le serveur d'après le réseau.
 
 Les schémas Drizzle (`apps/api/src/db/schema.ts`) reflètent ces tables. Drizzle gère
 `geometry(point)` nativement. Pour `LineString`, on passe par un `customType` qui lit et
@@ -359,7 +361,8 @@ Les schémas Drizzle (`apps/api/src/db/schema.ts`) reflètent ces tables. Drizzl
 | Table | Contenu | Usage |
 |---|---|---|
 | `osm_signal` | Nœuds `highway=traffic_signals`, `crossing=traffic_signals` + tags | Synchronisation de la table `feu` |
-| `osm_way` | Voies `highway=*` : `lanes`, `maxspeed`, `oneway`, `name` | Branches, génération du réseau (`noeud`, `troncon`) |
+| `osm_passage` | Nœuds `highway=crossing` ou `crossing=*` + tags | Passages piétons du réseau |
+| `osm_way` | Voies `highway=*` (et pistes cyclables) : `lanes`, `maxspeed`, `oneway`, `cycleway*`, `name` | Branches, semis du réseau (`noeud`, `troncon`) |
 | `osm_tram` | `railway=tram` | Drapeau `pres_tram` |
 | `osm_route_edge` / `osm_route_vertex` | Réseau découpé aux intersections, topologie pgRouting | Distances de corridor |
 
@@ -384,8 +387,10 @@ Une seule requête Overpass sur l'emprise de Besançon récupère :
 
 Plusieurs serveurs Overpass sont essayés dans l'ordre (overpass-api.de, private.coffee,
 mail.ru), et la réponse est mise en cache dans `data/osm/` (non versionné). Les tables
-`osm_meta`, `osm_commune`, `osm_signal`, `osm_way` (avec la liste de ses nœuds) et `osm_tram`
-sont **supprimées puis recréées** à chaque import, dans une transaction.
+`osm_meta`, `osm_commune`, `osm_signal`, `osm_passage`, `osm_way` (avec la liste de ses nœuds) et
+`osm_tram` sont **supprimées puis recréées** à chaque import, dans une transaction. La requête
+ramène aussi les pistes cyclables (`highway=cycleway`, `path` + `bicycle=designated`) et les
+passages piétons, qui servent au semis du réseau ([RESEAU.md](RESEAU.md) §3).
 
 On a choisi Overpass plutôt qu'osm2pgsql : aucun binaire à installer, et un volume ciblé
 (~900 feux, ~13 700 voies). La **topologie routable** nécessaire aux corridors (phase 1 bis)
@@ -582,7 +587,7 @@ Admin (cookie de session, un seul compte) :
 | PUT | `/api/carrefours/:id/branches` | Remplace branches et voies (`EDITION_LOCALE`) |
 | PUT | `/api/carrefours/:id/lignes` | Remplace lignes de feux, feux physiques et conflits admis (`EDITION_LOCALE`) |
 | PUT | `/api/carrefours/:id/programme` | Remplace les plans ; cycle et diagramme calculés depuis les étapes (`EDITION_LOCALE`) |
-| POST / PATCH / DELETE | `/api/reseau/generer`, `/api/reseau/troncons[/:id]` | Génère le réseau depuis OSM, trace, corrige ou supprime un tronçon (`EDITION_LOCALE`) |
+| POST / PATCH / DELETE | `/api/reseau/semer`, `/api/reseau/troncons[/:id][/couper]`, `/api/reseau/noeuds/:id[/liaisons]` | Sème le réseau depuis OSM (une fois), trace, coupe, corrige ou supprime un tronçon, déplace ou règle un nœud, saisit ses liaisons (`EDITION_LOCALE`) |
 | POST / DELETE | `/api/carrefours/:id/tops[/:top]` | Ajoute une série de tops `{ ligne, instants }`, ou en retire un (`EDITION_LOCALE`) |
 | PUT | `/api/admin/corridors/:id` | Création/édition, recalcul des distances |
 | POST | `/api/admin/simulations` | Phase 2 : met un job en file |

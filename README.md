@@ -549,7 +549,8 @@ métropole. Un simple mail au service Mobilité peut les obtenir, facultatif. Le
 - [ ] Rapport actuel vs optimisé sur l'axe pilote.
 
 ### Phase 2 — SUMO
-- [x] Réseau routier de toute la ville dans le même éditeur que les carrefours : rues générées depuis OSM, corrigées et complétées à la main, voies reliées une à une à chaque intersection et au bord des carrefours ; export SUMO plain XML pour netconvert — voir [docs/RESEAU.md](docs/RESEAU.md).
+- [x] Réseau routier de toute la ville en graphe, à la TM:PE : routes, pistes cyclables, feux et passages piétons semés une fois depuis OSM, puis corrigés sur la photo IGN (nœuds déplacés, rues coupées ou tracées, voies typées, liaisons voie à voie) ; un carrefour est un groupe de nœuds, composé à partir de ses feux, dont branches et connexions se déduisent ; export SUMO plain XML pour netconvert — voir [docs/RESEAU.md](docs/RESEAU.md).
+- [ ] Réconciliation avec une nouvelle version d'OSM, et proposition IA sur le graphe — voir [docs/reseau-d-abord.md](docs/reseau-d-abord.md).
 - [ ] Réseau SUMO de l'axe pilote (netconvert sur l'export), puis corrections.
 - [ ] Convertisseur plan de feux → `tlLogic` (+ offsets, WAUT), association lignes ↔ liens.
 - [ ] Demande plausible, puis calée sur des comptages.

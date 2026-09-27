@@ -104,3 +104,43 @@ describe('liaisons voie à voie à un nœud', () => {
     expect(liaisonsRetenues(bouts, null).auto).toBe(true);
   });
 });
+
+describe('liaisons selon le type des voies', () => {
+  // Rue ouest-est avec une voie vélo à droite de chaque sens, et une piste cyclable au nord.
+  const troncons = [
+    { id: 'ouest', noeud_de: 'a', noeud_vers: 'n', points: [m(-100, 0), m(0, 0)], voies_avant: 2, voies_arriere: 1, types_avant: ['generale', 'velo'] as const },
+    { id: 'est', noeud_de: 'n', noeud_vers: 'b', points: [m(0, 0), m(100, 0)], voies_avant: 2, voies_arriere: 1, types_avant: ['generale', 'velo'] as const },
+    { id: 'piste', noeud_de: 'n', noeud_vers: 'c', points: [m(0, 0), m(0, 100)], voies_avant: 1, voies_arriere: 0, types_avant: ['velo'] as const },
+  ].map((t) => ({ ...t, types_avant: [...t.types_avant] }));
+
+  it('relie les voies vélo entre elles, et les voitures à leurs voies', () => {
+    const depuisOuest = liaisonsParDefaut(boutsAuNoeud('n', troncons)).filter((l) => l.de === 'ouest');
+    expect(depuisOuest.filter((l) => l.vers === 'est').map((l) => [l.voie_de, l.voie_vers])).toEqual([
+      [0, 0],
+      [1, 1],
+    ]);
+    // La voiture ne va pas sur la piste ; le vélo, oui (à gauche, vers le nord).
+    expect(depuisOuest.filter((l) => l.vers === 'piste').map((l) => [l.voie_de, l.voie_vers])).toEqual([[1, 0]]);
+  });
+
+  it('envoie un vélo sans voie vélo en face sur la voie de droite', () => {
+    const sansVeloEst = troncons.map((t) => (t.id === 'est' ? { ...t, voies_avant: 1, types_avant: ['generale' as const] } : t));
+    const versEst = liaisonsParDefaut(boutsAuNoeud('n', sansVeloEst)).filter((l) => l.de === 'ouest' && l.vers === 'est');
+    expect(versEst.map((l) => [l.voie_de, l.voie_vers])).toEqual([
+      [0, 0],
+      [1, 0],
+    ]);
+  });
+
+  it('ne propose pas de demi-tour vers l’autre chaussée d’un boulevard', () => {
+    // Deux chaussées à sens unique qui se rejoignent au nœud, et une rue qui continue au sud.
+    const chaussees = [
+      { id: 'entree', noeud_de: 'a', noeud_vers: 'n', points: [m(-3, 100), m(0, 0)], voies_avant: 1, voies_arriere: 0 },
+      { id: 'sortie', noeud_de: 'n', noeud_vers: 'b', points: [m(0, 0), m(3, 100)], voies_avant: 1, voies_arriere: 0 },
+      { id: 'sud', noeud_de: 'n', noeud_vers: 'c', points: [m(0, 0), m(0, -100)], voies_avant: 1, voies_arriere: 1 },
+    ];
+    const liaisons = liaisonsParDefaut(boutsAuNoeud('n', chaussees));
+    expect(liaisons.some((l) => l.de === 'entree' && l.vers === 'sortie')).toBe(false);
+    expect(liaisons.some((l) => l.de === 'entree' && l.vers === 'sud')).toBe(true);
+  });
+});

@@ -19,7 +19,7 @@ describe('Import OSM (e2e)', () => {
 
   it('should load the osm_* tables and sync the signals of the commune, without creating carrefours', async () => {
     const bilan = await chargerOsm(client, trierElements({ elements: ELEMENTS_OSM }));
-    expect(bilan).toEqual({ signaux: 9, voies: 5, trams: 1, feux: { presents: 8, nouveaux: 8, disparus: 0 } });
+    expect(bilan).toEqual({ signaux: 9, passages: 4, voies: 5, trams: 1, feux: { presents: 8, nouveaux: 8, disparus: 0 } });
 
     const { rows } = await client.query(
       "SELECT type, count(*)::int AS n FROM feu GROUP BY type ORDER BY type",

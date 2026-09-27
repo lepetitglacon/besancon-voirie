@@ -1,57 +1,61 @@
 # Réseau routier
 
-> Toutes les rues de la ville, pas seulement les carrefours à feux : des **tronçons** relient
-> des **nœuds**, chacun avec ses voies par sens. Rues et carrefours s'éditent ensemble, voie par
-> voie, et toutes les voies se relient avec le même geste, comme le « lane connector » de
-> TM:PE : à chaque intersection, au bord de chaque carrefour et dans le carrefour. Le réseau
-> s'exporte au format SUMO pour la simulation (phase 2).
-> Complète [ARCHITECTURE.md](ARCHITECTURE.md) ; la configuration d'un carrefour (branches,
-> voies, connexions) est dans [CONFIGURATION.md](CONFIGURATION.md).
+> Toute la ville en graphe, à la TM:PE (Traffic Manager: President Edition, Cities: Skylines) :
+> des **tronçons** voie par voie relient des **nœuds** (intersections, feux, passages piétons),
+> et les voies se relient à chaque nœud par des **liaisons** (« lane connector »). Le réseau est
+> semé une fois depuis OSM, puis corrigé sur la photo IGN. Un **carrefour** est un groupe de
+> nœuds : ses branches, voies et connexions s'en déduisent. Le réseau s'exporte au format SUMO
+> (phase 2). Complète [ARCHITECTURE.md](ARCHITECTURE.md) ; lignes de feux et programme :
+> [CONFIGURATION.md](CONFIGURATION.md) ; choix du modèle : [reseau-d-abord.md](reseau-d-abord.md).
 
 ## Sommaire
 
 1. [Vue d'ensemble](#1-vue-densemble)
 2. [Modèle](#2-modèle)
-3. [Génération depuis OSM](#3-génération-depuis-osm)
-4. [Raccordement aux carrefours](#4-raccordement-aux-carrefours)
+3. [Semis depuis OSM](#3-semis-depuis-osm)
+4. [Carrefours bâtis sur le réseau](#4-carrefours-bâtis-sur-le-réseau)
 5. [Export SUMO](#5-export-sumo)
 6. [API](#6-api)
-7. [Interface](#7-interface)
+7. [Éditeur des voies](#7-éditeur-des-voies)
 
 ---
 
 ## 1. Vue d'ensemble
 
 ```text
- osm_way (pnpm osm:import)
-    │  découpe aux nœuds partagés
+ osm_way, osm_signal, osm_passage (pnpm osm:import)
+    │  semis, une seule fois : découpe aux intersections, aux feux et aux passages piétons
     ▼
- nœuds ──── tronçons ────  nœuds          ← corrigés à la main (voies, sens, nom, vitesse),
-    │                        │               complétés par des tronçons tracés sur la carte
-    │   carrefour configuré  │
-    ▼                        ▼
-  ╭─────── cercle ───────╮   les tronçons s'arrêtent sur le cercle du carrefour ;
-  │  branches et voies   │   chaque bout se raccorde à une branche, voie à voie
-  ╰──────────────────────╯
+ nœuds ──── tronçons ──── nœuds       ← corrigés sur la photo : déplacer, couper, tracer,
+    │   voies par sens, typées           voies et types, feux, passages, liaisons
+    │   (générale, bus, vélo, tram)
+    ▼
+ carrefour = groupe de nœuds (pris parmi ses feux, complété à la main)
+    │  vueCarrefour : branches, voies, passages, connexions et leur tracé
+    ▼
+ branche / voie / connexion  ──▶  lignes de feux, conflits, programme, temps réel
     │
-    ▼
- reseau.nod.xml / .edg.xml / .con.xml  ──netconvert──▶  reseau.net.xml (SUMO, sumolib, TraCI)
+ reseau.nod.xml / .edg.xml / .con.xml  ──netconvert──▶  reseau.net.xml (SUMO)
 ```
 
-Même règle que pour les carrefours : OSM propose, on corrige. Une correction à la main n'est
-jamais écrasée par une nouvelle génération.
+Le réseau est une donnée de référence : semé une fois, il ne se régénère pas. Ses identifiants
+restent stables, car les liaisons, les carrefours et les lignes de feux y renvoient. Une nouvelle
+version d'OSM passera par une réconciliation relue ([reseau-d-abord.md](reseau-d-abord.md), étape 3).
 
 ## 2. Modèle
 
 ```sql
 CREATE TYPE source_reseau AS ENUM ('osm', 'manuel');
+CREATE TYPE traversee_pieton AS ENUM ('feux', 'marquee', 'non_marquee');
 
 CREATE TABLE noeud (
   id            uuid PRIMARY KEY,
-  osm_node_id   bigint UNIQUE,                    -- intersection ou bout de voie OSM
-  carrefour_id  uuid UNIQUE REFERENCES carrefour ON DELETE SET NULL,  -- le carrefour qu'il représente
+  osm_node_id   bigint UNIQUE,                        -- nœud OSM d'origine
+  carrefour_id  uuid REFERENCES carrefour ON DELETE SET NULL,  -- plusieurs nœuds par carrefour
   geom          geometry(Point, 4326) NOT NULL,
-  liaisons      jsonb        -- liaisons voie à voie saisies [{de, voie_de, vers, voie_vers}] ; null : proposées
+  liaisons      jsonb,              -- liaisons saisies [{de, voie_de, vers, voie_vers}] ; null : proposées
+  feux          boolean NOT NULL DEFAULT false,   -- ligne d'arrêt à feux des véhicules
+  pieton        traversee_pieton                  -- passage piéton sur le nœud
 );
 
 CREATE TABLE troncon (
@@ -59,71 +63,100 @@ CREATE TABLE troncon (
   noeud_de       uuid NOT NULL REFERENCES noeud ON DELETE CASCADE,
   noeud_vers     uuid NOT NULL REFERENCES noeud ON DELETE CASCADE,
   geom           geometry(LineString, 4326) NOT NULL,   -- de noeud_de vers noeud_vers
-  osm_way_id     bigint, osm_de bigint, osm_vers bigint, -- voie et nœuds OSM d'origine
+  osm_way_id     bigint, osm_de bigint, osm_vers bigint, osm_tags jsonb,  -- provenance OSM
   nom text, highway text,
   voies_avant    smallint NOT NULL,   -- dans le sens de tracé (0 : sens interdit)
   voies_arriere  smallint NOT NULL,   -- dans l'autre sens
+  types_avant    jsonb, types_arriere jsonb,  -- type de chaque voie, rang 0 à gauche ; null : générales
   vitesse_kmh    smallint,            -- null : vitesse par défaut du type de voie
   source         source_reseau NOT NULL,
-  modifie        boolean NOT NULL DEFAULT false,  -- tronçon OSM corrigé : gardé à la régénération
-  supprime       boolean NOT NULL DEFAULT false,  -- tronçon OSM supprimé : masqué, jamais recréé
-  branche_de     text, branche_vers text,         -- branche du carrefour à chaque bout
-  liens_de       jsonb, liens_vers jsonb,         -- liens voie à voie (null : par défaut)
+  modifie        boolean NOT NULL DEFAULT false,  -- tronçon OSM corrigé à la main
+  supprime       boolean NOT NULL DEFAULT false,  -- tronçon OSM supprimé : masqué, gardé
+  branche_de text, branche_vers text,             -- code de la branche que forme ce bout (N, S…)
   CHECK (voies_avant + voies_arriere > 0), CHECK (noeud_de <> noeud_vers)
 );
+
+ALTER TABLE connexion ADD COLUMN trace geometry(LineString, 4326);  -- chemin à travers le carrefour
 ```
 
 | Notion | Convention |
 |---|---|
-| Sens d'un tronçon | `avant` : de `noeud_de` vers `noeud_vers`, dans le sens de la géométrie. « Inverser » retourne la géométrie et échange tout (nœuds, voies, branches, liens). |
-| Rang d'une voie de tronçon | Comme pour les branches : 0 = la plus à gauche dans son sens de circulation. |
-| Liens d'un bout raccordé | `entree` : `[voie du tronçon qui arrive, voie entrante de la branche]` ; `sortie` : `[voie sortante de la branche, voie du tronçon qui repart]`. |
-| Liens par défaut | `liensParDefaut(n, m)` : chaque voie source mène à sa part des voies cibles, et chaque cible est servie. 1 → 3 : la voie mène aux trois (élargissement) ; 3 → 1 : les trois se rejoignent. |
-| Voies d'une rue | `voiesTroncon` : tout du long de l'axe, `avant` à droite de l'axe et `arriere` à gauche (rang 0 contre l'axe), un sens unique centré. Reculées aux intersections (`retraitAuNoeud` : 3 m entre deux tronçons, 4 m + 0,6 voie par voie au-delà) pour laisser la place aux liaisons, pas au bord d'un carrefour. |
-| Liaisons d'un nœud | D'une voie qui arrive (`de`, `voie_de`) vers une voie qui repart (`vers`, `voie_vers`), rangs dans chaque sens. Proposées par `liaisonsParDefaut` comme les connexions d'un carrefour : tout droit voie à voie, tourne-à-gauche de gauche à gauche, tourne-à-droite de droite à droite, pas de demi-tour ; deux tronçons seuls se prolongent voie à voie. Des liaisons saisies devenues impossibles (voie retirée, tronçon supprimé) sont ignorées. |
+| Sens d'un tronçon | `avant` : de `noeud_de` vers `noeud_vers`, dans le sens de la géométrie. « Inverser » retourne la géométrie et échange tout (nœuds, voies, types, codes de branche). |
+| Rang d'une voie | 0 = la plus à gauche dans son sens de circulation. Une voie vélo le long de la chaussée est la dernière (la plus à droite), sauf à gauche d'un sens unique. |
+| Types de voies | `generale`, `bus`, `velo`, `tram`. `types_avant` null : toutes générales ; une liste plus courte est complétée par des voies générales. |
+| Voies d'une rue | `voiesTroncon` : tout du long de l'axe, `avant` à droite de l'axe et `arriere` à gauche (rang 0 contre l'axe), un sens unique centré. Reculées aux intersections (`retraitAuNoeud` : 3 m entre deux tronçons, 4 m + 0,6 voie par voie au-delà) pour laisser la place aux liaisons. |
+| Liaisons d'un nœud | D'une voie qui arrive (`de`, `voie_de`) vers une voie qui repart (`vers`, `voie_vers`). Proposées par `liaisonsParDefaut` : tout droit voie à voie, tourne-à-gauche de gauche à gauche, tourne-à-droite de droite à droite, pas de demi-tour (braquage ≥ 150°, même vers l'autre chaussée d'un boulevard) ; deux tronçons seuls se prolongent voie à voie (`liensParDefaut` : 1 → 3 élargit, 3 → 1 rejoint). Les voies vélo se relient entre elles ; sans voie vélo en face, un vélo rejoint la voie de droite (de gauche pour tourner à gauche) ; une piste cyclable part de la voie de droite d'une rue sans voie vélo ; une voiture n'est jamais envoyée sur une voie vélo. Des liaisons saisies devenues impossibles sont ignorées. |
+| Ligne d'arrêt | Un nœud `feux` : feu véhicule OSM (`highway=traffic_signals`) posé sur la voie, ou saisi. Un feu piéton (`crossing=traffic_signals`) est un passage piéton `pieton = feux`. |
 
-## 3. Génération depuis OSM
+## 3. Semis depuis OSM
 
 ```bash
-pnpm reseau:generer        # client de l'API (pnpm dev doit tourner) : POST /api/reseau/generer
+pnpm osm:import --refresh   # une fois : l'import ramène aussi pistes cyclables et passages piétons
+pnpm reseau:semer           # client de l'API (pnpm dev doit tourner) : POST /api/reseau/semer
 ```
 
-1. Voies de `osm_way` circulables (comme la détection des branches : `motorway` →
-   `living_street`, `busway`, `road`, leurs `_link` ; sans `service`, sans `area=yes`, sans
-   `access=no` ni `motor_vehicle=no`).
-2. **Découpe** (`decouperVoies`, `apps/api/src/reseau/osm.ts`) : un nœud OSM partagé par deux
-   voies (ou deux fois par la même) coupe la voie. Une boucle qui revient sur son nœud de départ
-   est coupée à mi-parcours (SUMO refuse une arête d'un nœud vers lui-même).
-3. **Voies par sens** : `lanes:forward` / `lanes:backward`, sinon `lanes` (moitié par sens pour
-   une rue à double sens, tout pour un sens unique), `oneway` (`-1` : sens inverse), giratoires
-   en sens unique. Vitesse : `maxspeed` (km/h ou mph), sinon celle du type de voie à l'export.
-4. **Ce qui est gardé** : les tronçons tracés à la main, et les tronçons OSM corrigés ou
-   supprimés, reconnus par `(osm_way_id, osm_de, osm_vers)` même après une coupe. Leurs moitiés
-   sont marquées ensemble. Tout le reste est recréé.
-5. Chaque carrefour configuré est ensuite **raccordé** (§4).
+1. Voies de `osm_way` : circulables (`motorway` → `living_street`, `busway`, `road`, leurs `_link` ;
+   sans `service`, sans `area=yes`, sans `access=no` ni `motor_vehicle=no`), et pistes
+   cyclables (`highway=cycleway`, ou `path` + `bicycle=designated`).
+2. **Découpe** (`decouperVoies`, [osm.ts](../apps/api/src/reseau/osm.ts)) : un nœud OSM partagé
+   par deux voies coupe la voie, ainsi que chaque feu (`osm_signal`) et chaque passage piéton
+   (`osm_passage`) de la voie. Une boucle est coupée à mi-parcours (SUMO refuse une arête d'un
+   nœud vers lui-même).
+3. **Voies par sens** (`voiesParSens`) : `lanes:forward` / `lanes:backward`, sinon `lanes`,
+   `oneway` (`-1` : sens inverse), giratoires en sens unique. Puis les voies vélo le long de la
+   chaussée : `cycleway`, `cycleway:right|left|both` = `lane` ou `track` (double sens : la voie
+   vélo de droite pour le sens avant, celle de gauche pour l'autre), `opposite_lane` et
+   `cycleway:left:oneway=-1` (contresens cyclable). Piste cyclable : une voie vélo par sens
+   autorisé (`oneway:bicycle`). `highway=busway` : voies de bus. Vitesse : `maxspeed`.
+4. **Nœuds** : `feux` pour un feu véhicule, `pieton` d'après `crossing` (`traffic_signals` : à
+   feux ; `unmarked` : non marqué ; sinon marqué).
+5. **Une seule fois** : un second semis est refusé (409). `--reinitialiser` (ou
+   `{ "reinitialiser": true }`) efface tout le réseau, corrections et liaisons comprises, le sème
+   de nouveau, puis retrouve les nœuds de chaque carrefour d'après ses feux.
 
-Import du 27/09/2026 (6 219 voies circulables) : **8 608 tronçons** et 7 026 nœuds en une seconde.
+Semis du 27/09/2026 (données OSM de 16:52 UTC, 6 904 voies) : **11 313 nœuds**, **13 036
+tronçons** dont 978 cyclables, 360 lignes d'arrêt à feux, 3 309 passages piétons, en moins
+d'une seconde.
 
-## 4. Raccordement aux carrefours
+## 4. Carrefours bâtis sur le réseau
 
-Un carrefour dont les branches ont des voies devient un nœud du réseau (`noeud.carrefour_id`),
-placé en son centre (`raccorderCarrefour`, `apps/api/src/reseau/raccordement.ts`) :
+### Composition
 
-1. **Cercle** : rayon = distance du centre au bout de la voie la plus longue, plus 5 m.
-2. Chaque tronçon qui entre dans le cercle y est **coupé** (`horsDuCercle`, `@voirie/engine`) :
-   le bout intérieur passe sur le nœud du carrefour. Un tronçon qui traverse le carrefour est coupé
-   en deux ; un tronçon entièrement dedans disparaît, comme les intersections OSM de l'intérieur.
-3. Chaque bout raccordé prend la **branche** de même direction (azimut du centre vers le bout, à
-   40° près). Une branche choisie à la main est gardée tant qu'elle existe ; des liens devenus
-   impossibles (voie retirée) reviennent aux liens par défaut.
+On compose un carrefour comme avant, en choisissant ses feux ([ARCHITECTURE.md
+§5.3](ARCHITECTURE.md#53-composition-manuelle-des-carrefours)). Il prend alors les nœuds libres
+parmi ses feux (`rattacherNoeuds`, [carrefours.ts](../apps/api/src/reseau/carrefours.ts)) :
+ceux à moins de 8 m de l'enveloppe convexe des feux, et les nœuds OSM de ses feux. Un giratoire
+prend aussi tout son anneau (tronçons `junction=roundabout` reliés). Ajouter des feux ajoute les
+nœuds qu'ils couvrent ; les nœuds se retirent ou s'ajoutent ensuite à la main (outil Nœuds). Un
+nœud appartient à un carrefour au plus.
 
-Le raccordement est relancé à chaque enregistrement des branches (le cercle dépend des voies), à
-chaque génération, et quand on trace ou modifie un tronçon qui touche le carrefour. Il est
-idempotent : un bout déjà raccordé est recoupé au même endroit.
+### Vue du carrefour
 
-Enregistrer une branche ou des liens à la main marque le tronçon comme corrigé : la régénération
-le garde, avec ses liens. De même, saisir les liaisons d'un nœud marque corrigés les tronçons qui
-le touchent : leurs identifiants, auxquels les liaisons renvoient, ne changent plus.
+`vueCarrefour` ([@voirie/engine](../packages/engine/src/vueCarrefour.ts)) déduit du groupe de
+nœuds ce qu'attendent les lignes de feux, les conflits et le programme :
+
+- **Branche** : un tronçon qui entre dans le groupe. On suit son **approche** vers l'intérieur
+  (nœuds de degré 2 : passage piéton, élargissement) jusqu'à la première ligne d'arrêt à feux,
+  à défaut le premier passage piéton à feux (traversée piétonne), à défaut l'intersection. Ses
+  voies entrantes arrivent là, ses voies sortantes en repartent. Son code est son point
+  cardinal (N, NE…, suffixé s'il est pris), gardé ensuite sur le bout du tronçon
+  (`branche_de` / `branche_vers`) : les lignes de feux y renvoient.
+- **Branche interne** : un feu véhicule sur un tronçon interne, hors des approches (terre-plein
+  central d'une chaussée séparée, anneau d'un giratoire). Codes R1, R2… On y arrive (voies
+  sortantes, prises à leur départ du nœud d'avant), puis on en repart (voies entrantes).
+- **Connexion** : un chemin voie à voie qui suit les liaisons de chaque nœud du groupe, d'une
+  voie entrante jusqu'à une voie sortante (ou une ligne d'arrêt interne). Son tracé réel
+  (`connexion.trace`) remplace, pour le calcul des conflits et le dessin, la courbe entre les
+  deux voies.
+- **Passage piéton** d'une branche : sur sa ligne d'arrêt, entre elle et l'intersection, sinon en
+  amont ; en travers du tronçon, de la largeur de ses voies plus 1,5 m de chaque côté.
+
+La vue est **écrite** dans `branche`, `voie` et `connexion` (`materialiserCarrefour`) à chaque
+modification du réseau autour du carrefour : nœud déplacé, ajouté ou retiré, tronçon tracé,
+coupé, fusionné, modifié ou supprimé, liaisons saisies. Lignes de feux, conflits, programme et
+temps réel les lisent sans changement ; le sens des mouvements s'y lit sur les voies. Un
+carrefour bâti sur le réseau refuse `PUT /branches` (409). Un carrefour sans nœud (réseau non
+semé, tests) garde ses branches saisies à la main.
 
 ## 5. Export SUMO
 
@@ -132,72 +165,59 @@ pnpm reseau:sumo [--bbox=ouest,sud,est,nord]   # écrit data/sumo/reseau.{nod,ed
 cd data/sumo && netconvert -c reseau.netccfg     # → reseau.net.xml
 ```
 
-Format « plain XML » de SUMO (`exporterSumo`, `packages/engine/src/sumo.ts`), en longitude,
-latitude : netconvert les projette en UTM (`proj.plain-geo`, `proj.utm` dans `reseau.netccfg`),
-et `sumolib` sait revenir en lon/lat (`net.convertXY2LonLat`).
+Format « plain XML » de SUMO (`exporterSumo`, [sumo.ts](../packages/engine/src/sumo.ts)), en
+longitude, latitude : netconvert les projette en UTM (`proj.plain-geo`, `proj.utm`), et
+`sumolib` sait revenir en lon/lat (`net.convertXY2LonLat`).
 
-| Élément | Identifiant SUMO |
+| Élément | SUMO |
 |---|---|
 | Nœud du réseau | uuid du nœud, `type="priority"` |
-| Carrefour configuré | `c<carrefour>`, `type="traffic_light"` (programme par défaut de netconvert, en attendant `versTlLogic`) |
-| Bout de tronçon raccordé | `r<tronçon>_<de\|vers>`, sur le cercle |
-| Tronçon, sens avant / arrière | `t<tronçon>` / `-t<tronçon>` |
-| Approche d'une branche | `a<carrefour>_<branche>_e_…` (vers le centre, voies entrantes), `…_s_…` (voies sortantes) |
-| Branche sans tronçon | nœud `b<carrefour>_<branche>` en cul-de-sac (alerte) |
-
-- Les **connexions du carrefour** (`S:e0 → O:s1`) deviennent des `<connection>` entre arêtes
-  d'approche ; les **liens de raccordement**, des `<connection>` entre le tronçon et l'approche ;
-  les **liaisons de chaque nœud** (saisies, ou à défaut proposées), des `<connection>` entre
-  tronçons. Ce qu'on voit dans l'éditeur est donc ce que SUMO simule.
-  SUMO numérote les voies de la droite vers la gauche : index = nombre de voies − 1 − rang.
-- Voies bus, vélo, tram d'une branche : `<lane allow="bus|bicycle|tram"/>`.
-- Priorité des arêtes d'après `highway` (les approches d'un carrefour passent en premier).
-- Les **alertes** (branche sans tronçon, deux tronçons sur la même branche, tronçon non
-  raccordé) sont écrites en commentaire en tête de `reseau.nod.xml`.
+| Nœud d'un carrefour | `type="traffic_light" tl="c<carrefour>"` : tous les nœuds du carrefour partagent un feu, comme un feu temporisé TM:PE sur plusieurs nœuds (programme par défaut de netconvert, en attendant `versTlLogic`) |
+| Tronçon, sens avant / arrière | `t<tronçon>` / `-t<tronçon>` ; voies bus, vélo, tram : `<lane allow="bus\|bicycle\|tram"/>` |
+| Liaisons de chaque nœud | `<connection>` (saisies, ou à défaut proposées) : ce qu'on voit dans l'éditeur est ce que SUMO simule. SUMO numérote les voies de la droite vers la gauche : index = nombre de voies − 1 − rang. |
 
 ## 6. API
 
 | Méthode | Route | Effet |
 |---|---|---|
-| GET | `/api/reseau?bbox=` | Tronçons (6 000 au plus, `tronque` au-delà), nœuds avec leurs liaisons, et carrefours configurés de l'emprise (branches, connexions, raccordements) |
-| PUT | `/api/reseau/noeuds/:id/liaisons` | `{ liaisons: [...] \| null }` : liaisons d'un nœud ordinaire (null : proposées) ; 400 pour une voie qui n'arrive pas au nœud ou un nœud de carrefour (`EditionGuard`) |
-| POST | `/api/reseau/generer` | (Re)génère depuis OSM, garde les corrections (`EditionGuard`) |
+| GET | `/api/reseau?bbox=` | Tronçons (6 000 au plus, `tronque` au-delà) et nœuds de l'emprise, avec leurs liaisons |
+| POST | `/api/reseau/semer` | `{ reinitialiser? }` : sème le réseau depuis OSM, une seule fois (409 ensuite) ; bilan (`EditionGuard`) |
 | POST | `/api/reseau/troncons` | `{ points, de, vers, nom, voies_avant, voies_arriere, vitesse_kmh }` ; chaque bout s'accroche à un nœud (`{type:'noeud', id}`), coupe un tronçon (`{type:'troncon', id}`, au point le plus proche, ou sur son bout à moins de 1,5 m) ou crée un nœud (`{type:'libre'}`) (`EditionGuard`) |
-| PATCH | `/api/reseau/troncons/:id` | Nom, voies par sens, vitesse, `inverser` (`EditionGuard`) |
+| PATCH | `/api/reseau/troncons/:id` | Nom, voies par sens, types de voies, vitesse, tracé (`points`, bouts gardés sur leurs nœuds), `inverser` (`EditionGuard`) |
 | DELETE | `/api/reseau/troncons/:id` | Supprime (tracé à la main) ou masque (OSM) (`EditionGuard`) |
+| POST | `/api/reseau/troncons/:id/couper` | `{ position }` : nouveau nœud au point le plus proche ; voies, types et liaisons gardés de part et d'autre ; entre deux nœuds d'un même carrefour, le nœud en fait partie (`EditionGuard`) |
+| PATCH | `/api/reseau/noeuds/:id` | `{ position?, feux?, pieton?, carrefour_id? }` : déplacer (les tronçons suivent), ligne d'arrêt à feux, passage piéton, carrefour (null : l'en retirer) (`EditionGuard`) |
+| DELETE | `/api/reseau/noeuds/:id` | Retire un nœud entre deux tronçons de mêmes voies : ils n'en font plus qu'un ; 400 sinon (`EditionGuard`) |
+| PUT | `/api/reseau/noeuds/:id/liaisons` | `{ liaisons: [...] \| null }` (null : proposées) ; 400 pour une voie qui n'arrive pas au nœud (`EditionGuard`) |
 | GET | `/api/reseau/sumo/:fichier[?bbox=]` | `reseau.nod.xml`, `reseau.edg.xml`, `reseau.con.xml`, `reseau.netccfg` |
-| GET | `/api/carrefours/:id/raccordements` | Rayon, bouts raccordés (branche, voies, liens), alertes |
-| PUT | `/api/carrefours/:id/raccordements` | Branche et liens de chaque bout (`liens: null` : par défaut) (`EditionGuard`) |
-| POST | `/api/carrefours/:id/raccordements/recalculer` | Recoupe au cercle du carrefour (`EditionGuard`) |
+| GET | `/api/carrefours/:id/branches` | Vue du carrefour : `graphe: true` et `traces` pour un carrefour bâti sur le réseau |
 
-## 7. Interface
+Chaque modification recalcule les carrefours dont les nœuds sont touchés, dans la même
+transaction. Un tronçon OSM corrigé (voies, tracé, nœud déplacé, coupé) est marqué `modifie`.
 
-Un seul éditeur pour les rues et les carrefours : **≡ Voies** sur la carte (touche <kbd>R</kbd>),
-ou un clic sur un carrefour. À partir du zoom 16, les rues sont dessinées voie par voie, à leur
-largeur, comme les voies des carrefours (en gris pour OSM, orange corrigées, vert tracées à la
-main) ; plus loin, une ligne par tronçon. Les carrefours configurés de la vue sont dessinés avec
-leurs voies et leurs connexions ; un clic en ouvre un, sans quitter l'éditeur et **en gardant
-l'outil en cours**. <kbd>Échap</kbd> referme le carrefour (ses modifications restent dans les
-brouillons), puis quitte l'éditeur.
+## 7. Éditeur des voies
 
-- **↖ Sélection** (<kbd>V</kbd>) : un clic sur une rue ouvre sa popup. Nom, voies dans le sens du
-  tracé et dans l'autre (0 : sens interdit), vitesse (vide : celle du type de voie),
-  « Inverser », « Supprimer ». Chaque changement est enregistré aussitôt.
-- **＋ Tracer** (<kbd>T</kbd>) : cliquer le départ (un nœud, une rue, qui sera coupée à cet
-  endroit, ou un point libre), les points de la rue, puis l'arrivée sur un nœud ou une rue.
-  <kbd>Entrée</kbd> (ou un second clic sur le dernier point) finit sur un point libre ;
-  <kbd>⌫</kbd> retire le dernier point, <kbd>Échap</kbd> annule. La rue a une voie par sens, à
-  régler ensuite. Tracée jusqu'au centre d'un carrefour, elle s'arrête à son bord et se relie à la
-  branche de même direction. Carrefour ouvert, le même outil trace aussi ses voies : glisser de la
-  ligne d'arrêt vers l'amont donne une voie du carrefour, cliquer pose un point de rue.
-- **↝ Liaison** (<kbd>C</kbd>) : partout le même geste, du bout d'une voie qui arrive (poignée
-  bleue) vers le début d'une voie qui repart (poignée creuse). Les liaisons proposées sont en
-  pointillé, celles saisies en trait plein ; refaire le geste ou cliquer une liaison la retire.
-  - À une intersection : entre les voies des rues, enregistré aussitôt.
-  - Au bord d'un carrefour (ouvert) : d'une voie de rue vers le bout d'une voie entrante, ou du
-    bout d'une voie sortante (poignée grise) vers une voie de rue. Viser une autre branche que
-    celle de la rue l'y relie, avec les liens proposés. Enregistré avec le carrefour.
-  - Dans le carrefour : les connexions entre ses voies, comme avant.
-- Carte d'en-tête (aucun carrefour ouvert) : aide de l'outil, légende, **⟳ Générer depuis OSM**
-  (garde les corrections) et liens d'**export SUMO** de la vue ou de toute la ville. Carrefour
-  ouvert, le badge « rue non reliée » signale une rue qu'aucune branche ne prolonge.
+**≡ Voies** sur la carte (touche <kbd>R</kbd>, mode Édition) : tout le réseau sur la photo IGN,
+imposée à plat. À partir du zoom 16, chaque tronçon est dessiné voie par voie, à sa largeur :
+voies vélo en vert, bus en rouge, tram en violet, les autres en gris (OSM), orange (corrigées)
+ou vert clair (tracées à la main). Chaque nœud montre sa ligne d'arrêt à feux (pastille rouge),
+son passage piéton (zébras en travers de la rue) et son carrefour (cercle violet, orange pour
+le carrefour ouvert). Un clic sur le disque d'un carrefour l'ouvre.
+
+| Outil | Geste |
+|---|---|
+| ↖ **Sélection** (<kbd>V</kbd>) | Glisser un nœud le déplace. Un clic sur une voie ouvre la popup du tronçon (nom, voies par sens et leur type, vitesse, « Couper ici », « Inverser », « Supprimer ») ; sur un nœud, la sienne (ligne d'arrêt à feux, passage piéton, carrefour, liaisons proposées, « Retirer le nœud »). |
+| ＋ **Tracer** (<kbd>T</kbd>) | Cliquer le départ (un nœud, une rue, qui sera coupée à cet endroit, ou un point libre), les points de la rue, puis l'arrivée ; <kbd>Entrée</kbd> finit sur un point libre, <kbd>⌫</kbd> retire le dernier point, <kbd>Échap</kbd> annule. |
+| ✂ **Couper** (<kbd>X</kbd>) | Un clic sur une voie pose un nœud : ligne d'arrêt, passage piéton, début d'une voie de présélection (le tronçon d'approche a alors ses propres voies). |
+| ↝ **Liaison** (<kbd>C</kbd>) | Du bout d'une voie qui arrive (poignée bleue) vers le début d'une voie qui repart (poignée creuse), à n'importe quel nœud ; pointillés : proposées ; refaire le geste ou cliquer une liaison la retire. |
+| ◎ **Nœuds** (<kbd>N</kbd>, carrefour ouvert) | Un clic sur un nœud l'ajoute au carrefour ou l'en retire. |
+
+**Carrefour ouvert** : les mêmes outils, plus ● **Feu** (<kbd>F</kbd>) pour poser les feux sur
+leur mât. La carte d'en-tête porte le badge « Sur le réseau » ; le calque du carrefour dessine
+sa vue (codes des branches, flèches, connexions selon leur tracé), relue à chaque modification.
+Les onglets Lignes de feux, Programme et Graphe s'en servent comme avant. OSM, IA et JSON ne
+servent qu'aux carrefours sans nœud.
+
+Carte d'en-tête de l'éditeur (aucun carrefour ouvert) : aide de l'outil, légende, **⟳ Semer
+depuis OSM** (réseau vide) ou **Réinitialiser depuis OSM**, et liens d'**export SUMO** de la
+vue ou de toute la ville.

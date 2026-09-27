@@ -30,6 +30,11 @@ describe('directionMouvement', () => {
     expect(directionMouvement(180, 20)).toBe('tout_droit');
     expect(directionMouvement(180, 180, true)).toBe('demi_tour');
   });
+
+  it('voit un demi-tour vers une autre branche qui repart presque en sens inverse (deux chaussées)', () => {
+    expect(directionMouvement(180, 170)).toBe('demi_tour');
+    expect(directionMouvement(180, 140)).toBe('droite');
+  });
 });
 
 describe('lireTurnLanes / voiesParDefaut', () => {
