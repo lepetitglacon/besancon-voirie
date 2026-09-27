@@ -59,8 +59,11 @@ export class IaService {
   async analyser(carrefourId: string, emprise?: EmpriseIa | null): Promise<DetectionBranchesIa> {
     const detection = await this.branches.detecter(carrefourId); // 404 si le carrefour n'existe pas
     const cadre = cadreDe(detection, emprise);
+    const { rows } = await this.db.execute<{ nature: string }>(sql`SELECT nature FROM carrefour WHERE id = ${carrefourId}`);
+    const giratoire = rows[0]?.nature === 'giratoire';
     const contexte: ContexteIa = {
       cadre,
+      giratoire,
       detection,
       feux: await this.feux(carrefourId),
       voiesOsm: await this.voiesOsm(cadre),
@@ -85,13 +88,20 @@ export class IaService {
       if (!lecture.success) throw new UnprocessableEntityException('Réponse de Claude hors schéma');
       let resultat;
       try {
-        resultat = configurationDepuisLecture(lecture.data, cadre, detection);
+        resultat = configurationDepuisLecture(lecture.data, cadre, detection, giratoire);
       } catch (erreur) {
         throw new UnprocessableEntityException((erreur as Error).message);
       }
-      const { branches, connexions } = resultat.configuration;
+      const { branches, connexions, anneau } = resultat.configuration;
       const remarques = [
         lecture.data.remarques,
+        resultat.noeuds === 'ia'
+          ? `Nœuds de l'anneau lus sur la photo (${anneau!.noeuds.length}).`
+          : resultat.noeuds === 'osm'
+            ? "Nœuds de l'anneau d'après OSM : l'IA n'en a pas proposé trois distincts."
+            : giratoire
+              ? "Aucun nœud d'anneau : posez-les avec l'outil Nœud."
+              : '',
         resultat.ecartees.length ? `Connexions écartées (voie inconnue ou en double) : ${resultat.ecartees.join(', ')}.` : '',
       ]
         .filter(Boolean)
@@ -101,7 +111,7 @@ export class IaService {
           `${reponse.modele}, ${reponse.duree_s} s, ${reponse.cout_usd?.toFixed(3) ?? '?'} $`,
       );
       return {
-        ...deduire(detection.centre, branches, connexions, detection.anneau),
+        ...deduire(detection.centre, branches, connexions, anneau),
         rayon_m: detection.rayon_m,
         sources: Object.fromEntries(branches.map((b) => [b.code, 'ia' satisfies SourceBranche])),
         ia: {

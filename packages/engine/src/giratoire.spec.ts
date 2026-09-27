@@ -11,6 +11,7 @@ import {
   insererNoeud,
   liaisonsHorsNoeud,
   noeudDeVoie,
+  normaliserNoeuds,
   proposerLiaisonsNoeuds,
   tronconsXY,
   type Anneau,
@@ -158,5 +159,25 @@ describe('conflits d’un giratoire par nœuds', () => {
     // Au nœud 5 (nord-est), l'anneau arrive par le tronçon du nœud E et repart par R5.
     const anneauNordEst = ligne('A1', `${tronconsTram.find((t) => t.noeud === noeudDe('E'))!.code}>R5`);
     expect(nature([ligne('T1', 'T>T2'), anneauNordEst], 'T1', 'A1', g)).toBe('croisement');
+  });
+});
+
+describe('nœuds proposés', () => {
+  it('fusionne les nœuds proches, remet la boucle dans le sens de circulation et la complète jusqu’à quatre', () => {
+    // Est, sud, ouest (sens horaire), plus un doublon de l'est à 2 m.
+    const positions = [point(90, 15), point(180, 15), point(270, 15), point(95, 15)];
+    const resultat = normaliserNoeuds(positions)!;
+    expect(resultat.anneau.noeuds).toHaveLength(4);
+    // Le doublon rejoint le nœud est.
+    expect(resultat.codes[3]).toBe(resultat.codes[0]);
+    // Sens antihoraire : après l'est vient le nord (le nœud ajouté), puis l'ouest, puis le sud.
+    const code = (i: number) => Number(resultat.codes[i]);
+    const n = resultat.anneau.noeuds.length;
+    expect((code(2) - code(0) + n) % n).toBe(2);
+    expect((code(1) - code(2) + n) % n).toBe(1);
+  });
+
+  it('renonce sous trois nœuds distincts', () => {
+    expect(normaliserNoeuds([point(0, 15), point(2, 15), point(180, 15)])).toBeNull();
   });
 });

@@ -315,3 +315,41 @@ export function azimutsVoiesGiratoire(
   });
   return azimuts;
 }
+
+/**
+ * Nettoie une boucle de nœuds proposée (lue sur la photo par l'IA, par exemple) : fusionne
+ * les nœuds à moins de `ecartMin` mètres, remet la boucle dans le sens de circulation
+ * (antihoraire), la complète jusqu'à quatre nœuds au milieu des plus longs tronçons, et
+ * numérote 1, 2, 3… `codes[i]` : code retenu pour la position d'origine `i`. null s'il reste
+ * moins de trois nœuds.
+ */
+export function normaliserNoeuds(positions: readonly LonLat[], ecartMin = 6): { anneau: Anneau; codes: string[] } | null {
+  if (positions.length === 0) return null;
+  const repere = repereLocal(positions[0]!);
+  const xy = positions.map(repere.versXY);
+  // Fusion : chaque position rejoint le premier nœud gardé à moins de `ecartMin`.
+  const gardes: XY[] = [];
+  const groupe = xy.map((p) => {
+    const proche = gardes.findIndex((g) => distance(g, p) < ecartMin);
+    if (proche >= 0) return proche;
+    gardes.push(p);
+    return gardes.length - 1;
+  });
+  if (gardes.length < NOEUDS_MIN) return null;
+  // Aire signée (x vers l'est, y vers le nord) : positive dans le sens antihoraire.
+  const aire = gardes.reduce((s, p, i) => {
+    const q = suivant(gardes, i);
+    return s + p[0] * q[1] - q[0] * p[1];
+  }, 0);
+  const ordre: Array<{ point: XY; origine: number | null }> = gardes.map((point, i) => ({ point, origine: i }));
+  if (aire < 0) ordre.reverse();
+  while (ordre.length < NOEUDS_CONSEILLES) {
+    const traces = tronconsXY(ordre.map((o) => o.point));
+    const longueurs = traces.map((t) => longueurPolyligne(t));
+    const i = longueurs.indexOf(Math.max(...longueurs));
+    ordre.splice(i + 1, 0, { point: pointA(traces[i]!, longueurs[i]! / 2).point, origine: null });
+  }
+  const noeuds = ordre.map((o, i) => ({ code: String(i + 1), position: repere.versLonLat(o.point) }));
+  const codeDuGroupe = new Map(ordre.flatMap((o, i) => (o.origine === null ? [] : [[o.origine, String(i + 1)] as const])));
+  return { anneau: { noeuds }, codes: groupe.map((g) => codeDuGroupe.get(g)!) };
+}

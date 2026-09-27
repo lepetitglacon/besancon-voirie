@@ -563,9 +563,28 @@ Pour un carrefour de nature `giratoire`, `GET /branches/detection` :
 4. génère les tronçons (voies = `lanes` de l'anneau) et propose les liaisons de chaque nœud.
 
 Le tram n'est pas détecté comme branche (comme pour les carrefours ordinaires) : ses voies
-s'ajoutent à la main, en type `tram`, sans nœud. La proposition OSM + IA reçoit les nœuds :
-l'IA corrige les rues, les tronçons et les liaisons aux nœuds se reprennent de la
-proposition OSM.
+s'ajoutent à la main, en type `tram`, sans nœud.
+
+### Proposition OSM + IA
+
+L'IA reçoit les nœuds d'OSM (s'il y en a) et la consigne de découper l'anneau d'après la
+photo, comme dans TM:PE. Elle renvoie, en plus des rues :
+
+- `anneau.noeuds` : la boucle, dans l'ordre de circulation, un nœud au milieu de la chaussée
+  là où chaque entrée et chaque sortie touche l'anneau (deux nœuds si l'entrée et la sortie
+  d'une rue sont à plus de 10 m l'une de l'autre), un nœud à chaque passage du tram ou d'un
+  bus en site propre, quatre au moins ; `voies` : voies de l'anneau jusqu'au nœud suivant ;
+- pour chaque rue, `noeud` : le numéro du nœud où elle touche l'anneau (null pour le tram
+  qui traverse l'îlot). Une rue dont l'entrée et la sortie touchent l'anneau à deux nœuds
+  devient deux branches : l'une entrante (NE), l'autre sortante (NE2).
+
+Le serveur nettoie la boucle (`normaliserNoeuds`) : nœuds à moins de 6 m fusionnés, sens de
+circulation rétabli, complément jusqu'à quatre au milieu des plus longs tronçons. S'il reste
+moins de trois nœuds, il garde ceux d'OSM ; une rue sans nœud valable rejoint le plus proche.
+Les tronçons et les liaisons aux nœuds se reconstruisent à partir de ces nœuds ; de l'IA, on
+ne garde que les liaisons du tram ou du bus qui traverse l'îlot. Les remarques disent d'où
+viennent les nœuds (photo ou OSM). Un giratoire absent d'OSM reçoit ainsi ses nœuds de la
+photo.
 
 ### Ce qu'on ne reprend pas de TM:PE
 
