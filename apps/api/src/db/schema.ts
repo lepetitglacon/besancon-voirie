@@ -60,7 +60,7 @@ export const carrefour = pgTable(
     presTram: boolean('pres_tram').notNull().default(false),
     /** Paires de lignes en conflit tolérées (tourne-à-droite avec piétons…). */
     conflitsAdmis: jsonb('conflits_admis').$type<Array<[string, string]>>().notNull().default([]),
-    /** Giratoire : anneau (centre de l'îlot, rayon extérieur, voies) — docs/CONFIGURATION.md §7. */
+    /** Giratoire : nœuds de l'anneau, dans l'ordre de circulation — docs/CONFIGURATION.md §7. */
     anneau: jsonb('anneau').$type<Anneau>(),
     creeLe: creeLe(),
     modifieLe: timestamp('modifie_le', { withTimezone: true })
@@ -124,6 +124,10 @@ export const branche = pgTable(
     /** Passage piéton en travers de la branche, d'un trottoir à l'autre. */
     traversee: ligne('traversee'),
     prioriteEntree: prioriteEntree('priorite_entree'),
+    /** Giratoire : nœud où la rue se raccorde à l'anneau ; pour un tronçon, son nœud de départ. */
+    noeud: text('noeud'),
+    /** Tronçon d'anneau généré (R1, R2…), et non une rue. */
+    troncon: boolean('troncon').notNull().default(false),
   },
   (t) => [unique().on(t.carrefourId, t.code)],
 );
@@ -167,8 +171,7 @@ export const connexion = pgTable(
 
 /**
  * Ligne de feux (signal group) — docs/CONFIGURATION.md §4. `mouvements` : clés « S>O » des
- * mouvements commandés ; `traverse` : branche traversée par une ligne piétonne (R12) ;
- * `anneau` : feu d'anneau d'un giratoire, en amont de cette branche (§7).
+ * mouvements commandés ; `traverse` : branche traversée par une ligne piétonne (R12).
  */
 export const ligneFeux = pgTable(
   'ligne_feux',
@@ -184,7 +187,6 @@ export const ligneFeux = pgTable(
       .notNull()
       .default(sql`'{}'`),
     traverse: text('traverse'),
-    anneau: text('anneau'),
   },
   (t) => [unique().on(t.carrefourId, t.code)],
 );

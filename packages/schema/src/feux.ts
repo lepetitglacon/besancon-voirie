@@ -33,8 +33,6 @@ export const CleMouvement = z.string().regex(/^[A-Z0-9]{1,4}>[A-Z0-9]{1,4}$/, 'M
  * Ligne de feux (signal group) : les feux qui changent toujours ensemble.
  * Véhicules, vélos, transports en commun : les mouvements commandés.
  * Piétons (R12) : la branche traversée.
- * Feu d'anneau d'un giratoire : la branche juste en aval du feu ; il arrête la circulation de
- * l'anneau et ne commande aucun mouvement (docs/CONFIGURATION.md §7).
  */
 export const LigneFeux = z
   .object({
@@ -42,8 +40,6 @@ export const LigneFeux = z
     signal: Signal,
     mouvements: z.array(CleMouvement).max(40).default([]),
     traverse: z.string().regex(/^[A-Z0-9]{1,4}$/).nullable().default(null),
-    /** Feu sur l'anneau d'un giratoire, juste en amont de cette branche. */
-    anneau: z.string().regex(/^[A-Z0-9]{1,4}$/).nullable().default(null),
     /** Feux physiques (table feu) qui affichent cette ligne. */
     feux: z.array(z.uuid()).max(40).default([]),
   })
@@ -51,10 +47,6 @@ export const LigneFeux = z
     if (ligne.signal === 'R12') {
       if (!ligne.traverse) ctx.addIssue({ code: 'custom', path: ['traverse'], message: 'Branche traversée manquante' });
       if (ligne.mouvements.length) ctx.addIssue({ code: 'custom', path: ['mouvements'], message: 'Une ligne piétonne ne commande pas de mouvement' });
-      if (ligne.anneau) ctx.addIssue({ code: 'custom', path: ['anneau'], message: 'Un feu d’anneau n’est pas une ligne piétonne' });
-    } else if (ligne.anneau) {
-      if (ligne.mouvements.length) ctx.addIssue({ code: 'custom', path: ['mouvements'], message: 'Un feu d’anneau ne commande pas de mouvement : il arrête l’anneau' });
-      if (ligne.traverse) ctx.addIssue({ code: 'custom', path: ['traverse'], message: 'Seule une ligne piétonne traverse une branche' });
     } else {
       if (ligne.mouvements.length === 0) ctx.addIssue({ code: 'custom', path: ['mouvements'], message: 'Aucun mouvement commandé' });
       if (ligne.traverse) ctx.addIssue({ code: 'custom', path: ['traverse'], message: 'Seule une ligne piétonne traverse une branche' });

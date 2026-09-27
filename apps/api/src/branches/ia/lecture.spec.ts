@@ -22,6 +22,8 @@ const detection: DetectionBranches = {
       ],
       traversee: null,
       priorite_entree: null,
+      noeud: null,
+      troncon: false,
     },
   ],
   connexions: [],

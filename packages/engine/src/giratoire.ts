@@ -1,308 +1,317 @@
 /**
  * Giratoires — docs/CONFIGURATION.md §7.
  *
- * Même modèle qu'OSM, SUMO et TM:PE : l'anneau est une chaussée à sens unique, et chaque
- * branche s'y insère en un point. Circulation à droite : on tourne sur l'anneau dans le sens
- * antihoraire vu du ciel, l'azimut décroît. Une trajectoire d'entrée à sortie rejoint
- * l'anneau, le suit, puis le quitte ; le tram et les bus en site propre traversent l'îlot en
- * ligne droite.
+ * Comme dans TM:PE, un giratoire est une boucle de nœuds posés sur la photo, dans l'ordre de
+ * circulation (sens antihoraire vu du ciel). Chaque nœud est un mini-carrefour : on y relie
+ * à la main les voies de l'anneau et celles des rues qui s'y raccordent. Entre deux nœuds, un
+ * tronçon d'anneau suit une courbe lissée qui passe par les nœuds ; ses voies sont des voies
+ * sortantes au nœud de départ et entrantes au nœud d'arrivée, comme celles d'une branche.
  */
-import { LARGEUR_VOIE_M, repereLocal, type LonLat, type Repere, type Segment, type XY } from './geometrie.js';
-import { normaliserAngle } from './branches.js';
-import type { Connexion } from './connexions.js';
+import { azimutSegment, cleVoie } from './connexions.js';
+import { LARGEUR_VOIE_M, longueurPolyligne, repereLocal, type LonLat, type Segment, type XY } from './geometrie.js';
 
+export interface Noeud {
+  /** « 1 », « 2 »… */
+  code: string;
+  position: LonLat;
+}
+
+/** Anneau d'un giratoire : ses nœuds dans l'ordre de circulation. */
 export interface Anneau {
-  /** Centre de l'îlot. */
-  centre: LonLat;
-  /** Rayon du bord extérieur de la chaussée annulaire (m). */
-  rayon_m: number;
-  /** Nombre de voies de l'anneau. */
-  voies: number;
+  noeuds: readonly Noeud[];
 }
 
-/** Rayon proposé quand OSM ne donne pas l'anneau (m) : giratoire urbain courant. */
-export const RAYON_ANNEAU_DEFAUT_M = 15;
-/** Distance entre le bord de l'anneau et la ligne de cédez-le-passage proposée (m). */
+/** En dessous, pas d'anneau ; à partir de 4, la courbe suit bien un anneau réel. */
+export const NOEUDS_MIN = 3;
+export const NOEUDS_CONSEILLES = 4;
+
+/** Code du tronçon d'anneau qui part d'un nœud : R1 part du nœud 1. */
+export const codeTroncon = (noeud: string) => `R${noeud}`;
+
+/** Longueur laissée libre de chaque côté d'un nœud, où se dessinent ses liaisons (m). */
+export const ECART_NOEUD_M = 4;
+/** Longueur des bouts de voie d'un tronçon, de chaque côté (m). */
+const LONGUEUR_BOUT_M = 8;
+/** Recul de la ligne d'arrêt d'une rue par rapport à l'anneau (m). */
 const RECUL_ENTREE_M = 2;
-/** Distance entre un feu d'anneau et le premier point de conflit qu'il protège (m). */
-export const RECUL_FEU_ANNEAU_M = 3;
-/** Écart maximal (°) entre le bout d'une voie et le point où sa trajectoire rejoint ou quitte l'anneau. */
-const RACCORD_MAX_DEG = 45;
-/** Pas d'échantillonnage des arcs (°). */
-const PAS_ARC_DEG = 3;
-const POINTS_RACCORD = 8;
-const RAD = Math.PI / 180;
-const EPSILON_DEG = 1e-6;
-
-/** Distance entre le centre de l'îlot et la ligne d'arrêt des voies entrantes proposées (m). */
-export const distanceArretGiratoire = (anneau: Anneau) => anneau.rayon_m + RECUL_ENTREE_M;
-
-/** Rayon du milieu de la chaussée annulaire (m) : repère des feux d'anneau et des franchissements. */
-export const rayonCirculation = (anneau: Anneau) => Math.max(anneau.rayon_m - (anneau.voies * LARGEUR_VOIE_M) / 2, 1);
-
-/** Rayon du milieu de la voie `voie` de l'anneau, numérotées depuis l'extérieur (0 = voie extérieure). */
-const rayonVoie = (anneau: Anneau, voie: number) => Math.max(anneau.rayon_m - (voie + 0.5) * LARGEUR_VOIE_M, 1);
-
-/**
- * Voies de l'anneau au droit des voies raccordées, numérotées depuis l'extérieur : la voie
- * entrante (ou sortante) la plus à droite donne sur la voie extérieure de l'anneau.
- */
-export interface VoiesRaccordees {
-  entree: number;
-  sortie: number;
-}
-
-/** Voie de l'anneau au droit de la voie de rang `rang` parmi `nombre` voies de même sens de la branche. */
-export const voieAuDroit = (rang: number, nombre: number, anneau: Anneau) => Math.min(Math.max(nombre - 1 - rang, 0), anneau.voies - 1);
-
-/**
- * Voies de l'anneau au droit d'une connexion, d'après le rang de ses voies et le nombre de
- * voies de même sens de leurs branches (`cles` : toutes les clés de voie du carrefour).
- */
-export function voiesRaccordees(connexion: Connexion, cles: Iterable<string>, anneau: Anneau): VoiesRaccordees {
-  const nombres = new Map<string, number>();
-  for (const cle of cles) {
-    const prefixe = cle.replace(/\d+$/, '');
-    nombres.set(prefixe, (nombres.get(prefixe) ?? 0) + 1);
-  }
-  const auDroit = (cle: string) => {
-    const rang = Number(/\d+$/.exec(cle)?.[0] ?? 0);
-    return voieAuDroit(rang, nombres.get(cle.replace(/\d+$/, '')) ?? 1, anneau);
-  };
-  return { entree: auDroit(connexion.de), sortie: auDroit(connexion.vers) };
-}
-
-/** Degrés parcourus avant la sortie pendant lesquels on se rabat vers la voie de sortie (au plus). */
-const RABATTEMENT_MAX_DEG = 45;
-
-/** Azimut (°) du point `p` vu depuis `centre`, en coordonnées planes. */
-export function azimutXY(centre: XY, p: XY): number {
-  return ((Math.atan2(p[0] - centre[0], p[1] - centre[1]) / RAD + 360) % 360);
-}
-
-/** Degrés parcourus sur l'anneau, dans le sens de circulation, pour aller de l'azimut `de` à l'azimut `a`. */
-export const parcours = (de: number, a: number) => (((de - a) % 360) + 360) % 360;
-
-const pointAnneau = (centre: XY, rayon: number, azimut: number): XY => [
-  centre[0] + rayon * Math.sin(azimut * RAD),
-  centre[1] + rayon * Math.cos(azimut * RAD),
-];
-
-/** Direction de circulation sur l'anneau à cet azimut (unitaire). */
-const tangente = (azimut: number): XY => [-Math.cos(azimut * RAD), Math.sin(azimut * RAD)];
+const POINTS_PAR_TRONCON = 24;
 
 const moins = (a: XY, b: XY): XY => [a[0] - b[0], a[1] - b[1]];
-const unitaire = (a: XY): XY => {
-  const n = Math.hypot(a[0], a[1]) || 1;
-  return [a[0] / n, a[1] / n];
-};
+const distance = (a: XY, b: XY) => Math.hypot(...moins(a, b));
 
-function bezier(p0: XY, p1: XY, p2: XY, p3: XY, points: number): XY[] {
-  return Array.from({ length: points }, (_, i) => {
-    const t = i / (points - 1);
-    const a = (1 - t) ** 3;
-    const b = 3 * (1 - t) ** 2 * t;
-    const c = 3 * (1 - t) * t ** 2;
-    const d = t ** 3;
-    return [a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0], a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1]];
+/** Élément qui suit `index` dans l'ordre de circulation (le dernier est suivi du premier). */
+export const suivant = <T>(liste: readonly T[], index: number) => liste[(index + 1) % liste.length]!;
+
+/**
+ * Courbe fermée qui passe par tous les points (Catmull-Rom centripète : ni boucle ni
+ * rebroussement entre deux nœuds rapprochés), en coordonnées planes. Une polyligne par
+ * tronçon : du point `i` au point suivant.
+ */
+export function tronconsXY(points: readonly XY[], parTroncon = POINTS_PAR_TRONCON): XY[][] {
+  const n = points.length;
+  if (n < 2) return [];
+  const p = (i: number) => points[((i % n) + n) % n]!;
+  const pas = (a: XY, b: XY) => Math.max(Math.sqrt(distance(a, b)), 1e-6);
+  const lerp = (a: XY, b: XY, ta: number, tb: number, t: number): XY => {
+    const k = (t - ta) / (tb - ta);
+    return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+  };
+  return points.map((_, i) => {
+    const [p0, p1, p2, p3] = [p(i - 1), p(i), p(i + 1), p(i + 2)];
+    const t0 = 0;
+    const t1 = t0 + pas(p0, p1);
+    const t2 = t1 + pas(p1, p2);
+    const t3 = t2 + pas(p2, p3);
+    return Array.from({ length: parTroncon + 1 }, (_, k) => {
+      const t = t1 + ((t2 - t1) * k) / parTroncon;
+      const a1 = lerp(p0, p1, t0, t1, t);
+      const a2 = lerp(p1, p2, t1, t2, t);
+      const a3 = lerp(p2, p3, t2, t3, t);
+      const b1 = lerp(a1, a2, t0, t2, t);
+      const b2 = lerp(a2, a3, t1, t3, t);
+      return lerp(b1, b2, t1, t2, t);
+    });
   });
 }
 
-/**
- * Trajet d'une voie entrante à une voie sortante par l'anneau : raccord d'entrée, arc parcouru
- * dans le sens de circulation, raccord de sortie (coordonnées planes, en mètres).
- */
-export interface TrajetGiratoire {
-  /** Du bout de la voie entrante au point où la trajectoire rejoint l'anneau. */
-  entree: XY[];
-  /** Azimut (°) où la trajectoire rejoint l'anneau. */
-  debut: number;
-  /** Degrés parcourus sur l'anneau. */
-  longueur: number;
-  /** Du point où la trajectoire quitte l'anneau au bout de la voie sortante. */
-  sortie: XY[];
-  centre: XY;
-  /** Rayon de la voie de l'anneau suivie. */
-  rayon: number;
-  /** Rayon de la voie qui donne sur la sortie : on s'y rabat pendant les `rabattement` derniers degrés. */
-  rayonSortie: number;
-  rabattement: number;
-}
-
-/** Écart (°) entre le bout d'une voie et son raccord à l'anneau : on rejoint l'anneau en tournant. */
-function raccord(distanceAuCentre: number, rayon: number): number {
-  return Math.min(Math.max(distanceAuCentre - rayon, 0) / rayon / RAD, RACCORD_MAX_DEG);
-}
-
-/**
- * Trajet par l'anneau. Sur un anneau à plusieurs voies, on prend la voie extérieure pour les
- * premières sorties et une voie plus intérieure pour aller plus loin (le tour se partage en
- * autant de tranches que de voies : sur trois voies, moins d'un tiers de tour, moins de deux
- * tiers, au-delà), jamais plus extérieure que celle au droit de la voie
- * entrante ; avant la sortie, on se rabat sur la voie au droit de la voie sortante.
- */
-export function trajetGiratoire(
-  entree: Segment,
-  sortie: Segment,
-  anneau: Anneau,
-  repere: Repere,
-  raccordees: VoiesRaccordees = { entree: 0, sortie: 0 },
-): TrajetGiratoire {
-  const centre = repere.versXY(anneau.centre);
-  const milieu = rayonCirculation(anneau);
-  const p0 = repere.versXY(entree[0]);
-  const p3 = repere.versXY(sortie[0]);
-  const directionEntree = unitaire(moins(p0, repere.versXY(entree[1]))); // vers l'anneau
-  const directionSortie = unitaire(moins(repere.versXY(sortie[1]), p3)); // en quittant l'anneau
-
-  const debut = (azimutXY(centre, p0) - raccord(Math.hypot(...moins(p0, centre)), milieu) + 360) % 360;
-  const fin = (azimutXY(centre, p3) + raccord(Math.hypot(...moins(p3, centre)), milieu)) % 360;
-  // Entrée et sortie au même point : un tour complet (demi-tour sur une branche étroite).
-  const longueur = parcours(debut, fin) || 360;
-  // Tranche d'après l'écart entre la voie entrante et la voie sortante, vues du centre : les
-  // raccords raccourcissent l'arc parcouru, pas la distance entre les branches.
-  const ecart = parcours(azimutXY(centre, p0), azimutXY(centre, p3)) || 360;
-  const selonParcours = Math.min(Math.floor((ecart / 360) * anneau.voies), anneau.voies - 1);
-  const rayon = rayonVoie(anneau, Math.max(selonParcours, raccordees.entree));
-  const rayonSortie = rayonVoie(anneau, raccordees.sortie);
-  const p1 = pointAnneau(centre, rayon, debut);
-  const p2 = pointAnneau(centre, rayonSortie, fin);
-  const kEntree = 0.5 * Math.hypot(...moins(p1, p0));
-  const kSortie = 0.5 * Math.hypot(...moins(p3, p2));
-  const tEntree = tangente(debut);
-  const tSortie = tangente(fin);
-  return {
-    entree: bezier(
-      p0,
-      [p0[0] + directionEntree[0] * kEntree, p0[1] + directionEntree[1] * kEntree],
-      [p1[0] - tEntree[0] * kEntree, p1[1] - tEntree[1] * kEntree],
-      p1,
-      POINTS_RACCORD,
-    ),
-    debut,
-    longueur,
-    sortie: bezier(
-      p2,
-      [p2[0] + tSortie[0] * kSortie, p2[1] + tSortie[1] * kSortie],
-      [p3[0] - directionSortie[0] * kSortie, p3[1] - directionSortie[1] * kSortie],
-      p3,
-      POINTS_RACCORD,
-    ),
-    centre,
-    rayon,
-    rayonSortie,
-    rabattement: rayon === rayonSortie ? 0 : Math.min(RABATTEMENT_MAX_DEG, longueur / 3),
-  };
-}
-
-/** Rayon du trajet après `parcouru` degrés sur l'anneau : constant, puis rabattement vers la sortie. */
-function rayonA(trajet: TrajetGiratoire, parcouru: number): number {
-  const depart = trajet.longueur - trajet.rabattement;
-  if (trajet.rabattement === 0 || parcouru <= depart) return trajet.rayon;
-  const t = Math.min((parcouru - depart) / trajet.rabattement, 1);
-  return trajet.rayon + (trajet.rayonSortie - trajet.rayon) * t * t * (3 - 2 * t);
-}
-
-/**
- * Courbe du trajet entre deux positions sur l'anneau, en degrés parcourus depuis son début :
- * le raccord d'entrée est inclus si l'on part de 0, celui de sortie si l'on va jusqu'au bout.
- */
-export function courbeTrajet(trajet: TrajetGiratoire, depuis = 0, jusqua = trajet.longueur): XY[] {
-  const etendue = jusqua - depuis;
-  const pas = Math.max(1, Math.ceil(etendue / PAS_ARC_DEG));
-  const arc = Array.from({ length: pas + 1 }, (_, i) => {
-    const parcouru = depuis + (etendue * i) / pas;
-    return pointAnneau(trajet.centre, rayonA(trajet, parcouru), trajet.debut - parcouru);
-  });
-  return [
-    ...(depuis <= EPSILON_DEG ? trajet.entree.slice(0, -1) : []),
-    ...arc,
-    ...(jusqua >= trajet.longueur - EPSILON_DEG ? trajet.sortie.slice(1) : []),
-  ];
-}
-
-/** Courbe d'une connexion par l'anneau, en lon/lat (pour le dessin). */
-export function courbeGiratoire(entree: Segment, sortie: Segment, anneau: Anneau, raccordees?: VoiesRaccordees): LonLat[] {
-  const repere = repereLocal(anneau.centre);
-  return courbeTrajet(trajetGiratoire(entree, sortie, anneau, repere, raccordees)).map(repere.versLonLat);
-}
-
-/** Contour de l'anneau et de l'îlot, en lon/lat (pour le dessin). */
-export function contourAnneau(anneau: Anneau, points = 72): { exterieur: LonLat[]; ilot: LonLat[] } {
-  const repere = repereLocal(anneau.centre);
-  const cercle = (rayon: number) =>
-    Array.from({ length: points + 1 }, (_, i) => repere.versLonLat(pointAnneau([0, 0], rayon, (360 * i) / points)));
-  return {
-    exterieur: cercle(anneau.rayon_m),
-    ilot: cercle(Math.max(anneau.rayon_m - anneau.voies * LARGEUR_VOIE_M, 0.5)),
-  };
-}
-
-/**
- * Une connexion traverse l'îlot en ligne droite au lieu de suivre l'anneau : tram, ou bus en
- * site propre (voie bus à voie bus).
- */
-export const traverseIlot = (typeEntree: string | undefined, typeSortie: string | undefined) =>
-  (typeEntree === 'tram' && typeSortie === 'tram') || (typeEntree === 'bus' && typeSortie === 'bus');
-
-/** Azimuts (°) où une polyligne franchit le cercle de rayon `rayon`, dans l'ordre du parcours. */
-export function franchissementsCercle(courbe: readonly XY[], centre: XY, rayon: number): number[] {
-  const azimuts: number[] = [];
-  for (let i = 0; i < courbe.length - 1; i++) {
-    const a = courbe[i]!;
-    const b = courbe[i + 1]!;
-    const da = Math.hypot(...moins(a, centre)) - rayon;
-    const db = Math.hypot(...moins(b, centre)) - rayon;
-    if (da * db < 0) {
-      const t = da / (da - db);
-      azimuts.push(azimutXY(centre, [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]));
+/** Point à `d` mètres du début d'une polyligne, et direction unitaire à cet endroit. */
+function pointA(polyligne: readonly XY[], d: number): { point: XY; direction: XY } {
+  let reste = Math.max(d, 0);
+  for (let i = 0; i < polyligne.length - 1; i++) {
+    const a = polyligne[i]!;
+    const b = polyligne[i + 1]!;
+    const l = distance(a, b);
+    if (reste <= l || i === polyligne.length - 2) {
+      const k = l === 0 ? 0 : Math.min(reste / l, 1);
+      const u: XY = l === 0 ? [1, 0] : [(b[0] - a[0]) / l, (b[1] - a[1]) / l];
+      return { point: [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k], direction: u };
     }
+    reste -= l;
   }
+  return { point: polyligne[0]!, direction: [1, 0] };
+}
+
+export interface GeometrieTroncon {
+  /** Code du tronçon (branche générée) : R + code du nœud de départ. */
+  code: string;
+  /** Nœud de départ et nœud d'arrivée. */
+  de: string;
+  vers: string;
+  /** Tracé du tronçon, du nœud de départ au nœud d'arrivée. */
+  trace: LonLat[];
+  /** Voies au départ (sortantes du nœud de départ), rang 0 = la plus à gauche, côté îlot. */
+  sortantes: Segment[];
+  /** Mêmes voies à l'arrivée (entrantes au nœud d'arrivée), rang 0 = côté îlot. */
+  entrantes: Segment[];
+}
+
+/**
+ * Géométrie des tronçons d'anneau : tracé, et bouts de voies de part et d'autre des nœuds.
+ * `voies` : nombre de voies de chaque tronçon (par code de tronçon), 1 par défaut.
+ */
+export function geometrieAnneau(anneau: Anneau, voies: ReadonlyMap<string, number> = new Map()): GeometrieTroncon[] {
+  const { noeuds } = anneau;
+  if (noeuds.length < NOEUDS_MIN) return [];
+  const repere = repereLocal(noeuds[0]!.position);
+  const traces = tronconsXY(noeuds.map((n) => repere.versXY(n.position)));
+  return noeuds.map((noeud, i) => {
+    const code = codeTroncon(noeud.code);
+    const trace = traces[i]!;
+    const longueur = longueurPolyligne(trace);
+    const ecart = Math.min(ECART_NOEUD_M, longueur / 4);
+    const bout = Math.max(Math.min(LONGUEUR_BOUT_M, longueur / 2 - ecart - 0.5), 0.5);
+    const nombre = Math.max(voies.get(code) ?? 1, 1);
+    // Circulation antihoraire : la gauche du conducteur est côté îlot.
+    const decale = (d: number, rang: number): LonLat => {
+      const { point, direction } = pointA(trace, d);
+      const gauche: XY = [-direction[1], direction[0]];
+      const k = ((nombre - 1) / 2 - rang) * LARGEUR_VOIE_M;
+      return repere.versLonLat([point[0] + gauche[0] * k, point[1] + gauche[1] * k]);
+    };
+    const rangs = Array.from({ length: nombre }, (_, r) => r);
+    return {
+      code,
+      de: noeud.code,
+      vers: suivant(noeuds, i).code,
+      trace: trace.map(repere.versLonLat),
+      sortantes: rangs.map((r): Segment => [decale(ecart, r), decale(ecart + bout, r)]),
+      entrantes: rangs.map((r): Segment => [decale(longueur - ecart, r), decale(longueur - ecart - bout, r)]),
+    };
+  });
+}
+
+/** Distance entre un nœud et la ligne d'arrêt proposée des rues qui s'y raccordent (m). */
+export const distanceArretNoeud = (voiesAnneau: number) => (voiesAnneau * LARGEUR_VOIE_M) / 2 + RECUL_ENTREE_M;
+
+/**
+ * Ajoute un nœud là où il allonge le moins la boucle. Tant qu'il y a moins de trois nœuds,
+ * on les classe dans le sens de circulation (antihoraire) autour de leur centre.
+ */
+export function insererNoeud(anneau: Anneau, noeud: Noeud): Anneau {
+  const { noeuds } = anneau;
+  if (noeuds.length < NOEUDS_MIN) {
+    const tous = [...noeuds, noeud];
+    const repere = repereLocal(tous[0]!.position);
+    const xy = tous.map((n) => repere.versXY(n.position));
+    const centre: XY = [xy.reduce((s, p) => s + p[0], 0) / xy.length, xy.reduce((s, p) => s + p[1], 0) / xy.length];
+    const angle = (p: XY) => Math.atan2(p[1] - centre[1], p[0] - centre[0]);
+    return { noeuds: tous.map((n, i) => ({ n, a: angle(xy[i]!) })).sort((x, y) => x.a - y.a).map((o) => o.n) };
+  }
+  const repere = repereLocal(noeuds[0]!.position);
+  const p = repere.versXY(noeud.position);
+  let meilleur = { index: 0, cout: Infinity };
+  noeuds.forEach((n, i) => {
+    const a = repere.versXY(n.position);
+    const b = repere.versXY(suivant(noeuds, i).position);
+    const cout = distance(a, p) + distance(p, b) - distance(a, b);
+    if (cout < meilleur.cout) meilleur = { index: i, cout };
+  });
+  return { noeuds: [...noeuds.slice(0, meilleur.index + 1), noeud, ...noeuds.slice(meilleur.index + 1)] };
+}
+
+/** Premier code de nœud libre : 1, 2, 3… */
+export function codeNoeudLibre(anneau: Anneau | null): string {
+  const pris = new Set(anneau?.noeuds.map((n) => n.code));
+  let n = 1;
+  while (pris.has(String(n))) n++;
+  return String(n);
+}
+
+/** Voie générée d'un tronçon, au format des voies de branche. */
+interface VoieTroncon {
+  sens: 'entrante' | 'sortante';
+  rang: number;
+  type: 'generale';
+  geom: Segment;
+}
+
+/**
+ * Tronçons d'anneau sous forme de branches générées (R1, R2…), à enregistrer avec les rues :
+ * leurs voies se relient aux nœuds comme celles d'une branche. `voies` : nombre de voies par
+ * tronçon, 1 par défaut.
+ */
+export function branchesTroncons(anneau: Anneau, voies: ReadonlyMap<string, number> = new Map()) {
+  const troncons = geometrieAnneau(anneau, voies);
+  const repere = repereLocal(anneau.noeuds[0]?.position ?? [0, 0]);
+  const xy = anneau.noeuds.map((n) => repere.versXY(n.position));
+  const centre: XY = [xy.reduce((s, p) => s + p[0], 0) / (xy.length || 1), xy.reduce((s, p) => s + p[1], 0) / (xy.length || 1)];
+  return troncons.map((t) => {
+    const [x, y] = repere.versXY(t.trace[Math.floor(t.trace.length / 2)]!);
+    return {
+      code: t.code,
+      nom: null,
+      azimut: Math.round((((Math.atan2(x - centre[0], y - centre[1]) * 180) / Math.PI + 360) % 360) * 10) / 10,
+      osm_way_id: null,
+      geom: t.trace,
+      voies: [
+        ...t.sortantes.map((geom, rang): VoieTroncon => ({ sens: 'sortante', rang, type: 'generale', geom })),
+        ...t.entrantes.map((geom, rang): VoieTroncon => ({ sens: 'entrante', rang, type: 'generale', geom })),
+      ],
+      traversee: null,
+      priorite_entree: null,
+      noeud: t.de,
+      troncon: true,
+    };
+  });
+}
+
+/** Branche vue par les fonctions de nœud : ses voies, son nœud, tronçon d'anneau ou rue. */
+interface BrancheNoeud {
+  code: string;
+  noeud?: string | null;
+  troncon?: boolean;
+  voies: ReadonlyArray<{ sens: 'entrante' | 'sortante'; rang: number }>;
+}
+
+/**
+ * Nœud où se trouve une voie : celui de sa rue ; pour un tronçon, son nœud de départ côté
+ * voies sortantes, son nœud d'arrivée côté voies entrantes. null hors anneau (tram qui
+ * traverse l'îlot, par exemple).
+ */
+export function noeudDeVoie(cle: string, branches: readonly BrancheNoeud[], anneau: Anneau): string | null {
+  const [code, voie] = cle.split(':');
+  const branche = branches.find((b) => b.code === code);
+  if (!branche?.noeud) return null;
+  if (!branche.troncon || voie?.startsWith('s')) return branche.noeud;
+  const index = anneau.noeuds.findIndex((n) => n.code === branche.noeud);
+  return index < 0 ? null : suivant(anneau.noeuds, index).code;
+}
+
+/** Liaisons qui relient deux nœuds différents, ou un nœud et une voie hors anneau. */
+export function liaisonsHorsNoeud(
+  branches: readonly BrancheNoeud[],
+  connexions: ReadonlyArray<{ de: string; vers: string }>,
+  anneau: Anneau,
+): string[] {
+  return connexions
+    .filter((c) => noeudDeVoie(c.de, branches, anneau) !== noeudDeVoie(c.vers, branches, anneau))
+    .map((c) => `${c.de}>${c.vers}`);
+}
+
+/**
+ * Liaisons proposées à chaque nœud, voies alignées à droite : l'anneau continue voie par voie,
+ * on sort par les voies extérieures de l'anneau, on s'insère sur ses voies extérieures.
+ * Point de départ à corriger à la main avec l'outil Liaison.
+ */
+export function proposerLiaisonsNoeuds(branches: readonly BrancheNoeud[], anneau: Anneau): Array<{ de: string; vers: string }> {
+  const nombre = (b: BrancheNoeud | undefined, sens: 'entrante' | 'sortante') => b?.voies.filter((v) => v.sens === sens).length ?? 0;
+  const aligne = (rang: number, depuis: number, vers: number) => Math.min(Math.max(rang + vers - depuis, 0), vers - 1);
+  const liaisons: Array<{ de: string; vers: string }> = [];
+  anneau.noeuds.forEach((noeud, i) => {
+    const precedent = anneau.noeuds[(i - 1 + anneau.noeuds.length) % anneau.noeuds.length]!;
+    const arrivee = branches.find((b) => b.troncon && b.noeud === precedent.code);
+    const depart = branches.find((b) => b.troncon && b.noeud === noeud.code);
+    const rues = branches.filter((b) => !b.troncon && b.noeud === noeud.code);
+    const nArrivee = nombre(arrivee, 'entrante');
+    const nDepart = nombre(depart, 'sortante');
+    for (let r = 0; r < nArrivee && depart; r++) {
+      liaisons.push({ de: `${arrivee!.code}:e${r}`, vers: `${depart.code}:s${aligne(r, nArrivee, nDepart)}` });
+    }
+    for (const rue of rues) {
+      const sorties = nombre(rue, 'sortante');
+      const entrees = nombre(rue, 'entrante');
+      for (let s = 0; s < sorties && arrivee; s++) {
+        liaisons.push({ de: `${arrivee.code}:e${aligne(s, sorties, nArrivee)}`, vers: `${rue.code}:s${s}` });
+      }
+      for (let e = 0; e < entrees && depart; e++) {
+        liaisons.push({ de: `${rue.code}:e${e}`, vers: `${depart.code}:s${aligne(e, entrees, nDepart)}` });
+      }
+    }
+  });
+  return liaisons;
+}
+
+/**
+ * Azimut de chaque voie d'un giratoire (clé de voie → °), pour lire le sens des mouvements à
+ * un nœud. Rues : de leur bout côté anneau vers leur bout éloigné. Tronçons : la tangente de
+ * l'anneau au nœud, vers l'amont pour le tronçon qui arrive, vers l'aval pour celui qui part
+ * (continuer sur l'anneau est un tout-droit).
+ */
+export function azimutsVoiesGiratoire(
+  branches: ReadonlyArray<{
+    code: string;
+    noeud?: string | null;
+    troncon?: boolean;
+    voies: ReadonlyArray<{ sens: 'entrante' | 'sortante'; rang: number; geom: Segment }>;
+  }>,
+  anneau: Anneau | null,
+): Map<string, number> {
+  const azimuts = new Map<string, number>();
+  if (!anneau) return azimuts;
+  for (const b of branches) {
+    if (!b.noeud || b.troncon) continue;
+    for (const v of b.voies) azimuts.set(cleVoie(b.code, v.sens, v.rang), azimutSegment(v.geom));
+  }
+  anneau.noeuds.forEach((noeud, i) => {
+    const precedent = anneau.noeuds[(i - 1 + anneau.noeuds.length) % anneau.noeuds.length]!;
+    const arrivee = branches.find((b) => b.troncon && b.noeud === precedent.code);
+    const depart = branches.find((b) => b.troncon && b.noeud === noeud.code);
+    const avant = arrivee?.voies.find((v) => v.sens === 'entrante');
+    const apres = depart?.voies.find((v) => v.sens === 'sortante');
+    if (!avant || !apres) return;
+    const tangente = azimutSegment([avant.geom[0], apres.geom[0]]);
+    for (const v of arrivee!.voies) if (v.sens === 'entrante') azimuts.set(cleVoie(arrivee!.code, v.sens, v.rang), (tangente + 180) % 360);
+    for (const v of depart!.voies) if (v.sens === 'sortante') azimuts.set(cleVoie(depart!.code, v.sens, v.rang), tangente);
+  });
   return azimuts;
-}
-
-/**
- * Position d'un feu d'anneau : juste en amont du point le plus en amont parmi ceux où les
- * trajectoires de la branche touchent l'anneau (insertions de ses voies entrantes,
- * franchissements du tram ou du bus qui en vient ou y va). `points` : ces azimuts.
- */
-export function azimutFeuAnneau(points: readonly number[], rayon: number): number | null {
-  if (points.length === 0) return null;
-  const reference = points[0]!;
-  const amont = Math.max(...points.map((p) => normaliserAngle(p - reference)));
-  return (((reference + amont + RECUL_FEU_ANNEAU_M / rayon / RAD) % 360) + 360) % 360;
-}
-
-/** Passage d'une trajectoire sur l'anneau, pour les conflits d'insertion. */
-export interface PassageAnneau {
-  /** Azimut (°) où la trajectoire est sur l'anneau au départ de son tronçon d'anneau. */
-  debut: number;
-  /** Degrés parcourus sur l'anneau. */
-  longueur: number;
-  /** Distance (m) le long de la courbe jusqu'au début de l'anneau. */
-  avant: number;
-  rayon: number;
-  /** Vrai si la trajectoire s'insère depuis une voie entrante ; faux si elle part d'un feu d'anneau. */
-  insertion: boolean;
-}
-
-/** Vrai si l'azimut `azimut` est strictement à l'intérieur de l'arc parcouru. */
-export const surArc = (passage: PassageAnneau, azimut: number) => {
-  const c = parcours(passage.debut, azimut);
-  return c > EPSILON_DEG && c < passage.longueur - EPSILON_DEG;
-};
-
-/** Distance (m) le long de la trajectoire jusqu'à l'azimut `azimut` de son arc. */
-export const distanceSurArc = (passage: PassageAnneau, azimut: number) =>
-  passage.avant + passage.rayon * RAD * parcours(passage.debut, azimut);
-
-/**
- * Points d'insertion entre deux trajectoires sur l'anneau : l'une rejoint l'anneau là où
- * l'autre y circule. Distances (m) depuis le début de chacune jusqu'au point d'insertion.
- */
-export function insertions(a: PassageAnneau, b: PassageAnneau): Array<{ da: number; db: number }> {
-  const points: Array<{ da: number; db: number }> = [];
-  if (b.insertion && surArc(a, b.debut)) points.push({ da: distanceSurArc(a, b.debut), db: b.avant });
-  if (a.insertion && surArc(b, a.debut)) points.push({ da: a.avant, db: distanceSurArc(b, a.debut) });
-  return points;
 }

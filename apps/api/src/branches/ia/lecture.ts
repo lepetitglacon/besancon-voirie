@@ -3,7 +3,7 @@
  * l'image. Le serveur la reconvertit en lon/lat (cadre connu exactement) puis la valide avec le
  * même schéma que l'éditeur (`ConfigurationBranches`). Logique pure, testée à part.
  */
-import { cleVoie, type LonLat } from '@voirie/engine';
+import { cleVoie, liaisonsHorsNoeud, proposerLiaisonsNoeuds, repereLocal, type LonLat } from '@voirie/engine';
 import {
   ConfianceIa,
   ConfigurationBranches,
@@ -92,8 +92,11 @@ const tagsUtiles = (tags: Record<string, string>) =>
 
 /** La proposition OSM exprimée comme la réponse attendue, pour que l'IA n'ait qu'à la corriger. */
 export function propositionEnPixels(cadre: CadrePhoto, detection: DetectionBranches): LectureIa {
+  // Les tronçons d'anneau et leurs liaisons se déduisent des nœuds : l'IA ne voit que les rues.
+  const troncons = new Set(detection.branches.filter((b) => b.troncon).map((b) => b.code));
+  const surTroncon = (cle: string) => troncons.has(cle.split(':')[0]!);
   return {
-    branches: detection.branches.map((b) => {
+    branches: detection.branches.filter((b) => !b.troncon).map((b) => {
       const voies = (sens: Voie['sens']) =>
         b.voies
           .filter((v) => v.sens === sens)
@@ -111,7 +114,7 @@ export function propositionEnPixels(cadre: CadrePhoto, detection: DetectionBranc
         remarques: `source OSM : ${detection.sources[b.code] === 'osm' ? 'flèches turn:lanes' : 'règles par défaut'}`,
       };
     }),
-    connexions: detection.connexions,
+    connexions: detection.connexions.filter((c) => !surTroncon(c.de) && !surTroncon(c.vers)),
     remarques: '',
   };
 }
@@ -126,15 +129,15 @@ export function consigne(contexte: ContexteIa, fichier: string): string {
     trace_px: v.coordonnees.map((c) => px(cadre, c)),
   }));
   const { anneau } = contexte.detection;
-  const centre = px(cadre, anneau?.centre ?? contexte.detection.centre);
+  const centre = px(cadre, contexte.detection.centre);
   const giratoire = anneau
     ? `
 ## Giratoire
-Ce carrefour est un giratoire. Anneau d'après OSM : centre de l'îlot ${JSON.stringify(centre)}, rayon extérieur ${Math.round(anneau.rayon_m / cadre.metres_par_px)} px (${anneau.rayon_m} m), ${anneau.voies} voie(s). On y tourne dans le sens inverse des aiguilles d'une montre.
+Ce carrefour est un giratoire. On y tourne dans le sens inverse des aiguilles d'une montre. Nœuds de l'anneau posés d'après OSM, dans l'ordre de circulation (chaque rue se raccorde au plus proche) : ${JSON.stringify(anneau.noeuds.map((n) => ({ noeud: n.code, ...px(cadre, n.position) })))}.
 - L'anneau n'est pas une branche : ne crée des branches que pour les rues qui s'y raccordent, et pour le tram ou un site propre bus qui traverse l'îlot.
 - Les voies entrantes s'arrêtent à la ligne de cédez-le-passage (ou au feu), au bord de l'anneau ; les sortantes partent du bord de l'anneau.
-- Connexions : chaque voie entrante mène à toutes les sorties, demi-tour compris, sauf marquage contraire. Tram et bus en site propre : seulement vers leur propre voie de l'autre côté de l'îlot.
-- Dis dans les remarques si l'anneau d'OSM ne correspond pas à la photo (centre, rayon, nombre de voies), et si des feux se trouvent sur l'anneau lui-même.
+- Connexions : ne renvoie que celles du tram ou du bus en site propre qui traverse l'îlot (de sa voie à sa voie de l'autre côté). Les liaisons avec l'anneau se proposent à chaque nœud, à part.
+- Dis dans les remarques si les nœuds ne tombent pas là où les rues touchent l'anneau sur la photo, le nombre de voies de l'anneau, et si des feux se trouvent sur l'anneau lui-même.
 `
     : '';
   return `Configure les voies du carrefour à feux photographié.
@@ -206,6 +209,8 @@ export function configurationDepuisLecture(lecture: LectureIa, cadre: CadrePhoto
       voies: toutes,
       traversee: b.traversee ? [ll(b.traversee.debut), ll(b.traversee.fin)] : null,
       priorite_entree: null,
+      noeud: null,
+      troncon: false,
     };
   });
 
@@ -226,7 +231,29 @@ export function configurationDepuisLecture(lecture: LectureIa, cadre: CadrePhoto
     connexions.push({ de, vers });
   }
 
-  const resultat = ConfigurationBranches.safeParse({ branches, connexions, anneau: detection.anneau });
+  const { anneau } = detection;
+  let retenues = connexions;
+  if (anneau) {
+    // Giratoire : chaque rue se raccorde au nœud de la proposition OSM (même code), sinon au plus
+    // proche de ses voies ; les tronçons d'anneau et les liaisons aux nœuds se reprennent de zéro.
+    const noeudOsm = new Map(detection.branches.filter((b) => !b.troncon).map((b) => [b.code, b.noeud]));
+    const repere = repereLocal(anneau.noeuds[0]!.position);
+    const plusProche = (b: Branche) => {
+      const bouts = b.voies.map((v) => repere.versXY(v.geom[0]));
+      if (bouts.length === 0) return null;
+      const [x, y] = [bouts.reduce((s, p) => s + p[0], 0) / bouts.length, bouts.reduce((s, p) => s + p[1], 0) / bouts.length];
+      const distance = (n: { position: LonLat }) => Math.hypot(repere.versXY(n.position)[0] - x, repere.versXY(n.position)[1] - y);
+      return anneau.noeuds.reduce((a, n) => (distance(n) < distance(a) ? n : a)).code;
+    };
+    const sitePropre = (b: Branche) => b.voies.length > 0 && b.voies.every((v) => v.type === 'tram' || v.type === 'bus');
+    for (const b of branches) b.noeud = sitePropre(b) ? null : (noeudOsm.get(b.code) ?? plusProche(b));
+    branches.push(...detection.branches.filter((b) => b.troncon).map(({ sens: _sens, ...b }) => b));
+    const hors = new Set(liaisonsHorsNoeud(branches, connexions, anneau));
+    const traversees = connexions.filter((c) => !hors.has(`${c.de}>${c.vers}`));
+    ecartees.push(...connexions.filter((c) => hors.has(`${c.de}>${c.vers}`)).map((c) => `${c.de} → ${c.vers} (hors nœud)`));
+    retenues = [...proposerLiaisonsNoeuds(branches, anneau), ...traversees];
+  }
+  const resultat = ConfigurationBranches.safeParse({ branches, connexions: retenues, anneau });
   if (!resultat.success) {
     const erreurs = resultat.error.issues.map((i) => `${i.path.join('.')} : ${i.message}`);
     throw new Error(`Proposition de l'IA invalide : ${erreurs.join(' ; ')}`);
