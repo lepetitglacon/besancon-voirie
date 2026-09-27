@@ -1,12 +1,12 @@
 import { Badge, Box, Button } from '@chakra-ui/react'
 import type { LonLat } from '@voirie/engine'
 import type { Bbox, CarrefourResume, CarrefoursGeoJson, EmpriseIa, FeuResume, FeuxGeoJson } from '@voirie/schema'
-import type { Map as CarteMapLibre, MapGeoJSONFeature } from 'maplibre-gl'
+import { AttributionControl, type Map as CarteMapLibre, type MapGeoJSONFeature } from 'maplibre-gl'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Map, {
-  AttributionControl,
   Layer,
   Source,
+  useMap,
   type MapLayerMouseEvent,
   type MapMouseEvent,
   type MapRef,
@@ -95,6 +95,37 @@ interface Props {
   onDessinerZoneIa: (emprise: EmpriseIa) => void
   /** Pose un feu sur son mât, ou le remet à sa position OSM (null). */
   onPlacerFeu: (id: string, position: LonLat | null) => Promise<void>
+}
+
+/**
+ * Au montage de la carte : attribution et première emprise. Sans attendre l'événement load,
+ * qui se perd par moments (double montage de StrictMode) : les carrefours ne se chargeaient
+ * alors qu'au premier déplacement.
+ */
+function Demarrage({ onEmprise }: { onEmprise: (bbox: Bbox) => void }) {
+  const { current } = useMap()
+  useEffect(() => {
+    const carte = current?.getMap()
+    if (!carte) return
+    // En bas à gauche : le bas à droite accueille la carte de suivi.
+    const attribution = new AttributionControl({ compact: true })
+    carte.addControl(attribution, 'bottom-left')
+    // Repliée (bouton « i ») : dépliée, elle passerait sous la barre d'outils. MapLibre la déplie
+    // quand arrivent les premières attributions des sources : on la replie à ce moment-là.
+    const conteneur = carte.getContainer().querySelector('.maplibregl-ctrl-attrib')
+    const replier = new MutationObserver(() => {
+      if (!conteneur?.classList.contains('maplibregl-compact-show')) return
+      conteneur.classList.remove('maplibregl-compact-show')
+      replier.disconnect()
+    })
+    if (conteneur) replier.observe(conteneur, { attributes: true, attributeFilter: ['class'] })
+    onEmprise(emprise(carte))
+    return () => {
+      replier.disconnect()
+      carte.removeControl(attribution)
+    }
+  }, [current, onEmprise])
+  return null
 }
 
 /** Zoom utilisé pour configurer un carrefour. */
@@ -245,15 +276,9 @@ export function CarteCarrefours(props: Props) {
       onMouseLeave={() => setSurvol(false)}
       onClick={cliquer}
       onContextMenu={(evenement) => props.onMenuContextuel([evenement.lngLat.lng, evenement.lngLat.lat])}
-      onLoad={(evenement) => {
-        // Attribution repliée (bouton « i ») : dépliée, elle passerait sous la barre d'outils.
-        evenement.target.getContainer().querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show')
-        props.onEmprise(emprise(evenement.target))
-      }}
       onMoveEnd={(evenement) => props.onEmprise(emprise(evenement.target))}
     >
-      {/* En bas à gauche : le bas à droite accueille la carte de suivi. */}
-      <AttributionControl position="bottom-left" compact />
+      <Demarrage onEmprise={props.onEmprise} />
       <ControleZoom position="absolute" top="4" right="4" zIndex="1" />
       <FondDeCarte {...fond} />
       {children}
