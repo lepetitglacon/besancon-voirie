@@ -118,5 +118,24 @@ export interface BranchesCarrefour {
 export interface DetectionBranches extends BranchesCarrefour {
   rayon_m: number;
   /** Par code de branche : d'où viennent les flèches qui ont servi à proposer les connexions. */
-  sources: Record<string, 'osm' | 'defaut'>;
+  sources: Record<string, SourceBranche>;
+}
+
+/** D'où vient une branche proposée : flèches OSM, règles par défaut, ou lecture de la photo par l'IA. */
+export type SourceBranche = 'osm' | 'defaut' | 'ia';
+
+export const ConfianceIa = z.enum(['haute', 'moyenne', 'basse']);
+export type ConfianceIa = z.infer<typeof ConfianceIa>;
+
+/** Proposition OSM corrigée par l'IA d'après l'orthophoto IGN, non enregistrée. */
+export interface DetectionBranchesIa extends DetectionBranches {
+  ia: {
+    /** Remarques générales de l'IA : ce qu'elle n'a pas pu voir, ce qu'elle a supposé. */
+    remarques: string;
+    /** Par code de branche : confiance et remarques. */
+    branches: Record<string, { confiance: ConfianceIa; remarques: string }>;
+    modele: string;
+    duree_s: number;
+    cout_usd: number | null;
+  };
 }

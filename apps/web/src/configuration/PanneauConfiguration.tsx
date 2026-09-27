@@ -1,4 +1,4 @@
-import { Button, Heading, HStack, Stack, Tabs } from '@chakra-ui/react'
+import { Button, Heading, HStack, Spinner, Stack, Tabs } from '@chakra-ui/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   calculerProgramme,
@@ -9,16 +9,19 @@ import {
   validerGraphe,
   type LonLat,
 } from '@voirie/engine'
-import type {
-  Branche,
-  BranchesCarrefour,
-  CarrefourResume,
-  Connexion,
-  FeuResume,
-  FeuxGeoJson,
-  PlanSaisi,
+import {
+  ConfigurationBranches,
+  type Branche,
+  type BranchesCarrefour,
+  type CarrefourResume,
+  type Connexion,
+  type DetectionBranchesIa,
+  type FeuResume,
+  type FeuxGeoJson,
+  type PlanSaisi,
+  type SourceBranche,
 } from '@voirie/schema'
-import { useEffect, useImperativeHandle, useMemo, useState, type Ref } from 'react'
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
 import { api } from '../api'
 import { Aide, Message } from '../ds'
 import type { ModeEdition } from './calque/CalqueCarrefour'
@@ -86,7 +89,9 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
     queryFn: () => api.branches(carrefour.id),
   })
   const [brouillonBranches, setBrouillonBranches] = useState<Brouillon | null>(null)
-  const [sources, setSources] = useState<Record<string, 'osm' | 'defaut'>>({})
+  const [sources, setSources] = useState<Record<string, SourceBranche>>({})
+  const [analyseIa, setAnalyseIa] = useState<DetectionBranchesIa['ia'] | null>(null)
+  const champImport = useRef<HTMLInputElement>(null)
   const [mode, setMode] = useState<ModeEdition>('ajuster')
   const enregistre: BranchesCarrefour | undefined = branchesEnregistrees.data
   const configuration: Brouillon = useMemo(
@@ -101,8 +106,41 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
     onSuccess: (proposition) => {
       setBrouillonBranches({ branches: proposition.branches, connexions: proposition.connexions })
       setSources(proposition.sources)
+      setAnalyseIa(null)
     },
   })
+  const detectionIa = useMutation({
+    mutationFn: () => api.detecterBranchesIa(carrefour.id),
+    onSuccess: (proposition) => {
+      setBrouillonBranches({ branches: proposition.branches, connexions: proposition.connexions })
+      setSources(proposition.sources)
+      setAnalyseIa(proposition.ia)
+    },
+  })
+  /** Import d'un JSON `ConfigurationBranches` (celui d'un `PUT /branches`), validé par le même schéma. */
+  const importJson = useMutation({
+    mutationFn: async (fichier: File) => {
+      let brut: unknown
+      try {
+        brut = JSON.parse(await fichier.text())
+      } catch {
+        throw new Error(`${fichier.name} n’est pas un fichier JSON`)
+      }
+      const resultat = ConfigurationBranches.safeParse(brut)
+      if (!resultat.success) {
+        throw new Error(`JSON refusé : ${resultat.error.issues.map((i) => `${i.path.join('.')} : ${i.message}`).join(' ; ')}`)
+      }
+      return resultat.data
+    },
+    onSuccess: (configurationImportee) => {
+      setBrouillonBranches(configurationImportee)
+      setSources({})
+      setAnalyseIa(null)
+    },
+  })
+  const propositionEnCours = detection.isPending || detectionIa.isPending || importJson.isPending
+  const remplacer = (source: string) =>
+    branches.length === 0 || window.confirm(`Remplacer les branches actuelles par ${source} ?`)
   const enregistrementBranches = useMutation({
     mutationFn: () => api.enregistrerBranches(carrefour.id, pourEnregistrer(configuration)),
     onSuccess: async (resultat) => {
@@ -281,7 +319,7 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
 
   const feuxPlaces = feuxCarrefour?.filter((f) => f.properties.position_manuelle).length ?? 0
   const modifie = brouillonBranches !== null || brouillonLignes !== null || brouillonProgramme !== null
-  const erreur = [detection, enregistrementBranches, enregistrementLignes, enregistrementProgramme].find((m) => m.error)?.error
+  const erreur = [detection, detectionIa, importJson, enregistrementBranches, enregistrementLignes, enregistrementProgramme].find((m) => m.error)?.error
 
   const changerOnglet = (suivant: Onglet) => {
     setOnglet(suivant)
@@ -308,16 +346,41 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
           <Aide>Calez les voies de chaque rue sur la photo aérienne, puis reliez les voies entrantes aux voies sortantes.</Aide>
           <HStack gap="1.5" wrap="wrap">
             <Button
-              onClick={() => {
-                if (branches.length === 0 || window.confirm('Remplacer les branches actuelles par la proposition OSM ?')) {
-                  detection.mutate()
-                }
-              }}
+              onClick={() => remplacer('la proposition OSM') && detection.mutate()}
+              disabled={propositionEnCours && !detection.isPending}
               loading={detection.isPending}
               loadingText="Détection…"
             >
               Détecter depuis OSM
             </Button>
+            <Button
+              onClick={() => remplacer('la proposition OSM + IA') && detectionIa.mutate()}
+              disabled={propositionEnCours && !detectionIa.isPending}
+              loading={detectionIa.isPending}
+              loadingText="Analyse…"
+              title="La détection OSM, corrigée par Claude d’après la photo aérienne IGN (1 à 3 min)"
+            >
+              ✦ Générer avec OSM + IA
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => champImport.current?.click()}
+              disabled={propositionEnCours}
+              title="Charger un JSON { branches, connexions } dans l’éditeur"
+            >
+              Importer un JSON
+            </Button>
+            <input
+              ref={champImport}
+              type="file"
+              accept="application/json,.json"
+              hidden
+              onChange={(e) => {
+                const fichier = e.target.files?.[0]
+                e.target.value = ''
+                if (fichier && remplacer(fichier.name)) importJson.mutate(fichier)
+              }}
+            />
             <Button
               variant="solid"
               onClick={() => enregistrementBranches.mutate()}
@@ -327,6 +390,17 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
               Enregistrer les branches
             </Button>
           </HStack>
+          {detectionIa.isPending && <AnalyseEnCours />}
+          {analyseIa && !detectionIa.isPending && (
+            <Stack gap="1" borderWidth="1px" borderColor="border.muted" rounded="l2" p="2.5">
+              <Aide>
+                ✦ Proposition lue sur la photo par {analyseIa.modele} en {analyseIa.duree_s} s
+                {analyseIa.cout_usd !== null && ` (${analyseIa.cout_usd.toFixed(2)} $)`}. Vérifiez chaque branche avant
+                d’enregistrer.
+              </Aide>
+              {analyseIa.remarques && <Aide color="fg">{analyseIa.remarques}</Aide>}
+            </Stack>
+          )}
           {brouillonBranches && <Message ton="avertissement">Branches non enregistrées</Message>}
           <HStack gap="2.5" wrap="wrap">
             <Button
@@ -356,6 +430,7 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
               brouillon={configuration}
               centre={centre}
               sources={sources}
+              analyseIa={analyseIa?.branches ?? null}
               mode={mode}
               onMode={setMode}
               onChanger={setBrouillonBranches}
@@ -486,5 +561,24 @@ export function PanneauConfiguration({ ref, carrefour, feuxCarrefour, onAffichag
         Fermer
       </Button>
     </Stack>
+  )
+}
+
+/** Pendant l'analyse par l'IA : ce qui se passe et depuis combien de temps. */
+function AnalyseEnCours() {
+  const [secondes, setSecondes] = useState(0)
+  useEffect(() => {
+    const debut = Date.now()
+    const minuterie = window.setInterval(() => setSecondes(Math.round((Date.now() - debut) / 1000)), 1000)
+    return () => window.clearInterval(minuterie)
+  }, [])
+  return (
+    <HStack gap="2.5" borderWidth="1px" borderColor="border.muted" rounded="l2" p="2.5" aria-live="polite">
+      <Spinner size="sm" color="fg.muted" />
+      <Stack gap="0">
+        <Aide color="fg">Claude lit la photo aérienne IGN et corrige la proposition OSM… {secondes} s</Aide>
+        <Aide>Compter 1 à 3 minutes. Les voies arriveront directement sur la carte, à vérifier avant d’enregistrer.</Aide>
+      </Stack>
+    </HStack>
   )
 }

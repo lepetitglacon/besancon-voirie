@@ -9,6 +9,7 @@ import type {
   ConfigurationProgramme,
   CreerCarrefour,
   DetectionBranches,
+  DetectionBranchesIa,
   EtatHistoriqueTram,
   FeuxGeoJson,
   HistoriqueTroncons,
@@ -62,6 +63,9 @@ export const api = {
   branches: (carrefourId: string) => requete<BranchesCarrefour>(`/api/carrefours/${carrefourId}/branches`),
   detecterBranches: (carrefourId: string) =>
     requete<DetectionBranches>(`/api/carrefours/${carrefourId}/branches/detection`),
+  /** Proposition OSM corrigée par l'IA d'après l'orthophoto IGN (1 à 3 min). */
+  detecterBranchesIa: (carrefourId: string) =>
+    requete<DetectionBranchesIa>(`/api/carrefours/${carrefourId}/branches/detection-ia`, { method: 'POST' }),
   enregistrerBranches: (carrefourId: string, configuration: ConfigurationBranches) =>
     requete<BranchesCarrefour>(`/api/carrefours/${carrefourId}/branches`, {
       method: 'PUT',

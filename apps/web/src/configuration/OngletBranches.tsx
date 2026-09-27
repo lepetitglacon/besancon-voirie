@@ -1,6 +1,6 @@
 import { Badge, Button, Heading, HStack, IconButton, Input, List, Stack, Text } from '@chakra-ui/react'
 import { cleVoie, flechesParVoie, mouvementsDepuisConnexions, type LonLat } from '@voirie/engine'
-import type { SensVoie, TypeVoie } from '@voirie/schema'
+import type { DetectionBranchesIa, SensVoie, SourceBranche, TypeVoie } from '@voirie/schema'
 import { Aide, Case, Message, Pastille, Segments, Selecteur } from '../ds'
 import type { ModeEdition } from './calque/CalqueCarrefour'
 import { DIRECTIONS, FLECHES } from './libelles'
@@ -24,14 +24,16 @@ const symbole = new Map(FLECHES.map((f) => [f.direction, f.symbole]))
 interface Props {
   brouillon: Brouillon
   centre: LonLat
-  sources: Record<string, 'osm' | 'defaut'>
+  sources: Record<string, SourceBranche>
+  /** Confiance et remarques de l'IA par branche, après « Générer avec OSM + IA ». */
+  analyseIa: DetectionBranchesIa['ia']['branches'] | null
   mode: ModeEdition
   onMode: (mode: ModeEdition) => void
   onChanger: (brouillon: Brouillon) => void
 }
 
 /** Étape 1 : branches, voies calées sur la photo, passages piétons et connexions entre voies. */
-export function OngletBranches({ brouillon, centre, sources, mode, onMode, onChanger }: Props) {
+export function OngletBranches({ brouillon, centre, sources, analyseIa, mode, onMode, onChanger }: Props) {
   const { branches, connexions } = brouillon
   const fleches = flechesParVoie(branches, connexions)
   const mouvements = mouvementsDepuisConnexions(branches, connexions)
@@ -154,12 +156,9 @@ export function OngletBranches({ brouillon, centre, sources, mode, onMode, onCha
             <Button size="xs" onClick={() => onChanger(regenererVoies(brouillon, branche.code, centre))} title="Remettre les voies à leur position proposée">
               Replacer
             </Button>
-            {sources[branche.code] && (
-              <Badge colorPalette={sources[branche.code] === 'osm' ? 'green' : 'orange'}>
-                {sources[branche.code] === 'osm' ? 'connexions d’après OSM' : 'connexions par défaut, à vérifier'}
-              </Badge>
-            )}
+            {sources[branche.code] && <BadgeSource source={sources[branche.code]!} ia={analyseIa?.[branche.code]} />}
           </HStack>
+          {analyseIa?.[branche.code]?.remarques && <Aide>✦ {analyseIa[branche.code]!.remarques}</Aide>}
         </Stack>
       ))}
 
@@ -194,6 +193,22 @@ export function OngletBranches({ brouillon, centre, sources, mode, onMode, onCha
         ))}
       </List.Root>
       {sansConnexion.length > 0 && <Message ton="avertissement">Voies entrantes sans connexion : {sansConnexion.join(' ; ')}</Message>}
+    </>
+  )
+}
+
+const BADGES: Record<SourceBranche, { couleur: string; libelle: string }> = {
+  osm: { couleur: 'green', libelle: 'connexions d’après OSM' },
+  defaut: { couleur: 'orange', libelle: 'connexions par défaut, à vérifier' },
+  ia: { couleur: 'purple', libelle: 'lu sur la photo' },
+}
+const CONFIANCES = { haute: 'green', moyenne: 'orange', basse: 'red' } as const
+
+function BadgeSource({ source, ia }: { source: SourceBranche; ia: DetectionBranchesIa['ia']['branches'][string] | undefined }) {
+  return (
+    <>
+      <Badge colorPalette={BADGES[source].couleur}>{BADGES[source].libelle}</Badge>
+      {ia && <Badge colorPalette={CONFIANCES[ia.confiance]}>confiance {ia.confiance}</Badge>}
     </>
   )
 }

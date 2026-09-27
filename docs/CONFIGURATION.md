@@ -101,12 +101,46 @@ connexions (`flechesParVoie`, `mouvementsDepuisConnexions`), côté API comme c�
    la voie sortante la plus à gauche, tourne-à-droite vers la plus à droite, tout droit voie
    par voie. Le badge indique si elles viennent d'OSM ou des règles par défaut.
 
+### Proposition OSM + IA
+
+Le bouton **✦ Générer avec OSM + IA** part de la détection OSM et la fait corriger par Claude
+d'après la photo aérienne (`apps/api/src/branches/ia/`) :
+
+1. **Photo** : orthophoto IGN demandée au WMS de la Géoplateforme en Web Mercator, carré de
+   1024 px centré sur le carrefour, de 100 à 180 m de côté selon sa taille (10 à 18 cm/pixel).
+   Nord en haut ; le passage lon/lat ↔ pixel est exact (`photo.ts`).
+2. **Consigne** (`lecture.ts`) : la photo brute (rien n'est dessiné dessus), et en texte, en
+   pixels de l'image : les feux OSM du carrefour, les voies OSM du cadre avec leurs tags utiles
+   (`lanes`, `turn:lanes`, `oneway`, bus, vélo, tram) et la proposition OSM au format attendu en
+   réponse. Claude n'a qu'à la corriger d'après le marquage au sol.
+3. **Claude Code sur le serveur** (`claude.ts`) : `claude -p` avec `--json-schema` (schéma zod
+   `LectureIa`) et `--output-format json`, seul l'outil Read, dans un dossier temporaire, sans
+   MCP, réglages utilisateur ni skills : ~5 k tokens de contexte au lieu de ~60 k.
+4. **Retour** : les pixels sont reconvertis en lon/lat, les connexions vers des voies inconnues
+   ou en double sont écartées (et signalées), puis la proposition est validée par
+   `ConfigurationBranches`, comme un `PUT`. Elle arrive dans l'éditeur comme celle d'OSM, avec
+   pour chaque branche un badge « lu sur la photo », la confiance de l'IA et ses remarques.
+
+Une seule analyse à la fois par carrefour. Variables (`.env`) : `IA_CLAUDE_CMD` (commande,
+`claude` par défaut ; Claude Code doit être installé et connecté sur le serveur), `IA_MODELE`
+(`opus` par défaut), `IA_DELAI_S` (300), `IA_GARDER_FICHIERS=true` pour garder la photo dans
+`/tmp/voirie-ia-*`.
+
+Premier essai, Edgar Faure × Maréchal Foch (chaussées séparées, 8 feux) : 52 s, 0,18 $ avec
+Opus 5.5. 4 branches et 9 connexions, voies posées sur le marquage (3 entrantes sur Edgar Faure
+de part et d'autre de l'îlot, sortie sud à 2 voies), branche nord-est notée « confiance basse »
+car sous les arbres.
+
+**Importer un JSON** charge dans l'éditeur un fichier `{ branches, connexions }` (le corps d'un
+`PUT /branches`), validé par le même schéma.
+
 ### API
 
 | Méthode | Route | Effet |
 |---|---|---|
 | GET | `/api/carrefours/:id/branches` | Centre, branches (voies, passages piétons), connexions, mouvements, flèches, alertes |
 | GET | `/api/carrefours/:id/branches/detection` | Proposition depuis OSM, **non enregistrée** |
+| POST | `/api/carrefours/:id/branches/detection-ia` | Proposition OSM corrigée par l'IA d'après l'orthophoto IGN, **non enregistrée** (`EditionGuard`, 1 à 3 min) |
 | PUT | `/api/carrefours/:id/branches` | `{ branches, connexions }` : remplace tout (`EditionGuard`) |
 
 Validation : codes de branche uniques, rangs consécutifs depuis 0 dans chaque sens, une
@@ -409,3 +443,4 @@ Les flèches sont donc **surtout à saisir à la main** : la détection propose,
 | `config-programme` | Étape 3 : plans et plages horaires, éditeur d'étapes, jaune et rouges de dégagement calculés, diagramme de feux et lecture du cycle sur la carte |
 | `config-graphes` | Étape 4 : graphe des étapes (étapes sur appel, priorité tram, arcs conditionnels) et simulation d'un scénario de demandes |
 | `config-recalage` | Feux posés sur leur mât sur la photo, position OSM conservée |
+| `config-ia` | Proposition « OSM + IA » : orthophoto IGN lue par Claude Code sur le serveur, import d'un JSON de branches |

@@ -43,7 +43,7 @@ function sensDe(branche: Branche): SensBranche {
 }
 
 /** Complète branches et connexions avec ce qui s'en déduit : sens, mouvements, flèches, alertes. */
-function deduire(centre: [number, number], branches: Branche[], connexions: Connexion[]): BranchesCarrefour {
+export function deduire(centre: [number, number], branches: Branche[], connexions: Connexion[]): BranchesCarrefour {
   const avecDepart = new Set(connexions.map((c) => c.de));
   const alertes = branches.flatMap((b) =>
     b.voies
