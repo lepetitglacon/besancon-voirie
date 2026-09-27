@@ -981,6 +981,8 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
                   />
                 ) : (
                   <OngletProgramme
+                    carrefourId={carrefour.id}
+                    modifie={brouillonProgramme !== null}
                     contexte={contexte}
                     plans={plans}
                     onChanger={setBrouillonProgramme}

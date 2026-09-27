@@ -4,6 +4,7 @@ import type { PlanSaisi } from '@voirie/schema'
 import { Aide, Compteur, Message, Segments, Selecteur } from '../ds'
 import { Chronogramme } from './Chronogramme'
 import { Lecture } from './Lecture'
+import { SynchroPlan } from './SynchroPlan'
 import {
   basculerJour,
   basculerLigneEtape,
@@ -22,6 +23,9 @@ const MODES: Record<PlanSaisi['mode'], string> = {
 }
 
 interface Props {
+  carrefourId: string
+  /** Programme modifié depuis le dernier enregistrement. */
+  modifie: boolean
   contexte: ContexteProgramme
   plans: PlanSaisi[]
   onChanger: (plans: PlanSaisi[]) => void
@@ -38,7 +42,8 @@ interface Props {
 const secondes = (s: number) => `${Math.round(s * 10) / 10} s`
 
 /** Étape 3 : plans de feux, programme par étapes, transitions et diagramme de feux. */
-export function OngletProgramme({ contexte, plans, onChanger, planActif, onPlanActif, resultat, instant, onInstant, vitesse, onVitesse }: Props) {
+export function OngletProgramme(props: Props) {
+  const { carrefourId, modifie, contexte, plans, onChanger, planActif, onPlanActif, resultat, instant, onInstant, vitesse, onVitesse } = props
   const plan = plans[planActif]
   const codes = contexte.lignes.map((l) => l.code)
   const enConflit = (a: string, b: string) => contexte.conflits.some(([x, y]) => (x === a && y === b) || (x === b && y === a))
@@ -384,6 +389,15 @@ export function OngletProgramme({ contexte, plans, onChanger, planActif, onPlanA
                 {c.message}
               </Message>
             ))}
+            <SynchroPlan
+              carrefourId={carrefourId}
+              plans={plans}
+              plan={plan}
+              resultat={resultat}
+              modifie={modifie}
+              onInstant={onInstant}
+              onVitesse={onVitesse}
+            />
           </>
         ) : (
           <Aide>Le diagramme de feux s'affiche ici pour un plan à cycle avec des étapes.</Aide>

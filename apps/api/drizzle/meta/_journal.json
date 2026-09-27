@@ -113,6 +113,13 @@
       "when": 1790475746788,
       "tag": "20260927022226_giratoires",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1790502062978,
+      "tag": "20260927094102_top_synchro",
+      "breakpoints": true
     }
   ]
 }

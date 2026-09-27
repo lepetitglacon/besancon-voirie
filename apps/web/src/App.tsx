@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { LonLat } from '@voirie/engine'
 import type { AnalyseIa, Bbox, CarrefourResume, FeuResume, TypeJour } from '@voirie/schema'
-import { Badge, Box, HStack, IconButton, Kbd, Popover, Portal, Stack, Tabs, Text } from '@chakra-ui/react'
+import { Badge, Box, Button, HStack, IconButton, Kbd, Popover, Portal, Stack, Tabs, Text } from '@chakra-ui/react'
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { useMap } from 'react-map-gl/maplibre'
 import { api } from './api'
@@ -33,16 +33,26 @@ import { useAnalysesIa, useNotificationsIa } from './configuration/analysesIa'
 import { PanneauEdition, type Edition } from './edition/PanneauEdition'
 import { CarteCarrefours } from './map/CarteCarrefours'
 import { CouchePertes } from './map/CouchePertes'
+import { CoucheFeuxTempsReel } from './map/CoucheFeuxTempsReel'
 import { CoucheTrams, type CouchesTram } from './map/CoucheTrams'
 import type { OptionsFond } from './map/FondDeCarte'
 import { usePreference } from './preferences'
+import { FicheTempsReel } from './tempsReel/FicheTempsReel'
+import { FIABILITES } from './tempsReel/libelles'
 import { PALIERS_PERTE } from './tram/pertes'
 
 /** Le flux Ginko est mis en cache 10 s par l'API. */
 const RAFRAICHISSEMENT_TRAMS_MS = 15_000
 
-/** « Carte » : la vue grand public. « Données brutes » : toutes les couches, une par une. */
-type Mode = 'carte' | 'brut'
+/** Les tops ajoutés en édition changent les décalages : relus de temps en temps. */
+const RAFRAICHISSEMENT_FEUX_MS = 60_000
+
+/**
+ * « Temps réel » : la vue grand public, feux et trams à l'heure réelle, en lecture seule.
+ * « Édition » : composition et configuration des carrefours. « Données brutes » : toutes les
+ * couches, une par une.
+ */
+type Mode = 'temps_reel' | 'edition' | 'brut'
 
 interface CouchesBrutes extends CouchesTram {
   carrefours: boolean
@@ -75,7 +85,8 @@ function typeJour(date: Date): TypeJour {
 function App() {
   const queryClient = useQueryClient()
   const [bbox, setBbox] = useState<Bbox>()
-  const [mode, setMode] = usePreference<Mode>('mode', 'carte')
+  const [mode, setMode] = usePreference<Mode>('mode-carte', 'temps_reel')
+  const tempsReel = mode === 'temps_reel'
   const [fond, setFond] = usePreference<OptionsFond>('fond', FOND_DEFAUT)
   const [trams, setTrams] = usePreference<boolean>('trams', true)
   const [brut, setBrut] = usePreference<CouchesBrutes>('couches-brutes', COUCHES_BRUTES_DEFAUT)
@@ -89,6 +100,8 @@ function App() {
     ouvrirAnalyseIa?: { id: string }
   }) | null>(null)
   const [panneauBasOuvert, setPanneauBasOuvert] = useState(false)
+  /** Carrefour dont la fiche temps réel est ouverte. */
+  const [ficheTempsReel, setFicheTempsReel] = useState<CarrefourChoisi | null>(null)
   const brouillons = useBrouillons()
   const [affichageConfiguration, setAffichageConfiguration] = useState<AffichageConfiguration>({
     branches: [],
@@ -124,7 +137,7 @@ function App() {
 
 
   const couchesTram: CouchesTram =
-    mode === 'carte' ? { lignes: trams, arrets: trams, zones: trams, rames: trams } : brut
+    mode === 'brut' ? brut : { lignes: trams, arrets: trams, zones: trams, rames: trams }
   const tramAffiche = Object.values(couchesTram).some(Boolean)
   const pertes = mode === 'brut' && brut.pertes
 
@@ -141,6 +154,25 @@ function App() {
     enabled: bbox !== undefined,
     placeholderData: (precedent) => precedent,
   })
+  const feuxTempsReel = useQuery({
+    queryKey: ['feux-temps-reel', bbox],
+    queryFn: () => api.feuxTempsReel(bbox!),
+    enabled: tempsReel && bbox !== undefined,
+    refetchInterval: RAFRAICHISSEMENT_FEUX_MS,
+    placeholderData: (precedent) => precedent,
+  })
+  const carrefourTempsReel = ficheTempsReel
+    ? (feuxTempsReel.data?.carrefours.find((c) => c.id === ficheTempsReel.carrefour.id) ?? null)
+    : null
+
+  /** Le mode Temps réel est en lecture seule : on quitte l'édition en cours (les brouillons restent). */
+  const changerMode = (suivant: Mode) => {
+    setMode(suivant)
+    if (suivant === 'temps_reel') {
+      setEdition(null)
+      setConfiguration(null)
+    } else setFicheTempsReel(null)
+  }
 
   const placerFeu = useCallback(
     async (id: string, position: LonLat | null) => {
@@ -290,7 +322,7 @@ function App() {
 
   // Raccourcis hors configuration (la configuration gère les siens).
   const touche = useEffectEvent((e: KeyboardEvent) => {
-    if (configuration || e.ctrlKey || e.metaKey || e.altKey) return
+    if (tempsReel || configuration || e.ctrlKey || e.metaKey || e.altKey) return
     if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
     const lettre = e.key.toLowerCase()
     if (!edition) return lettre === 'n' && composer()
@@ -303,9 +335,11 @@ function App() {
   }, [])
 
   const entreesMenu: EntreeMenu[] = [
-    ...(configuration
-      ? MENU_CONFIGURATION
-      : [{ valeur: 'composer', glyphe: '⌖', libelle: 'Composer un carrefour', raccourci: 'N' }, { type: 'separateur' as const }]),
+    ...(tempsReel
+      ? []
+      : configuration
+        ? MENU_CONFIGURATION
+        : [{ valeur: 'composer', glyphe: '⌖', libelle: 'Composer un carrefour', raccourci: 'N' }, { type: 'separateur' as const }]),
     { type: 'separateur' },
     { valeur: 'centrer', glyphe: '✥', libelle: 'Centrer la carte ici' },
     { valeur: 'copier', glyphe: '⎘', libelle: 'Copier les coordonnées' },
@@ -327,7 +361,8 @@ function App() {
         <Box position="fixed" inset="0">
           <CarteCarrefours
             carrefours={carrefours.data}
-            afficherCarrefours={mode === 'carte' || brut.carrefours || edition !== null || configuration !== null}
+            afficherCarrefours={mode !== 'brut' || brut.carrefours || edition !== null || configuration !== null}
+            tempsReel={tempsReel}
             fond={fond}
             feux={feux.data}
             edition={
@@ -349,7 +384,7 @@ function App() {
                 modeRectangle: false,
               })
             }
-            onOuvrir={configurer}
+            onOuvrir={tempsReel ? setFicheTempsReel : configurer}
             configuration={
               configuration && {
                 carrefourId: configuration.carrefour.id,
@@ -370,6 +405,7 @@ function App() {
             {pertes && reseauTram.data && historique.data && (
               <CouchePertes reseau={reseauTram.data} historique={historique.data} />
             )}
+            {tempsReel && feuxTempsReel.data && <CoucheFeuxTempsReel tempsReel={feuxTempsReel.data} />}
             {tramAffiche && reseauTram.data && (
               <CoucheTrams reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
             )}
@@ -395,6 +431,41 @@ function App() {
           onSupprimer={() => confirmerSuppression(configuration.carrefour)}
           onFermer={() => setConfiguration(null)}
         />
+      ) : tempsReel ? (
+        <CarteEnTete
+          position="fixed"
+          top="3"
+          left="3"
+          zIndex="2"
+          w="340px"
+          maxW="calc(100vw - 24px)"
+          surtitre={ficheTempsReel ? 'Temps réel' : 'Besançon Voirie'}
+          titre={ficheTempsReel ? ficheTempsReel.carrefour.nom : 'Feux et trams en temps réel'}
+          badges={
+            <>
+              {sante.isError && <Badge colorPalette="red">API injoignable</Badge>}
+              {!ficheTempsReel && feuxTempsReel.data && (
+                <Badge colorPalette="gray">{feuxTempsReel.data.carrefours.length} carrefour(s) programmé(s) dans la vue</Badge>
+              )}
+              {ficheTempsReel && (
+                <Button size="2xs" variant="ghost" ms="auto" onClick={() => setFicheTempsReel(null)}>
+                  Fermer
+                </Button>
+              )}
+            </>
+          }
+        >
+          <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
+            {ficheTempsReel ? (
+              <FicheTempsReel carrefour={carrefourTempsReel} />
+            ) : (
+              <Aide>
+                Les feux des carrefours programmés sont rejoués sur l'heure légale, calés par des tops relevés sur place.
+                Cliquer sur un carrefour pour voir son cycle.
+              </Aide>
+            )}
+          </Box>
+        </CarteEnTete>
       ) : (
         <>
           <CarteEnTete
@@ -473,7 +544,7 @@ function App() {
         </>
       )}
 
-      <CarteSuivi
+      {!tempsReel && <CarteSuivi
         position="fixed"
         right="3"
         bottom={configuration && panneauBasOuvert ? `calc(${hauteurPanneau} + 12px)` : '3'}
@@ -483,7 +554,7 @@ function App() {
         onReprendre={reprendre}
         analyses={analysesIa.data ?? []}
         onOuvrirAnalyse={ouvrirAnalyseIa}
-      />
+      />}
 
       <Popover.Root positioning={{ placement: 'left-start', gutter: 10 }}>
         <Popover.Trigger asChild>
@@ -515,13 +586,31 @@ function App() {
                     </Text>
                     <ModeCouleur />
                   </HStack>
-                  <Tabs.Root value={mode} onValueChange={(e) => setMode(e.value as Mode)}>
+                  <Tabs.Root value={mode} onValueChange={(e) => changerMode(e.value as Mode)}>
                     <Tabs.List>
-                      <Tabs.Trigger value="carte">Carte</Tabs.Trigger>
+                      <Tabs.Trigger value="temps_reel">Temps réel</Tabs.Trigger>
+                      <Tabs.Trigger value="edition">Édition</Tabs.Trigger>
                       <Tabs.Trigger value="brut">Données brutes</Tabs.Trigger>
                     </Tabs.List>
                   </Tabs.Root>
-                  {mode === 'carte' ? (
+                  {tempsReel && (
+                    <Stack gap="1.5">
+                      <Text textStyle="xs" fontWeight="semibold">
+                        Feux
+                      </Text>
+                      <HStack as="ul" rowGap="1" columnGap="2.5" wrap="wrap" listStyleType="none" textStyle="xs">
+                        {Object.values(FIABILITES).map((f) => (
+                          <HStack as="li" key={f.libelle} gap="1" title={f.aide}>
+                            <Badge size="xs" colorPalette={f.couleur}>
+                              {f.libelle}
+                            </Badge>
+                          </HStack>
+                        ))}
+                      </HStack>
+                      <Aide>Cycle calé sur l'heure légale (base de temps à 3 h), d'après les tops relevés au carrefour.</Aide>
+                    </Stack>
+                  )}
+                  {mode !== 'brut' ? (
                     <Stack gap="2.5">
                       <Bascule coche={trams} onChange={setTrams}>
                         Trams en temps réel
