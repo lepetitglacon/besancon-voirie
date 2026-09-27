@@ -63,6 +63,8 @@ type Bulle = { longitude: number; latitude: number; feu: FeuResume }
 interface Props {
   carrefours: CarrefoursGeoJson | undefined
   afficherCarrefours: boolean
+  /** Mode Temps réel : carte en lecture seule, les feux sont dessinés par la couche temps réel. */
+  tempsReel: boolean
   fond: OptionsFond
   /** Couches supplémentaires (trams…). */
   children?: ReactNode
@@ -225,8 +227,8 @@ export function CarteCarrefours(props: Props) {
     const id =
       objet?.layer.id === 'carrefours'
         ? (objet.properties.id as string)
-        : objet?.layer.id === 'feux'
-          ? (objet.properties as FeuResume).carrefour_id
+        : objet?.layer.id === 'feux' || objet?.layer.id === 'feux-temps-reel'
+          ? (objet.properties as Pick<FeuResume, 'carrefour_id'>).carrefour_id
           : null
     const trouve = id ? carrefours?.features.find((f) => f.id === id) : undefined
     return trouve && { carrefour: trouve.properties, position: trouve.geometry.coordinates as [number, number] }
@@ -236,6 +238,10 @@ export function CarteCarrefours(props: Props) {
     const objet = evenement.features?.[0]
     const { lng: longitude, lat: latitude } = evenement.lngLat
     const vise = carrefourVise(objet)
+    if (props.tempsReel) {
+      if (vise) props.onOuvrir(vise)
+      return
+    }
     if (configuration) {
       setBulle(undefined)
       // Un autre carrefour remplace celui qu'on configure (ses brouillons sont conservés),
@@ -265,7 +271,7 @@ export function CarteCarrefours(props: Props) {
       style={{ width: '100%', height: '100%' }}
       hash
       attributionControl={false}
-      interactiveLayerIds={['feux', 'carrefours']}
+      interactiveLayerIds={['feux', 'carrefours', 'feux-temps-reel']}
       cursor={traceActif ? 'crosshair' : survol ? 'pointer' : 'grab'}
       dragPan={!traceActif}
       boxZoom={edition === null}
@@ -313,6 +319,7 @@ export function CarteCarrefours(props: Props) {
             {...(configuration
               ? coucheFeux(configuration.feuxSurlignes, configuration.carrefourId, true)
               : coucheFeux(edition?.selection ?? [], edition?.carrefourId ?? null, edition !== null))}
+            layout={{ visibility: props.tempsReel ? 'none' : 'visible' }}
           />
         </Source>
       )}

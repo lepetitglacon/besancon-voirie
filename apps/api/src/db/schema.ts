@@ -251,6 +251,24 @@ export const planFeux = pgTable(
 );
 
 /**
+ * Top relevé sur place : instant où une ligne de feux passe au vert. Observation brute : le
+ * plan en vigueur et le décalage s'en déduisent à la lecture (docs/ARCHITECTURE.md §6.1).
+ */
+export const topSynchro = pgTable(
+  'top_synchro',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    carrefourId: uuid('carrefour_id')
+      .notNull()
+      .references(() => carrefour.id, { onDelete: 'cascade' }),
+    ligne: text('ligne').notNull(),
+    instant: timestamp('instant', { withTimezone: true }).notNull(),
+    creeLe: creeLe(),
+  },
+  (t) => [index('top_synchro_carrefour_idx').on(t.carrefourId, t.instant)],
+);
+
+/**
  * Passage d'une rame à un arrêt, déduit du flux GTFS-RT Ginko : l'arrêt disparaît de la liste
  * des arrêts restants de la course. Voir docs/ARCHITECTURE.md §8.2.
  */
