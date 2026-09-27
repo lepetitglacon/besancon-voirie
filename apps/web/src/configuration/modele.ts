@@ -2,8 +2,19 @@
  * Brouillon de configuration d'un carrefour (branches, voies, passages piétons, connexions)
  * et opérations d'édition, sans effet de bord.
  */
-import { cleVoie, genererVoies, voieAdjacente, type LonLat, type Segment } from '@voirie/engine'
-import type { Branche, Connexion, SensVoie, TypeVoie } from '@voirie/schema'
+import {
+  cleVoie,
+  codeCardinal,
+  genererVoies,
+  lireCleVoie,
+  normaliserAngle,
+  repereLocal,
+  voieAdjacente,
+  type LonLat,
+  type Segment,
+  type XY,
+} from '@voirie/engine'
+import type { Branche, Connexion, SensVoie, TypeVoie, Voie } from '@voirie/schema'
 
 export interface Brouillon {
   branches: Branche[]
@@ -46,6 +57,150 @@ export function retirerVoie(brouillon: Brouillon, code: string, sens: SensVoie):
   if (!derniere) return brouillon
   const suivant = surBranche(brouillon, code, (b) => ({ ...b, voies: b.voies.filter((v) => v !== derniere) }))
   return { ...suivant, connexions: sansVoie(suivant.connexions, cleVoie(code, sens, derniere.rang)) }
+}
+
+// ── Voies tracées à la main ──
+
+/** Écart d'azimut (°) au-delà duquel une voie tracée ouvre une nouvelle branche. */
+export const ECART_BRANCHE_MAX = 30
+/** Longueur minimale (m) d'une voie tracée : en dessous, le geste est un simple clic. */
+export const LONGUEUR_TRACE_MIN_M = 3
+/** Rang maximal d'une voie (la clé n'a qu'un chiffre). */
+const RANG_MAX = 9
+
+const RAD = Math.PI / 180
+
+/** Azimut (°) d'un segment, de son premier point vers le second. */
+export function azimutSegment([a, b]: Segment): number {
+  const [x, y] = repereLocal(a).versXY(b)
+  return (Math.atan2(x, y) / RAD + 360) % 360
+}
+
+const ecartAzimut = (a: number, b: number) => Math.abs(normaliserAngle(a - b))
+
+/**
+ * Position latérale d'une voie vue par son conducteur : plus elle est grande, plus la voie est
+ * à gauche. Rang 0 = la plus à gauche, donc les rangs suivent cette valeur décroissante.
+ */
+function aGauche(centre: LonLat, azimut: number, sens: SensVoie, geom: Segment): number {
+  const repere = repereLocal(centre)
+  const [ax, ay] = repere.versXY(geom[0])
+  const [bx, by] = repere.versXY(geom[1])
+  const u: XY = [Math.sin(azimut * RAD), Math.cos(azimut * RAD)]
+  // L'entrante roule vers le centre (−u), la sortante s'en éloigne (u) ; gauche = rotation de +90°.
+  const t: XY = sens === 'entrante' ? [-u[0], -u[1]] : u
+  const gauche: XY = [-t[1], t[0]]
+  return ((ax + bx) / 2) * gauche[0] + ((ay + by) / 2) * gauche[1]
+}
+
+/** Sens déduit de la position : vues du centre vers la branche, entrantes à gauche de l'axe. */
+function sensDeduit(centre: LonLat, azimut: number, geom: Segment): SensVoie {
+  return aGauche(centre, azimut, 'sortante', geom) > 0 ? 'entrante' : 'sortante'
+}
+
+/** Renomme des clés de voie dans les connexions (les clés absentes de `renommage` ne bougent pas). */
+function renommerConnexions(connexions: Connexion[], renommage: Map<string, string>): Connexion[] {
+  const cle = (c: string) => renommage.get(c) ?? c
+  return connexions.map((c) => ({ de: cle(c.de), vers: cle(c.vers) }))
+}
+
+/**
+ * Insère une voie dans une branche, au rang que donne sa position, sans déplacer les voies déjà
+ * calées : les voies du même sens plus à droite prennent le rang suivant, connexions comprises.
+ * Null si la branche est pleine.
+ */
+function insererVoie(
+  brouillon: Brouillon,
+  code: string,
+  voie: Omit<Voie, 'rang'>,
+  centre: LonLat,
+): { brouillon: Brouillon; cle: string } | null {
+  const branche = brouillon.branches.find((b) => b.code === code)
+  if (!branche) return null
+  const memeSens = voiesDe(branche, voie.sens)
+  if (memeSens.length > RANG_MAX || branche.voies.length >= 16) return null
+  const position = aGauche(centre, branche.azimut, voie.sens, voie.geom)
+  const rang = memeSens.filter((v) => aGauche(centre, branche.azimut, voie.sens, v.geom) > position).length
+  const renommage = new Map(
+    memeSens.filter((v) => v.rang >= rang).map((v) => [cleVoie(code, voie.sens, v.rang), cleVoie(code, voie.sens, v.rang + 1)]),
+  )
+  const suivant = surBranche(brouillon, code, (b) => ({
+    ...b,
+    voies: [...b.voies.map((v) => (v.sens === voie.sens && v.rang >= rang ? { ...v, rang: v.rang + 1 } : v)), { ...voie, rang }],
+  }))
+  return { brouillon: { ...suivant, connexions: renommerConnexions(suivant.connexions, renommage) }, cle: cleVoie(code, voie.sens, rang) }
+}
+
+/** Retire une voie quelconque et ses connexions ; les voies suivantes du même sens remontent d'un rang. */
+export function supprimerVoie(brouillon: Brouillon, cle: string): Brouillon {
+  const lue = lireCleVoie(cle)
+  const branche = lue && brouillon.branches.find((b) => b.code === lue.branche)
+  if (!lue || !branche) return brouillon
+  const renommage = new Map(
+    voiesDe(branche, lue.sens)
+      .filter((v) => v.rang > lue.rang)
+      .map((v) => [cleVoie(branche.code, lue.sens, v.rang), cleVoie(branche.code, lue.sens, v.rang - 1)]),
+  )
+  const suivant = surBranche(brouillon, branche.code, (b) => ({
+    ...b,
+    voies: b.voies
+      .filter((v) => !(v.sens === lue.sens && v.rang === lue.rang))
+      .map((v) => (v.sens === lue.sens && v.rang > lue.rang ? { ...v, rang: v.rang - 1 } : v)),
+  }))
+  return { ...suivant, connexions: renommerConnexions(sansVoie(suivant.connexions, cle), renommage) }
+}
+
+/** Code libre pour une nouvelle branche : point cardinal de l'azimut, suffixé s'il est pris (N, N2…). */
+function codeLibre(branches: Branche[], azimut: number): string {
+  const base = codeCardinal(azimut)
+  const pris = new Set(branches.map((b) => b.code))
+  for (let n = 1; ; n++) {
+    const code = n === 1 ? base : `${base}${n}`
+    if (!pris.has(code)) return code
+  }
+}
+
+/** Branche sans voie, ajoutée à la main dans la direction donnée. */
+export function ajouterBranche(brouillon: Brouillon, azimut: number): { brouillon: Brouillon; code: string } {
+  const code = codeLibre(brouillon.branches, azimut)
+  const branche: Branche = { code, nom: null, azimut: Math.round(azimut * 10) / 10, osm_way_id: null, geom: null, voies: [], traversee: null }
+  return { brouillon: { ...brouillon, branches: [...brouillon.branches, branche] }, code }
+}
+
+/**
+ * Voie tracée à la main sur la photo, du bout côté carrefour vers le bout éloigné. Elle rejoint
+ * la branche dont l'azimut est le plus proche (à 30° près), ou en ouvre une nouvelle ; son sens
+ * se déduit de son côté de l'axe (entrante pour une nouvelle branche) et son rang de sa position.
+ * Null si le trait est trop court ou la branche pleine.
+ */
+export function tracerVoie(brouillon: Brouillon, geom: Segment, centre: LonLat): { brouillon: Brouillon; cle: string } | null {
+  const [x, y] = repereLocal(geom[0]).versXY(geom[1])
+  if (Math.hypot(x, y) < LONGUEUR_TRACE_MIN_M) return null
+  // L'azimut d'une branche se mesure depuis le centre : on vise le bout éloigné de la voie.
+  const azimut = azimutSegment([centre, geom[1]])
+  const proche = brouillon.branches
+    .map((b) => ({ b, ecart: ecartAzimut(b.azimut, azimut) }))
+    .filter(({ ecart }) => ecart <= ECART_BRANCHE_MAX)
+    .sort((p, q) => p.ecart - q.ecart)[0]?.b
+  if (proche) {
+    return insererVoie(brouillon, proche.code, { sens: sensDeduit(centre, proche.azimut, geom), type: 'generale', geom }, centre)
+  }
+  const nouvelle = ajouterBranche(brouillon, azimut)
+  return insererVoie(nouvelle.brouillon, nouvelle.code, { sens: 'entrante', type: 'generale', geom }, centre)
+}
+
+/** Déplace une voie vers un autre sens ou une autre branche ; ses connexions sont retirées. */
+export function deplacerVoie(
+  brouillon: Brouillon,
+  cle: string,
+  cible: { branche: string; sens: SensVoie },
+  centre: LonLat,
+): { brouillon: Brouillon; cle: string } | null {
+  const lue = lireCleVoie(cle)
+  const voie = lue && brouillon.branches.find((b) => b.code === lue.branche)?.voies.find((v) => v.sens === lue.sens && v.rang === lue.rang)
+  if (!lue || !voie) return null
+  if (lue.branche === cible.branche && lue.sens === cible.sens) return { brouillon, cle }
+  return insererVoie(supprimerVoie(brouillon, cle), cible.branche, { sens: cible.sens, type: voie.type, geom: voie.geom }, centre)
 }
 
 export function changerTypeVoie(brouillon: Brouillon, code: string, sens: SensVoie, rang: number, type: TypeVoie): Brouillon {

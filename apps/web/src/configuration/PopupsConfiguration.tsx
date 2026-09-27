@@ -11,7 +11,15 @@ import {
   mouvementsDepuisConnexions,
   type LonLat,
 } from '@voirie/engine'
-import { typeLigne, type BranchesCarrefour, type ConfianceIa, type FeuResume, type SourceBranche, type TypeVoie } from '@voirie/schema'
+import {
+  typeLigne,
+  type BranchesCarrefour,
+  type ConfianceIa,
+  type FeuResume,
+  type SensVoie,
+  type SourceBranche,
+  type TypeVoie,
+} from '@voirie/schema'
 import {
   Aide,
   BarreOutils,
@@ -34,10 +42,12 @@ import {
   basculerTraversee,
   changerTypeVoie,
   couleursVoies,
+  deplacerVoie,
   regenererVoies,
   renommerBranche,
   retirerVoie,
   supprimerBranche,
+  supprimerVoie,
   voiesDe,
   type Brouillon,
 } from './modele'
@@ -62,16 +72,24 @@ const nomBranche = (brouillon: Brouillon, code: string) => brouillon.branches.fi
 
 // ── Voie ──
 
+const SENS: Array<{ valeur: SensVoie; libelle: string }> = [
+  { valeur: 'entrante', libelle: 'Entrante' },
+  { valeur: 'sortante', libelle: 'Sortante' },
+]
+
 interface PropsVoie {
   cle: string
   brouillon: Brouillon
+  centre: LonLat
   onChanger: (brouillon: Brouillon) => void
+  /** La voie a changé de clé (autre sens, autre branche, rang recalculé). */
+  onCle: (cle: string) => void
   onOutil: (outil: OutilCarte) => void
   onBranche: (code: string) => void
   onFermer: () => void
 }
 
-export function PopupVoie({ cle, brouillon, onChanger, onOutil, onBranche, onFermer }: PropsVoie) {
+export function PopupVoie({ cle, brouillon, centre, onChanger, onCle, onOutil, onBranche, onFermer }: PropsVoie) {
   const lue = lireCleVoie(cle)
   const branche = lue && brouillon.branches.find((b) => b.code === lue.branche)
   const voie = branche?.voies.find((v) => v.sens === lue!.sens && v.rang === lue!.rang)
@@ -79,6 +97,12 @@ export function PopupVoie({ cle, brouillon, onChanger, onOutil, onBranche, onFer
   const entrante = voie.sens === 'entrante'
   const directions = entrante ? (flechesParVoie(brouillon.branches, brouillon.connexions)[cle] ?? []) : []
   const liaisons = brouillon.connexions.filter((c) => c.de === cle || c.vers === cle)
+  const deplacer = (cible: { branche: string; sens: SensVoie }) => {
+    const resultat = deplacerVoie(brouillon, cle, cible, centre)
+    if (!resultat) return
+    onChanger(resultat.brouillon)
+    onCle(resultat.cle)
+  }
 
   return (
     <PopupCarte
@@ -88,8 +112,16 @@ export function PopupVoie({ cle, brouillon, onChanger, onOutil, onBranche, onFer
       onFermer={onFermer}
       pied={
         <>
-          <Button variant="lien" size="xs" onClick={() => onBranche(branche.code)}>
-            Branche {branche.code}
+          <Button
+            variant="plain"
+            colorPalette="red"
+            px="2"
+            onClick={() => {
+              onChanger(supprimerVoie(brouillon, cle))
+              onFermer()
+            }}
+          >
+            Supprimer
           </Button>
           <BarreOutils.Espace />
           <Button onClick={() => onOutil('ajuster')}>Caler (L)</Button>
@@ -101,6 +133,32 @@ export function PopupVoie({ cle, brouillon, onChanger, onOutil, onBranche, onFer
         </>
       }
     >
+      <Section libelle="Sens et branche">
+        <HStack gap="2">
+          <Segments
+            flex="1"
+            fitted
+            aria-label="Sens de la voie"
+            valeur={voie.sens}
+            onChange={(sens) => deplacer({ branche: branche.code, sens })}
+            options={SENS}
+          />
+          <Selecteur aria-label="Branche de la voie" valeur={branche.code} onChange={(code) => deplacer({ branche: code, sens: voie.sens })}>
+            {brouillon.branches.map((b) => (
+              <option key={b.code} value={b.code}>
+                {b.code}
+                {b.nom ? ` · ${b.nom}` : ''}
+              </option>
+            ))}
+          </Selecteur>
+        </HStack>
+        <Aide>
+          Changer de sens ou de branche retire les liaisons de la voie.{' '}
+          <Button variant="lien" size="xs" onClick={() => onBranche(branche.code)}>
+            Branche {branche.code}
+          </Button>
+        </Aide>
+      </Section>
       <Section libelle="Usage">
         <Segments
           fitted

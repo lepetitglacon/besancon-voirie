@@ -164,6 +164,40 @@ body {
   stroke-width: 3;
 }
 
+/* Outil « tracer » : toute la surface capte le geste, le déplacement de la carte se fait à la molette. */
+.calque-zone-trace {
+  fill: transparent;
+  pointer-events: all;
+  cursor: crosshair;
+}
+
+.calque-trace-voie {
+  pointer-events: none;
+  filter: drop-shadow(0 0 1.5px #1d2330);
+}
+
+.calque-trace-voie .bande {
+  fill: none;
+  stroke: #ffffff;
+  opacity: 0.6;
+  stroke-dasharray: 6 4;
+}
+
+.calque-trace-voie .arret {
+  fill: var(--chakra-colors-brand-solid);
+  stroke: #ffffff;
+  stroke-width: 2;
+}
+
+.calque-trace-voie .longueur {
+  fill: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: #1d2330;
+  stroke-width: 3px;
+}
+
 .calque-ecart-osm {
   filter: drop-shadow(0 0 1.5px #1d2330);
 }

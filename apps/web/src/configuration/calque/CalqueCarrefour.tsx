@@ -6,12 +6,12 @@
  * les clics vers la carte (pointer-events: none). La molette et l'appui de la souris, eux, sont
  * relayés au canvas : la carte zoome et se déplace aussi depuis une voie ou une liaison.
  */
-import { cleVoie, flechesParVoie, repereLocal, type LonLat, type XY } from '@voirie/engine'
+import { cleVoie, flechesParVoie, repereLocal, type LonLat, type Segment, type XY } from '@voirie/engine'
 import type { Branche, Connexion, EmpriseIa, TypeFeu } from '@voirie/schema'
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
 import { useMap } from 'react-map-gl/maplibre'
 import { FLECHES } from '../libelles'
-import { couleursVoies, deplacerPoignee, voiesDe, type Poignee as PoigneeModele } from '../modele'
+import { couleursVoies, deplacerPoignee, LONGUEUR_TRACE_MIN_M, voiesDe, type Poignee as PoigneeModele } from '../modele'
 import {
   CadrePhoto,
   Courbe,
@@ -20,6 +20,7 @@ import {
   Etiquette,
   PassagePieton,
   Poignee,
+  TraceVoie,
   Voie,
   type EtatCourbe,
   type EtatFeu,
@@ -30,9 +31,10 @@ import { useProjection } from './projection'
 
 /**
  * Outil actif sur le calque : « selection » ouvre la popup de l'élément cliqué, « pieton » ajoute
- * ou retire le passage piéton de la branche cliquée ; les autres déplacent des poignées.
+ * ou retire le passage piéton de la branche cliquée, « tracer » dessine une nouvelle voie ; les
+ * autres déplacent des poignées.
  */
-export type ModeEdition = 'selection' | 'ajuster' | 'connecter' | 'feux' | 'pieton'
+export type ModeEdition = 'selection' | 'ajuster' | 'connecter' | 'feux' | 'pieton' | 'tracer'
 
 /** Élément du calque cliqué, avec la position du clic (pour y ancrer une popup). */
 export type ClicCalque =
@@ -75,6 +77,8 @@ interface Props {
   onApercuFeu: (apercu: ApercuFeu | null) => void
   /** Clic sur une voie, une connexion ou le code d'une branche (outils « selection » et « pieton »). */
   onClic?: (clic: ClicCalque) => void
+  /** Voie tracée en mode « tracer » : [bout côté carrefour, bout éloigné]. */
+  onTracer?: (geom: Segment) => void
   /** Élément sélectionné, mis en avant (clé de voie, « de>vers » ou code de branche). */
   selection?: string | null
   /** Cadre de la photo envoyée à l'IA, montré avant de lancer l'analyse. */
@@ -96,6 +100,8 @@ type Survol = { type: 'voie'; cle: string } | { type: 'connexion'; cle: string }
 type Glisse =
   | { type: 'poignee'; poignee: PoigneeModele; position: LonLat }
   | { type: 'connexion'; de: string; position: LonLat; cible: string | null }
+  /** Nouvelle voie, du bout côté carrefour (appui) au bout éloigné (pointeur). */
+  | { type: 'trace'; depart: LonLat; position: LonLat }
   /** `enregistrement` : lâché, en attente de l'API (le feu reste affiché à sa nouvelle place). */
   | { type: 'feu'; id: string; depart: LonLat; position: LonLat; enregistrement: boolean }
 
@@ -119,6 +125,7 @@ export function CalqueCarrefour(props: Props) {
     onPlacerFeu,
     onApercuFeu,
     onClic,
+    onTracer,
     selection,
     cadrePhoto,
   } = props
@@ -149,7 +156,7 @@ export function CalqueCarrefour(props: Props) {
     }
     let appui: XY | null = null
     const relayerAppui = (e: globalThis.MouseEvent) => {
-      if (e.button !== 0 || (e.target as Element).closest('.calque-poignee')) return
+      if (e.button !== 0 || (e.target as Element).closest('.calque-poignee, .calque-zone-trace')) return
       appui = [e.clientX, e.clientY]
       canvas.dispatchEvent(new globalThis.MouseEvent('mousedown', e))
     }
@@ -276,6 +283,10 @@ export function CalqueCarrefour(props: Props) {
       return
     }
     if (glisse?.type === 'poignee') onDeplacer(glisse.poignee, glisse.position)
+    // Un trait trop court est un simple clic : rien n'est tracé.
+    if (glisse?.type === 'trace' && Math.hypot(...repereLocal(glisse.depart).versXY(glisse.position)) >= LONGUEUR_TRACE_MIN_M) {
+      onTracer?.([glisse.depart, glisse.position])
+    }
     if (glisse?.type === 'connexion' && glisse.cible) onConnecter(glisse.de, glisse.cible)
     setGlisse(null)
   }
@@ -470,6 +481,32 @@ export function CalqueCarrefour(props: Props) {
       {poignees.map(({ cle, gestes: g, ...poignee }) => (
         <Poignee key={cle} {...poignee} {...g} />
       ))}
+
+      {mode === 'tracer' && (
+        <rect
+          className="calque-zone-trace"
+          width="100%"
+          height="100%"
+          onPointerDown={(e) => {
+            if (e.button !== 0) return
+            e.currentTarget.setPointerCapture(e.pointerId)
+            const position = positionPointeur(e)
+            setGlisse({ type: 'trace', depart: position, position })
+          }}
+          onPointerMove={suivre}
+          onPointerUp={terminer}
+          onPointerCancel={() => setGlisse(null)}
+        >
+          <title>Glisser de la ligne d’arrêt vers l’amont pour tracer une voie</title>
+        </rect>
+      )}
+      {glisse?.type === 'trace' && (
+        <TraceVoie
+          segment={[px(glisse.depart), px(glisse.position)]}
+          largeur={largeurVoie}
+          longueur_m={Math.hypot(...repereLocal(glisse.depart).versXY(glisse.position))}
+        />
+      )}
 
       {feuxAffiches.map(
         (feu) =>

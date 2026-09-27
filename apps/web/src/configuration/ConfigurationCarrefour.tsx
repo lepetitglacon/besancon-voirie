@@ -35,7 +35,7 @@ import { demanderNotificationsSysteme, enFile, useAnalysesIa } from './analysesI
 import { Chrono } from './FileIa'
 import type { ClicCalque, ModeEdition } from './calque/CalqueCarrefour'
 import type { EtatFeu } from './calque/elements'
-import { basculerConnexion, basculerTraversee, deplacerPoignee, voiesDe, type Brouillon, type Poignee } from './modele'
+import { basculerConnexion, basculerTraversee, deplacerPoignee, tracerVoie, voiesDe, type Brouillon, type Poignee } from './modele'
 import { OngletGraphe, type Scenario } from './OngletGraphe'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
 import { OngletProgramme } from './OngletProgramme'
@@ -92,6 +92,10 @@ const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>>
   connecter: { titre: 'Relier les voies', aides: ['Glisser d’une voie entrante vers une voie sortante', 'Clic sur une liaison : la retirer'] },
   feux: { titre: 'Poser les feux', aides: ['Glisser chaque feu jusqu’à son mât', 'Clic sur le point creux : position OSM'] },
   pieton: { titre: 'Passages piétons', aides: ['Clic sur une voie ou un code de branche : ajouter ou retirer son passage'] },
+  tracer: {
+    titre: 'Tracer une voie',
+    aides: ['Glisser de la ligne d’arrêt vers l’amont', 'Elle rejoint la branche la plus proche, ou en ouvre une', 'Molette : zoomer'],
+  },
 }
 
 /** Hauteur du panneau bas « Plan de feux », en % de la fenêtre. */
@@ -126,6 +130,7 @@ export interface ConfigurationCarrefourHandle {
   clicCarte: (cible: 'centre' | 'vide', position: LonLat) => void
   deplacerPoignee: (poignee: Poignee, position: LonLat) => void
   connecter: (de: string, vers: string) => void
+  tracerVoie: (geom: [LonLat, LonLat]) => void
   dessinerZoneIa: (emprise: EmpriseIa) => void
   executer: (action: ActionConfiguration) => void
 }
@@ -155,6 +160,7 @@ const focusLibre = () => {
 
 export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onFermer }: Props) {
   const queryClient = useQueryClient()
+  const { carte } = useMap()
   const [outil, setOutil] = useState<OutilCarte>('selection')
   const [popup, setPopup] = useState<Popup | null>(null)
   const [panneauOuvert, setPanneauOuvert] = useState(false)
@@ -544,6 +550,16 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
   useImperativeHandle(ref, () => ({
     deplacerPoignee: (poignee, position) => setBrouillonBranches(deplacerPoignee(configuration, poignee, position)),
     connecter: (de, vers) => setBrouillonBranches(basculerConnexion(configuration, de, vers)),
+    tracerVoie: (geom) => {
+      const trace = tracerVoie(configuration, geom, centre)
+      if (!trace) {
+        return notifications.create({ type: 'error', title: 'Voie non ajoutée', description: 'La branche a déjà toutes ses voies (10 par sens au plus).' })
+      }
+      setBrouillonBranches(trace.brouillon)
+      setPopup({ type: 'voie', cle: trace.cle, position: geom[0] })
+      // La popup s'ouvre au-dessus de la voie : on la ramène sous le milieu de l'écran pour qu'elle tienne.
+      carte?.panTo(geom[0], { offset: [0, 160], duration: 300 })
+    },
     dessinerZoneIa: (emprise) => {
       if (!cadrage) return
       demandeIa.reset()
@@ -574,7 +590,6 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
 
   // Le panneau bas occupe le bas de l'écran : la carte recentre le carrefour dans ce qui reste.
   // Seulement si le décalage change : un easeTo au montage interromprait le vol vers le carrefour.
-  const { carte } = useMap()
   useEffect(() => {
     const bas = panneauOuvert ? (window.innerHeight * HAUTEUR_PANNEAU_VH) / 100 : 0
     if (!carte || (carte.getPadding().bottom ?? 0) === bas) return
@@ -594,7 +609,9 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
       <PopupVoie
         cle={popup.cle}
         brouillon={configuration}
+        centre={centre}
         onChanger={setBrouillonBranches}
+        onCle={(cle) => setPopup({ ...popup, cle })}
         onOutil={choisirOutil}
         onBranche={(code) => setPopup({ type: 'branche', code, position: popup.position })}
         onFermer={fermerPopup}
@@ -711,7 +728,7 @@ export function ConfigurationCarrefour({ ref, carrefour, ciblePopup, onAffichage
         </IconButton>
         {branchesEnregistrees.isSuccess && branches.length === 0 && (
           <Indice mt="2">
-            Aucune branche : <Kbd>O</Kbd> pour les détecter depuis OSM
+            Aucune branche : <Kbd>O</Kbd> pour les détecter depuis OSM, <Kbd>T</Kbd> pour tracer les voies
           </Indice>
         )}
         {cadrage && (

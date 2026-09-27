@@ -1,4 +1,4 @@
-import { genererVoies, type LonLat } from '@voirie/engine'
+import { genererVoies, repereLocal, type LonLat, type Segment } from '@voirie/engine'
 import type { Branche } from '@voirie/schema'
 import { describe, expect, it } from 'vitest'
 import {
@@ -6,9 +6,12 @@ import {
   basculerConnexion,
   basculerTraversee,
   deplacerPoignee,
+  deplacerVoie,
   renommerBranche,
   retirerVoie,
   supprimerBranche,
+  supprimerVoie,
+  tracerVoie,
   voiesDe,
   type Brouillon,
 } from './modele'
@@ -88,5 +91,54 @@ describe('opérations du brouillon', () => {
     const sans = basculerTraversee(depart, 'S', centre)
     expect(sans.branches[0]!.traversee).toBeNull()
     expect(basculerTraversee(sans, 'S', centre).branches[0]!.traversee).toHaveLength(2)
+  })
+})
+
+describe('voies tracées à la main', () => {
+  const { versLonLat } = repereLocal(centre)
+  /** Segment en mètres autour du centre : x vers l'est, y vers le nord. */
+  const trait = (a: [number, number], b: [number, number]): Segment => [versLonLat(a), versLonLat(b)]
+
+  it('rejoint la branche la plus proche, au rang que donne sa position', () => {
+    // Branche S (azimut 180) : l'entrante e0 est à 1,6 m à l'est de l'axe ; la nouvelle, entre l'axe
+    // et e0, est la plus à gauche du conducteur qui remonte vers le nord.
+    const resultat = tracerVoie(depart, trait([0.4, -15], [0.4, -40]), centre)!
+    expect(resultat.cle).toBe('S:e0')
+    expect(voiesDe(resultat.brouillon.branches[0]!, 'entrante')).toHaveLength(2)
+    expect(resultat.brouillon.connexions).toEqual([
+      { de: 'S:e1', vers: 'N:s0' },
+      { de: 'N:e0', vers: 'S:s0' },
+    ])
+  })
+
+  it('déduit le sens de son côté de l’axe', () => {
+    expect(tracerVoie(depart, trait([-5, -15], [-5, -40]), centre)!.cle).toBe('S:s1')
+    expect(tracerVoie(depart, trait([5, -15], [5, -40]), centre)!.cle).toBe('S:e1')
+  })
+
+  it('ouvre une nouvelle branche loin des autres', () => {
+    const resultat = tracerVoie(depart, trait([15, 1], [40, 1]), centre)!
+    expect(resultat.cle).toBe('E:e0')
+    expect(resultat.brouillon.branches.at(-1)).toMatchObject({ code: 'E', nom: null, traversee: null })
+    expect(resultat.brouillon.branches.at(-1)!.azimut).toBeCloseTo(88.6, 0)
+  })
+
+  it('ignore un trait trop court', () => {
+    expect(tracerVoie(depart, trait([0, -15], [0, -16]), centre)).toBeNull()
+  })
+
+  it('supprime une voie quelconque et fait remonter les suivantes', () => {
+    const avec = tracerVoie(depart, trait([0.4, -15], [0.4, -40]), centre)!.brouillon
+    const sans = supprimerVoie(avec, 'S:e0')
+    expect(voiesDe(sans.branches[0]!, 'entrante').map((v) => v.rang)).toEqual([0])
+    expect(sans.connexions).toEqual(depart.connexions)
+  })
+
+  it('change une voie de sens en retirant ses connexions', () => {
+    const resultat = deplacerVoie(depart, 'S:e0', { branche: 'S', sens: 'sortante' }, centre)!
+    expect(resultat.cle).toBe('S:s0')
+    expect(voiesDe(resultat.brouillon.branches[0]!, 'entrante')).toEqual([])
+    expect(voiesDe(resultat.brouillon.branches[0]!, 'sortante').map((v) => v.rang)).toEqual([0, 1])
+    expect(resultat.brouillon.connexions).toEqual([{ de: 'N:e0', vers: 'S:s1' }])
   })
 })

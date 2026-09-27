@@ -106,6 +106,10 @@ function App() {
     (de, vers) => panneauConfiguration.current?.connecter(de, vers),
     [],
   )
+  const tracerVoie = useCallback<ConfigurationCarrefourHandle['tracerVoie']>(
+    (geom) => panneauConfiguration.current?.tracerVoie(geom),
+    [],
+  )
   const dessinerZoneIa = useCallback<ConfigurationCarrefourHandle['dessinerZoneIa']>(
     (emprise) => panneauConfiguration.current?.dessinerZoneIa(emprise),
     [],
@@ -326,6 +330,7 @@ function App() {
             onMenuContextuel={setPointMenu}
             onDeplacerPoignee={deplacerPoignee}
             onConnecter={connecter}
+            onTracerVoie={tracerVoie}
             onDessinerZoneIa={dessinerZoneIa}
             onPlacerFeu={placerFeu}
             onSupprimer={(carrefour) => {

@@ -197,6 +197,14 @@ Sur la **photo aérienne** (fond de carte « Satellite »), l'éditeur dessine :
 - **⤳ Connecter** : glisser du point coloré d'une voie entrante vers le point blanc d'une voie
   sortante. Pendant le geste, les voies sortantes s'allument et la plus proche est accrochée
   (élastique vert). Refaire le même geste, ou cliquer sur une courbe, retire la connexion.
+- **＋ Tracer** (<kbd>T</kbd>) : pour une voie absente d'OSM et de la proposition IA, glisser
+  sur la photo de sa ligne d'arrêt vers l'amont. La voie rejoint la branche dont l'azimut est le
+  plus proche (à 30° près), sinon elle ouvre une nouvelle branche (code cardinal, N2 si N est
+  pris). Son sens se déduit de son côté de l'axe (entrante pour une nouvelle branche) et son
+  rang de sa position parmi les voies du même sens : les voies plus à droite prennent le rang
+  suivant, connexions comprises. Sa popup s'ouvre aussitôt : sens, branche, usage, puis
+  « Relier » pour ses départs et arrivées. Changer de sens ou de branche retire ses liaisons ;
+  « Supprimer » retire n'importe quelle voie (les suivantes remontent d'un rang).
 - Survoler une voie met en avant ses connexions. Pendant un ajustement, les voies et courbes
   suivent le pointeur en direct.
 - Dans l'onglet des lignes, les connexions de la ligne active sont mises en avant.

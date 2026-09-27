@@ -111,6 +111,20 @@ export function Elastique({ depart, arrivee, valide }: { depart: XY; arrivee: XY
   return <path className={classes('calque-elastique', valide && 'valide')} d={d([depart, arrivee])} />
 }
 
+/** Voie en cours de tracé : bande pointillée, ligne d'arrêt au point de départ, longueur. */
+export function TraceVoie({ segment, largeur, longueur_m }: { segment: [XY, XY]; largeur: number; longueur_m: number }) {
+  const [[x0, y0], [x1, y1]] = segment
+  return (
+    <g className="calque-trace-voie">
+      <path className="bande" d={d(segment)} strokeWidth={largeur} />
+      <circle className="arret" cx={x0} cy={y0} r={5} />
+      <text className="longueur" x={x1 + 10} y={y1} dominantBaseline="middle">
+        {Math.round(longueur_m)} m
+      </text>
+    </g>
+  )
+}
+
 export type EtatPoignee = 'normale' | 'survolee' | 'active' | 'cible-possible' | 'cible' | 'inactive'
 
 interface PropsPoignee {
