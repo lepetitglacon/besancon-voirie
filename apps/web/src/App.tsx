@@ -1,18 +1,34 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { LonLat } from '@voirie/engine'
 import type { AnalyseIa, Bbox, CarrefourResume, FeuResume, TypeJour } from '@voirie/schema'
-import { Badge, Button, Heading, HStack, Stack, Tabs, Text } from '@chakra-ui/react'
-import { useCallback, useRef, useState } from 'react'
+import { Badge, Box, HStack, IconButton, Kbd, Popover, Portal, Stack, Tabs, Text } from '@chakra-ui/react'
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
+import { useMap } from 'react-map-gl/maplibre'
 import { api } from './api'
+import { MENU_CONFIGURATION, type ActionConfiguration } from './configuration/actions'
 import {
-  PanneauConfiguration,
+  ConfigurationCarrefour,
   type AffichageConfiguration,
-  type PanneauConfigurationHandle,
-} from './configuration/PanneauConfiguration'
+  type ConfigurationCarrefourHandle,
+} from './configuration/ConfigurationCarrefour'
+import {
+  Aide,
+  BandeauMode,
+  BarreOutils,
+  Bascule,
+  CarteEnTete,
+  MenuContextuel,
+  Message,
+  ModeCouleur,
+  Pastille,
+  Section,
+  Segments,
+  Selecteur,
+  type EntreeMenu,
+} from './ds'
 import { useAnalysesIa, useNotificationsIa } from './configuration/analysesIa'
 import { FileIa } from './configuration/FileIa'
 import { PanneauEdition, type Edition } from './edition/PanneauEdition'
-import { Aide, Bascule, Message, ModeCouleur, Pastille, Section, Segments, Selecteur } from './ds'
 import { CarteCarrefours } from './map/CarteCarrefours'
 import { CouchePertes } from './map/CouchePertes'
 import { CoucheTrams, type CouchesTram } from './map/CoucheTrams'
@@ -63,7 +79,7 @@ function App() {
   const [configuration, setConfiguration] = useState<{
     carrefour: CarrefourResume
     position: [number, number]
-    /** Proposition IA à charger à l'ouverture (bouton « Ouvrir » d'une notification). */
+    /** Proposition IA à charger à l'ouverture (« Ouvrir » d'une notification). */
     ouvrirAnalyseIa?: { id: string }
   } | null>(null)
   const [affichageConfiguration, setAffichageConfiguration] = useState<AffichageConfiguration>({
@@ -73,26 +89,23 @@ function App() {
     feuxSurlignes: [],
     connexionsSurlignees: [],
     feux: null,
+    selection: null,
+    ancre: null,
   })
-  const panneauConfiguration = useRef<PanneauConfigurationHandle>(null)
-  // Relais stables des gestes de la carte vers le panneau de configuration.
-  const deplacerPoignee = useCallback<PanneauConfigurationHandle['deplacerPoignee']>(
+  const [ciblePopup, setCiblePopup] = useState<HTMLElement | null>(null)
+  const [pointMenu, setPointMenu] = useState<LonLat | null>(null)
+  const { carte } = useMap()
+  const panneauConfiguration = useRef<ConfigurationCarrefourHandle>(null)
+  // Relais stables des gestes de la carte vers la configuration.
+  const deplacerPoignee = useCallback<ConfigurationCarrefourHandle['deplacerPoignee']>(
     (poignee, position) => panneauConfiguration.current?.deplacerPoignee(poignee, position),
     [],
   )
-  const connecter = useCallback<PanneauConfigurationHandle['connecter']>(
+  const connecter = useCallback<ConfigurationCarrefourHandle['connecter']>(
     (de, vers) => panneauConfiguration.current?.connecter(de, vers),
     [],
   )
 
-
-  // File des propositions OSM + IA : suivie partout, notifiée à la fin de chaque analyse.
-  const analysesIa = useAnalysesIa()
-  const ouvrirAnalyseIa = useCallback((analyse: AnalyseIa) => {
-    setEdition(null)
-    setConfiguration({ carrefour: analyse.carrefour, position: analyse.position, ouvrirAnalyseIa: { id: analyse.id } })
-  }, [])
-  useNotificationsIa(analysesIa.data, ouvrirAnalyseIa)
 
   const couchesTram: CouchesTram =
     mode === 'carte' ? { lignes: trams, arrets: trams, zones: trams, rames: trams } : brut
@@ -217,248 +230,358 @@ function App() {
     setBrut((couches) => ({ ...couches, [couche]: coche }))
   const enLigne = tramsTempsReel.data?.trams.filter((t) => t.etat === 'en_ligne').length
 
+  // File des propositions OSM + IA : suivie partout, notifiée à la fin de chaque analyse.
+  const analysesIa = useAnalysesIa()
+  const ouvrirAnalyseIa = useCallback((analyse: AnalyseIa) => {
+    setEdition(null)
+    setConfiguration({ carrefour: analyse.carrefour, position: analyse.position, ouvrirAnalyseIa: { id: analyse.id } })
+  }, [])
+  useNotificationsIa(analysesIa.data, ouvrirAnalyseIa)
+
+  const composer = () =>
+    demarrer({ carrefourId: null, selection: [], nature: 'carrefour', nomSaisi: null, modeRectangle: true })
+
+  // Raccourcis hors configuration (la configuration gère les siens).
+  const touche = useEffectEvent((e: KeyboardEvent) => {
+    if (configuration || e.ctrlKey || e.metaKey || e.altKey) return
+    if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+    const lettre = e.key.toLowerCase()
+    if (!edition) return lettre === 'n' && composer()
+    if (e.key === 'Escape') return setEdition(null)
+    if (lettre === 'r' || lettre === 'v') setEdition({ ...edition, modeRectangle: lettre === 'r' })
+  })
+  useEffect(() => {
+    window.addEventListener('keydown', touche)
+    return () => window.removeEventListener('keydown', touche)
+  }, [])
+
+  const entreesMenu: EntreeMenu[] = [
+    ...(configuration
+      ? MENU_CONFIGURATION
+      : [{ valeur: 'composer', glyphe: '⌖', libelle: 'Composer un carrefour', raccourci: 'N' }, { type: 'separateur' as const }]),
+    { type: 'separateur' },
+    { valeur: 'centrer', glyphe: '✥', libelle: 'Centrer la carte ici' },
+    { valeur: 'copier', glyphe: '⎘', libelle: 'Copier les coordonnées' },
+  ]
+  const choisirMenu = (valeur: string) => {
+    if (valeur === 'centrer' && pointMenu) return carte?.flyTo({ center: pointMenu })
+    if (valeur === 'copier' && pointMenu) return void navigator.clipboard?.writeText(`${pointMenu[1].toFixed(6)}, ${pointMenu[0].toFixed(6)}`)
+    if (valeur === 'composer') return composer()
+    panneauConfiguration.current?.executer(valeur as ActionConfiguration)
+  }
+
   return (
     <>
-      <CarteCarrefours
-        carrefours={carrefours.data}
-        afficherCarrefours={mode === 'carte' || brut.carrefours || edition !== null || configuration !== null}
-        fond={fond}
-        feux={feux.data}
-        edition={
-          edition && {
-            selection: edition.selection,
-            carrefourId: edition.carrefourId,
-            modeRectangle: edition.modeRectangle,
-          }
-        }
-        onEmprise={setBbox}
-        onBasculerFeu={basculerFeu}
-        onAjouterFeux={ajouterFeux}
-        onComposerDepuis={(feu) =>
-          demarrer({
-            carrefourId: null,
-            selection: [feu.id],
-            nature: feu.type === 'pieton' ? 'traversee_pietonne' : 'carrefour',
-            nomSaisi: null,
-            modeRectangle: false,
-          })
-        }
-        onModifier={modifier}
-        onConfigurer={(carrefour, position) => {
-          setEdition(null)
-          setConfiguration({ carrefour, position })
-        }}
-        configuration={
-          configuration && {
-            carrefourId: configuration.carrefour.id,
-            position: configuration.position,
-            ...affichageConfiguration,
-          }
-        }
-        onClicFeuConfiguration={(feu) => panneauConfiguration.current?.clicFeu(feu)}
-        onDeplacerPoignee={deplacerPoignee}
-        onConnecter={connecter}
-        onPlacerFeu={placerFeu}
-        onSupprimer={(carrefour) => {
-          if (window.confirm(`Supprimer « ${carrefour.nom} » ? Ses feux redeviendront libres.`)) {
-            supprimer.mutate(carrefour)
-          }
-        }}
+      <MenuContextuel
+        entete={pointMenu && `${pointMenu[1].toFixed(4)} N · ${pointMenu[0].toFixed(4)} E`}
+        entrees={entreesMenu.filter((entree, i, liste) => entree.type !== 'separateur' || (i > 0 && liste[i - 1]!.type !== 'separateur'))}
+        onChoisir={choisirMenu}
       >
-        {pertes && reseauTram.data && historique.data && (
-          <CouchePertes reseau={reseauTram.data} historique={historique.data} />
-        )}
-        {tramAffiche && reseauTram.data && (
-          <CoucheTrams reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
-        )}
-      </CarteCarrefours>
-      <Stack
-        as="aside"
-        position="absolute"
-        top="3"
-        left="3"
-        zIndex="1"
-        gap="3"
-        w={configuration ? 'min(440px, calc(100vw - 24px))' : 'min(360px, calc(100vw - 24px))'}
-        maxH="calc(100vh - 24px)"
-        overflowY="auto"
-        px="14px"
-        py="3"
-        bg="bg.panel"
-        borderRadius="l3"
-        boxShadow="carte"
-      >
-        <HStack align="start" gap="2">
-          <Stack gap="0.5" flex="1">
-            <Heading as="h1" textStyle="xl" fontWeight="semibold">
-              Besançon Voirie
-            </Heading>
-            <Aide>Inventaire citoyen des feux tricolores.</Aide>
-            {sante.isSuccess && (
-              <Message ton="ok">
-                API connectée · PostGIS {sante.data.db.postgis} · pgRouting {sante.data.db.pgrouting}
-              </Message>
+        <Box position="fixed" inset="0">
+          <CarteCarrefours
+            carrefours={carrefours.data}
+            afficherCarrefours={mode === 'carte' || brut.carrefours || edition !== null || configuration !== null}
+            fond={fond}
+            feux={feux.data}
+            edition={
+              edition && {
+                selection: edition.selection,
+                carrefourId: edition.carrefourId,
+                modeRectangle: edition.modeRectangle,
+              }
+            }
+            onEmprise={setBbox}
+            onBasculerFeu={basculerFeu}
+            onAjouterFeux={ajouterFeux}
+            onComposerDepuis={(feu) =>
+              demarrer({
+                carrefourId: null,
+                selection: [feu.id],
+                nature: feu.type === 'pieton' ? 'traversee_pietonne' : 'carrefour',
+                nomSaisi: null,
+                modeRectangle: false,
+              })
+            }
+            onModifier={modifier}
+            onConfigurer={(carrefour, position) => {
+              setEdition(null)
+              setConfiguration({ carrefour, position })
+            }}
+            configuration={
+              configuration && {
+                carrefourId: configuration.carrefour.id,
+                position: configuration.position,
+                ...affichageConfiguration,
+              }
+            }
+            onClicFeuConfiguration={(feu, position) => panneauConfiguration.current?.clicFeu(feu, position)}
+            onClicCarteConfiguration={(cible, position) => panneauConfiguration.current?.clicCarte(cible, position)}
+            onClicCalque={(clic) => panneauConfiguration.current?.clicCalque(clic)}
+            onCiblePopup={setCiblePopup}
+            onMenuContextuel={setPointMenu}
+            onDeplacerPoignee={deplacerPoignee}
+            onConnecter={connecter}
+            onPlacerFeu={placerFeu}
+            onSupprimer={(carrefour) => {
+              if (window.confirm(`Supprimer « ${carrefour.nom} » ? Ses feux redeviendront libres.`)) {
+                supprimer.mutate(carrefour)
+              }
+            }}
+          >
+            {pertes && reseauTram.data && historique.data && (
+              <CouchePertes reseau={reseauTram.data} historique={historique.data} />
             )}
-            {sante.isError && <Message ton="erreur">API injoignable</Message>}
-          </Stack>
-          <ModeCouleur />
-        </HStack>
+            {tramAffiche && reseauTram.data && (
+              <CoucheTrams reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
+            )}
+          </CarteCarrefours>
+        </Box>
+      </MenuContextuel>
 
-        {analysesIa.data && <FileIa analyses={analysesIa.data} onOuvrir={ouvrirAnalyseIa} />}
+      {configuration ? (
+        <ConfigurationCarrefour
+          key={configuration.carrefour.id}
+          ref={panneauConfiguration}
+          carrefour={configuration.carrefour}
+          ciblePopup={ciblePopup}
+          onAffichage={setAffichageConfiguration}
+          onPlacerFeu={placerFeu}
+          ouvrirAnalyseIa={configuration.ouvrirAnalyseIa ?? null}
+          onFermer={() => setConfiguration(null)}
+        />
+      ) : (
+        <>
+          <CarteEnTete
+            position="fixed"
+            top="3"
+            left="3"
+            zIndex="2"
+            w="340px"
+            maxW="calc(100vw - 24px)"
+            surtitre="Besançon Voirie"
+            titre={edition ? (edition.carrefourId ? 'Modifier le carrefour' : 'Composer un carrefour') : 'Inventaire citoyen des feux tricolores'}
+            badges={
+              <>
+                {sante.isSuccess && <Badge colorPalette="green">API connectée</Badge>}
+                {sante.isError && <Badge colorPalette="red">API injoignable</Badge>}
+                {carrefours.data && <Badge colorPalette="gray">{carrefours.data.features.length} carrefour(s) dans la vue</Badge>}
+                {feuxLibres !== undefined && feuxLibres > 0 && <Badge colorPalette="orange">{feuxLibres} feu(x) à regrouper</Badge>}
+              </>
+            }
+          >
+            {edition && (
+              <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
+                <PanneauEdition
+                  edition={edition}
+                  enregistrement={{ enCours: enregistrer.isPending, erreur: enregistrer.error?.message ?? null }}
+                  onChanger={setEdition}
+                  onEnregistrer={(nom) => enregistrer.mutate({ edition, nom })}
+                  onAnnuler={() => setEdition(null)}
+                />
+              </Box>
+            )}
+            {!edition && analysesIa.data && analysesIa.data.length > 0 && (
+              <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
+                <FileIa analyses={analysesIa.data} onOuvrir={ouvrirAnalyseIa} />
+              </Box>
+            )}
+          </CarteEnTete>
 
-        {configuration ? (
-          <PanneauConfiguration
-            key={configuration.carrefour.id}
-            carrefour={configuration.carrefour}
-            feuxCarrefour={feux.data?.features.filter((f) => f.properties.carrefour_id === configuration.carrefour.id)}
-            ouvrirAnalyseIa={configuration.ouvrirAnalyseIa ?? null}
-            ref={panneauConfiguration}
-            onAffichage={setAffichageConfiguration}
-            onFermer={() => setConfiguration(null)}
-          />
-        ) : edition ? (
-          <PanneauEdition
-            edition={edition}
-            enregistrement={{ enCours: enregistrer.isPending, erreur: enregistrer.error?.message ?? null }}
-            onChanger={setEdition}
-            onEnregistrer={(nom) => enregistrer.mutate({ edition, nom })}
-            onAnnuler={() => setEdition(null)}
-          />
-        ) : (
-          <Stack gap="3">
-            <Tabs.Root value={mode} onValueChange={(e) => setMode(e.value as Mode)}>
-              <Tabs.List>
-                <Tabs.Trigger value="carte">Carte</Tabs.Trigger>
-                <Tabs.Trigger value="brut">Données brutes</Tabs.Trigger>
-              </Tabs.List>
-            </Tabs.Root>
+          {edition && (
+            <BandeauMode
+              position="fixed"
+              top="3"
+              left="50%"
+              transform="translateX(-50%)"
+              zIndex="2"
+              titre={edition.carrefourId ? 'Feux du carrefour' : 'Nouveau carrefour'}
+              aides={[
+                edition.modeRectangle ? 'Glisser : rectangle de feux' : 'Clic : ajouter ou retirer un feu',
+                <Kbd key="echap" variant="inverse">
+                  Échap
+                </Kbd>,
+              ]}
+            />
+          )}
 
-            {mode === 'carte' ? (
-              <Stack gap="2.5">
-                <HStack gap="1.5" wrap="wrap">
-                  {carrefours.data && <Badge colorPalette="gray">{carrefours.data.features.length} carrefour(s) dans la vue</Badge>}
-                  {feuxLibres !== undefined && <Badge colorPalette="orange">{feuxLibres} feu(x) à regrouper</Badge>}
-                </HStack>
-                {feuxLibres !== undefined && <Aide>Zoomer pour voir les feux à regrouper.</Aide>}
-                <Button
-                  variant="solid"
-                  alignSelf="start"
-                  onClick={() =>
-                    demarrer({ carrefourId: null, selection: [], nature: 'carrefour', nomSaisi: null, modeRectangle: true })
-                  }
-                >
-                  Composer un carrefour
-                </Button>
-                <Bascule coche={trams} onChange={setTrams}>
-                  Trams en temps réel
-                </Bascule>
-                {trams && enLigne !== undefined && (
-                  <Aide>{enLigne} rame(s) en ligne · position estimée d'après les temps d'attente Ginko</Aide>
-                )}
-              </Stack>
+          <BarreOutils.Root position="fixed" left="50%" transform="translateX(-50%)" bottom="22px" zIndex="3">
+            {edition ? (
+              <>
+                <BarreOutils.Outil
+                  glyphe="↖"
+                  libelle="Clic"
+                  raccourci="V"
+                  actif={!edition.modeRectangle}
+                  onClick={() => setEdition({ ...edition, modeRectangle: false })}
+                />
+                <BarreOutils.Outil
+                  glyphe="▭"
+                  libelle="Rectangle"
+                  raccourci="R"
+                  actif={edition.modeRectangle}
+                  onClick={() => setEdition({ ...edition, modeRectangle: true })}
+                />
+              </>
             ) : (
-              <Stack gap="2">
-                <Bascule coche={brut.carrefours} onChange={basculer('carrefours')}>
-                  Carrefours à feux{carrefours.data && ` (${carrefours.data.features.length} dans la vue)`}
-                </Bascule>
-                <Bascule coche={brut.lignes} onChange={basculer('lignes')}>
-                  Tram : lignes (GTFS)
-                </Bascule>
-                <Bascule coche={brut.arrets} onChange={basculer('arrets')}>
-                  Tram : arrêts
-                </Bascule>
-                <Bascule coche={brut.rames} onChange={basculer('rames')}>
-                  Tram : rames, position estimée{enLigne !== undefined && ` (${enLigne} en ligne)`}
-                </Bascule>
-                <Bascule coche={brut.zones} onChange={basculer('zones')}>
-                  Tram : zones probables
-                </Bascule>
-                <Bascule coche={brut.pertes} onChange={basculer('pertes')}>
-                  Tram : temps perdu par tronçon
-                </Bascule>
-                {brut.pertes && (
-                  <Stack gap="2" ps="11">
-                    <HStack gap="1.5">
-                      <Selecteur
-                        size="xs"
-                        aria-label="Type de jour"
-                        valeur={creneau.typeJour}
-                        onChange={(valeur) => setCreneau((c) => ({ ...c, typeJour: valeur as TypeJour }))}
-                      >
-                        <option value="semaine">Semaine</option>
-                        <option value="samedi">Samedi</option>
-                        <option value="dimanche">Dimanche</option>
-                      </Selecteur>
-                      <Selecteur
-                        size="xs"
-                        aria-label="Heure"
-                        valeur={creneau.heure ?? ''}
-                        onChange={(valeur) => setCreneau((c) => ({ ...c, heure: valeur === '' ? null : Number(valeur) }))}
-                      >
-                        <option value="">Toute la journée</option>
-                        {Array.from({ length: 24 }, (_, h) => (
-                          <option key={h} value={h}>
-                            {h} h – {h + 1} h
-                          </option>
-                        ))}
-                      </Selecteur>
-                    </HStack>
-                    <HStack as="ul" rowGap="1" columnGap="2.5" wrap="wrap" listStyleType="none" textStyle="xs">
-                      {PALIERS_PERTE.map((palier) => (
-                        <HStack as="li" key={palier.libelle} gap="1">
-                          <Pastille forme="trait" couleur={palier.couleur} />
-                          {palier.libelle}
-                        </HStack>
-                      ))}
-                    </HStack>
-                    <Aide>
-                      Durée habituelle moins durée quand ça roule bien.
-                      {historique.data && ` ${historique.data.troncons.length} tronçon(s) observé(s).`}
-                    </Aide>
-                  </Stack>
-                )}
-                {etatHistorique.data && (
-                  <Aide>
-                    Historique : {etatHistorique.data.passages.toLocaleString('fr-FR')} passage(s)
-                    {etatHistorique.data.premier &&
-                      ` depuis le ${new Date(etatHistorique.data.premier).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`}
-                    {!etatHistorique.data.collecteActive && ' · collecte arrêtée (TRAM_COLLECTE)'}
-                  </Aide>
-                )}
-              </Stack>
+              <>
+                <BarreOutils.Outil glyphe="↖" libelle="Sélection" raccourci="V" actif />
+                <BarreOutils.Outil glyphe="⌖" libelle="Carrefour" raccourci="N" onClick={composer} />
+              </>
             )}
+          </BarreOutils.Root>
+        </>
+      )}
 
-            {(reseauTram.isError || tramsTempsReel.isError) && (
-              <Message ton="erreur">
-                Trams indisponibles : {(reseauTram.error ?? tramsTempsReel.error)?.message}
-              </Message>
-            )}
-          </Stack>
-        )}
+      <Popover.Root positioning={{ placement: 'left-start', gutter: 10 }}>
+        <Popover.Trigger asChild>
+          <IconButton
+            position="fixed"
+            top="100px"
+            right="4"
+            zIndex="2"
+            w="9"
+            h="9"
+            bg="bg.panel"
+            borderWidth="0"
+            borderRadius="10px"
+            boxShadow="carte"
+            aria-label="Calques et fond de carte"
+            title="Calques et fond de carte"
+          >
+            ◧
+          </IconButton>
+        </Popover.Trigger>
+        <Portal>
+          <Popover.Positioner>
+            <Popover.Content w="320px">
+              <Popover.Body p="14px">
+                <Stack gap="3">
+                  <HStack justify="space-between">
+                    <Text textStyle="md" fontWeight="semibold">
+                      Calques
+                    </Text>
+                    <ModeCouleur />
+                  </HStack>
+                  <Tabs.Root value={mode} onValueChange={(e) => setMode(e.value as Mode)}>
+                    <Tabs.List>
+                      <Tabs.Trigger value="carte">Carte</Tabs.Trigger>
+                      <Tabs.Trigger value="brut">Données brutes</Tabs.Trigger>
+                    </Tabs.List>
+                  </Tabs.Root>
+                  {mode === 'carte' ? (
+                    <Stack gap="2.5">
+                      <Bascule coche={trams} onChange={setTrams}>
+                        Trams en temps réel
+                      </Bascule>
+                      {trams && enLigne !== undefined && (
+                        <Aide>{enLigne} rame(s) en ligne · position estimée d'après les temps d'attente Ginko</Aide>
+                      )}
+                    </Stack>
+                  ) : (
+                    <Stack gap="2">
+                      <Bascule coche={brut.carrefours} onChange={basculer('carrefours')}>
+                        Carrefours à feux{carrefours.data && ` (${carrefours.data.features.length} dans la vue)`}
+                      </Bascule>
+                      <Bascule coche={brut.lignes} onChange={basculer('lignes')}>
+                        Tram : lignes (GTFS)
+                      </Bascule>
+                      <Bascule coche={brut.arrets} onChange={basculer('arrets')}>
+                        Tram : arrêts
+                      </Bascule>
+                      <Bascule coche={brut.rames} onChange={basculer('rames')}>
+                        Tram : rames, position estimée{enLigne !== undefined && ` (${enLigne} en ligne)`}
+                      </Bascule>
+                      <Bascule coche={brut.zones} onChange={basculer('zones')}>
+                        Tram : zones probables
+                      </Bascule>
+                      <Bascule coche={brut.pertes} onChange={basculer('pertes')}>
+                        Tram : temps perdu par tronçon
+                      </Bascule>
+                      {brut.pertes && (
+                        <Stack gap="2" ps="11">
+                          <HStack gap="1.5">
+                            <Selecteur
+                              size="xs"
+                              aria-label="Type de jour"
+                              valeur={creneau.typeJour}
+                              onChange={(valeur) => setCreneau((c) => ({ ...c, typeJour: valeur as TypeJour }))}
+                            >
+                              <option value="semaine">Semaine</option>
+                              <option value="samedi">Samedi</option>
+                              <option value="dimanche">Dimanche</option>
+                            </Selecteur>
+                            <Selecteur
+                              size="xs"
+                              aria-label="Heure"
+                              valeur={creneau.heure ?? ''}
+                              onChange={(valeur) => setCreneau((c) => ({ ...c, heure: valeur === '' ? null : Number(valeur) }))}
+                            >
+                              <option value="">Toute la journée</option>
+                              {Array.from({ length: 24 }, (_, h) => (
+                                <option key={h} value={h}>
+                                  {h} h – {h + 1} h
+                                </option>
+                              ))}
+                            </Selecteur>
+                          </HStack>
+                          <HStack as="ul" rowGap="1" columnGap="2.5" wrap="wrap" listStyleType="none" textStyle="xs">
+                            {PALIERS_PERTE.map((palier) => (
+                              <HStack as="li" key={palier.libelle} gap="1">
+                                <Pastille forme="trait" couleur={palier.couleur} />
+                                {palier.libelle}
+                              </HStack>
+                            ))}
+                          </HStack>
+                          <Aide>
+                            Durée habituelle moins durée quand ça roule bien.
+                            {historique.data && ` ${historique.data.troncons.length} tronçon(s) observé(s).`}
+                          </Aide>
+                        </Stack>
+                      )}
+                      {etatHistorique.data && (
+                        <Aide>
+                          Historique : {etatHistorique.data.passages.toLocaleString('fr-FR')} passage(s)
+                          {etatHistorique.data.premier &&
+                            ` depuis le ${new Date(etatHistorique.data.premier).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`}
+                          {!etatHistorique.data.collecteActive && ' · collecte arrêtée (TRAM_COLLECTE)'}
+                        </Aide>
+                      )}
+                    </Stack>
+                  )}
 
-        <Section libelle="Fond de carte" pt="2.5" borderTopWidth="1px" borderColor="border.muted">
-          <Segments
-            fitted
-            aria-label="Fond de carte"
-            valeur={fond.fond}
-            onChange={(choix) => setFond((options) => ({ ...options, fond: choix }))}
-            options={[
-              { valeur: 'satellite', libelle: 'Satellite' },
-              { valeur: 'plan', libelle: 'Plan' },
-            ]}
-          />
-          <Bascule coche={fond.batiments} onChange={(batiments) => setFond((options) => ({ ...options, batiments }))}>
-            Bâtiments
-          </Bascule>
-          <Bascule coche={fond.relief3d} onChange={(relief3d) => setFond((options) => ({ ...options, relief3d }))}>
-            3D (plus gourmand)
-          </Bascule>
-        </Section>
+                  {(reseauTram.isError || tramsTempsReel.isError) && (
+                    <Message ton="erreur">
+                      Trams indisponibles : {(reseauTram.error ?? tramsTempsReel.error)?.message}
+                    </Message>
+                  )}
+                  <Section libelle="Fond de carte" pt="2.5" borderTopWidth="1px" borderColor="border.muted">
+                    <Segments
+                      fitted
+                      aria-label="Fond de carte"
+                      valeur={fond.fond}
+                      onChange={(choix) => setFond((options) => ({ ...options, fond: choix }))}
+                      options={[
+                        { valeur: 'satellite', libelle: 'Satellite' },
+                        { valeur: 'plan', libelle: 'Plan' },
+                      ]}
+                    />
+                    <Bascule coche={fond.batiments} onChange={(batiments) => setFond((options) => ({ ...options, batiments }))}>
+                      Bâtiments
+                    </Bascule>
+                    <Bascule coche={fond.relief3d} onChange={(relief3d) => setFond((options) => ({ ...options, relief3d }))}>
+                      3D (plus gourmand)
+                    </Bascule>
+                  </Section>
 
-        <Text textStyle="2xs" color="fg.muted">
-          Outil citoyen indépendant, sans lien avec la Ville ou la Métropole. Données indicatives.
-        </Text>
-      </Stack>
+                  <Text textStyle="2xs" color="fg.muted">
+                    Outil citoyen indépendant, sans lien avec la Ville ou la Métropole. Données indicatives.
+                  </Text>
+                </Stack>
+              </Popover.Body>
+            </Popover.Content>
+          </Popover.Positioner>
+        </Portal>
+      </Popover.Root>
     </>
   )
 }

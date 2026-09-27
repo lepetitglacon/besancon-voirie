@@ -103,8 +103,9 @@ connexions (`flechesParVoie`, `mouvementsDepuisConnexions`), côté API comme c�
 
 ### Proposition OSM + IA
 
-Le bouton **✦ Générer avec OSM + IA** part de la détection OSM et la fait corriger par Claude
-d'après la photo aérienne (`apps/api/src/branches/ia/`) :
+**✦ IA** (barre d'outils de la configuration, touche <kbd>I</kbd>, popup du carrefour ou menu
+contextuel) part de la détection OSM et la fait corriger par Claude d'après la photo aérienne
+(`apps/api/src/branches/ia/`) :
 
 1. **Photo** : orthophoto IGN demandée au WMS de la Géoplateforme en Web Mercator, carré de
    1024 px centré sur le carrefour, de 100 à 180 m de côté selon sa taille (10 à 18 cm/pixel).
@@ -118,10 +119,11 @@ d'après la photo aérienne (`apps/api/src/branches/ia/`) :
    MCP, réglages utilisateur ni skills : ~5 k tokens de contexte au lieu de ~60 k.
 4. **Retour** : les pixels sont reconvertis en lon/lat, les connexions vers des voies inconnues
    ou en double sont écartées (et signalées), puis la proposition est validée par
-   `ConfigurationBranches`, comme un `PUT`. Elle arrive dans l'éditeur comme celle d'OSM, avec
-   pour chaque branche un badge « lu sur la photo », la confiance de l'IA et ses remarques.
+   `ConfigurationBranches`, comme un `PUT`. Elle arrive dans l'éditeur comme celle d'OSM ; la
+   popup de chaque branche porte le badge « Lu sur la photo par l'IA », la confiance de l'IA et
+   ses remarques, la carte d'en-tête ses remarques générales.
 
-**File d'attente.** Le bouton met le carrefour en file (`analyse_ia`) et rend la main tout de
+**File d'attente.** ✦ IA met le carrefour en file (`analyse_ia`) et rend la main tout de
 suite : on peut en demander plusieurs et continuer à travailler. Un travailleur de l'API
 (`FileIaService`) lance les analyses dans l'ordre, `IA_PARALLELE` à la fois (2 par défaut, 0 pour
 n'en lancer aucune, comme dans les tests e2e). La file est en base : une analyse interrompue par
@@ -129,9 +131,11 @@ un redémarrage de l'API est remise en file et relancée. Un carrefour déjà en
 ajouté une seconde fois.
 
 Dans l'application :
-- une liste « ✦ Propositions IA » en haut du panneau latéral : en attente (avec la place dans
-  la file), en cours (chrono), prête (« Ouvrir »), en échec (motif au survol) ; « × » annule une
-  demande ou retire une ligne ;
+- une liste « ✦ Propositions IA » dans la carte d'en-tête de l'accueil : en attente (avec la
+  place dans la file), en cours (chrono), prête (« Ouvrir »), en échec (motif au survol) ; « × »
+  annule une demande ou retire une ligne ;
+- dans la carte d'en-tête du carrefour configuré : où en est son analyse, et « Charger » quand
+  elle est prête ;
 - à la fin de chaque analyse, une notification « Proposition IA prête » avec un bouton
   « Ouvrir », plus une notification système si l'onglet est en arrière-plan (permission
   demandée au premier ajout) ;
@@ -148,7 +152,7 @@ Opus 5.5. 4 branches et 9 connexions, voies posées sur le marquage (3 entrantes
 de part et d'autre de l'îlot, sortie sud à 2 voies), branche nord-est notée « confiance basse »
 car sous les arbres.
 
-**Importer un JSON** charge dans l'éditeur un fichier `{ branches, connexions }` (le corps d'un
+**⇪ JSON** (barre d'outils ou menu contextuel) charge dans l'éditeur un fichier `{ branches, connexions }` (le corps d'un
 `PUT /branches`), validé par le même schéma.
 
 ### API

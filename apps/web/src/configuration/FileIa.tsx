@@ -58,7 +58,7 @@ export function FileIa({ analyses, onOuvrir }: Props) {
   const enCours = analyses.filter(enFile).length
 
   return (
-    <Stack gap="1.5" borderWidth="1px" borderColor="border.muted" rounded="l2" p="2.5">
+    <Stack gap="1.5">
       <LibelleSection>
         ✦ Propositions IA{enCours > 0 && ` · ${enCours} en file`}
       </LibelleSection>

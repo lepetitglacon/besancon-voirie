@@ -25,7 +25,7 @@ interface OutilProps extends Omit<HTMLChakraProps<'button'>, 'children'> {
 }
 
 /** Un outil : glyphe, libellé et raccourci clavier ; enfoncé quand il est actif. */
-export function Outil({ glyphe, libelle, raccourci, actif = false, ...props }: OutilProps) {
+export function Outil({ glyphe, libelle, raccourci, actif, ...props }: OutilProps) {
   return (
     <Bouton type="button" aria-pressed={actif} title={raccourci ? `${libelle} (${raccourci})` : libelle} {...props}>
       <Glyphe>{glyphe}</Glyphe>

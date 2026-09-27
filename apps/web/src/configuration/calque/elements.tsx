@@ -3,7 +3,7 @@
  * pixels et un état, rendu par des classes CSS (voir index.css, « Calque de configuration »).
  */
 import type { XY } from '@voirie/engine'
-import type { PointerEvent, ReactNode } from 'react'
+import type { MouseEvent, PointerEvent, ReactNode } from 'react'
 import { cheminConnexion } from './chemins'
 
 const d = (points: readonly XY[]) => points.map(([x, y], i) => `${i ? 'L' : 'M'}${x},${y}`).join(' ')
@@ -20,9 +20,10 @@ interface PropsVoie {
   interactive: boolean
   titre: string
   onSurvol: (survol: boolean) => void
+  onClic?: (e: MouseEvent<SVGElement>) => void
 }
 
-export function Voie({ segment, largeur, couleur, sortante, etat, interactive, titre, onSurvol }: PropsVoie) {
+export function Voie({ segment, largeur, couleur, sortante, etat, interactive, titre, onSurvol, onClic }: PropsVoie) {
   return (
     <path
       className={classes('calque-voie', sortante && 'sortante', etat, interactive && 'interactive')}
@@ -31,6 +32,7 @@ export function Voie({ segment, largeur, couleur, sortante, etat, interactive, t
       strokeWidth={largeur}
       onPointerEnter={() => onSurvol(true)}
       onPointerLeave={() => onSurvol(false)}
+      onClick={onClic}
     >
       <title>{titre}</title>
     </path>
@@ -62,7 +64,7 @@ interface PropsCourbe {
   feu?: EtatFeu
   titre: string
   onSurvol?: (survol: boolean) => void
-  onClic?: () => void
+  onClic?: (e: MouseEvent<SVGElement>) => void
 }
 
 export function Courbe({ entree, sortie, couleur, etat, feu, titre, onSurvol, onClic }: PropsCourbe) {
@@ -139,9 +141,25 @@ export function EcartOsm({ osm, position, onRemettre }: { osm: XY; position: XY;
   )
 }
 
-export function Etiquette({ position, children, classe }: { position: XY; children: ReactNode; classe: string }) {
+interface PropsEtiquette {
+  position: XY
+  children: ReactNode
+  classe: string
+  titre?: string
+  onClic?: (e: MouseEvent<SVGElement>) => void
+}
+
+export function Etiquette({ position, children, classe, titre, onClic }: PropsEtiquette) {
   return (
-    <text className={classe} x={position[0]} y={position[1]} textAnchor="middle" dominantBaseline="middle">
+    <text
+      className={classes(classe, onClic && 'interactive')}
+      x={position[0]}
+      y={position[1]}
+      textAnchor="middle"
+      dominantBaseline="middle"
+      onClick={onClic}
+    >
+      {titre && <title>{titre}</title>}
       {children}
     </text>
   )

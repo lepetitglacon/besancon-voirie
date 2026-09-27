@@ -8,7 +8,12 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Popups de la carte : l'habillage vient de <PopupCarte>, MapLibre ne fournit que l'ancrage. */
+/* Popups de la carte : l'habillage vient de <PopupCarte>, MapLibre ne fournit que l'ancrage.
+   Elles passent devant le calque du carrefour (z-index 1). */
+.popup-carte-ancre {
+  z-index: 3;
+}
+
 .popup-carte-ancre .maplibregl-popup-content {
   padding: 0;
   background: none;
@@ -417,3 +422,14 @@ svg.graphe-etapes {
   stroke-width: 1;
 }
 
+
+/* Outils « sélection » et « piéton » : le code de chaque branche est cliquable. */
+.calque-code.interactive {
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.calque-carrefour.selection .calque-voie.interactive,
+.calque-carrefour.pieton .calque-voie.interactive {
+  cursor: pointer;
+}
