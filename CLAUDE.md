@@ -9,6 +9,12 @@ configuration des carrefours : `docs/CONFIGURATION.md`.
 - Pas de préfixe de ticket JIRA sur ce projet.
 - Messages en français, descriptifs, dans le style des commits existants (`git log --oneline`).
 
+## Tests
+
+- **Ne pas lancer les tests pendant le développement** (ni `pnpm test`, ni `test:e2e`, ni
+  `vitest` en mode watch) : ils saturent la machine.
+- Les lancer **une seule fois, à la fin**, quand le travail est terminé, avant de committer.
+
 ## Worktrees
 
 Le projet est géré par le Nevven Worktree Manager (id `besancon-voirie`, target unique `app`).
