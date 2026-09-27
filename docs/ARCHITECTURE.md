@@ -707,10 +707,11 @@ du temps, ni la fiabilité réelle des estimations. L'API enregistre donc chaque
   sur ses feux physiques ; à défaut, au bout des voies entrantes qu'elle commande, ou au milieu
   de la traversée pour les piétons. L'opacité suit la confiance (synchronisé, estimé, indicatif,
   phase inconnue). La priorité tram (§6.1) arrête les lignes qui coupent la voie quand une rame
-  approche : les rames sont suivies même quand leur affichage est désactivé. Un clic sur un
-  carrefour ouvre sa fiche : plan en vigueur, position dans le cycle, tête de feu de chaque
-  ligne, rame prioritaire. Passer en Temps réel ferme l'édition en cours (les
-  brouillons restent).
+  approche : les rames sont suivies même quand leur affichage est désactivé. Les carrefours
+  eux-mêmes ne sont pas dessinés, seulement leurs feux, en gris quand le carrefour n'a pas de
+  programme : un clic sur un feu ouvre la fiche de son carrefour (plan en vigueur, position
+  dans le cycle, tête de feu de chaque ligne, rame prioritaire). Passer en Temps réel ferme
+  l'édition en cours (les brouillons restent).
 - **Édition** : composition et configuration des carrefours (§5.3,
   [CONFIGURATION.md](CONFIGURATION.md)). L'onglet Programme reçoit les tops (§6.1) et peut
   caler son diagramme sur l'heure réelle, pour comparer sur place.

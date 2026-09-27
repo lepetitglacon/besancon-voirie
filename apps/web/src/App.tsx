@@ -190,6 +190,7 @@ function App() {
     refetchInterval: RAFRAICHISSEMENT_FEUX_MS,
     placeholderData: (precedent) => precedent,
   })
+  const carrefoursRejoues = useMemo(() => feuxTempsReel.data?.carrefours.map((c) => c.id), [feuxTempsReel.data])
   const carrefourTempsReel = ficheTempsReel
     ? (feuxTempsReel.data?.carrefours.find((c) => c.id === ficheTempsReel.carrefour.id) ?? null)
     : null
@@ -433,8 +434,10 @@ function App() {
         <Box position="fixed" inset="0">
           <CarteCarrefours
             carrefours={carrefours.data}
-            afficherCarrefours={mode !== 'brut' || brut.carrefours || edition !== null || configuration !== null}
+            // Temps réel : seuls les feux ; un clic sur l'un d'eux ouvre la fiche de son carrefour.
+            afficherCarrefours={mode === 'edition' || (mode === 'brut' && brut.carrefours) || edition !== null || configuration !== null}
             tempsReel={tempsReel}
+            carrefoursRejoues={carrefoursRejoues}
             // Éditeur des voies : on cale nœuds et voies sur la photo IGN, vue de dessus.
             fond={editeur ? { ...fond, fond: 'satellite', relief3d: false } : fond}
             feux={feux.data}
@@ -601,8 +604,8 @@ function App() {
               <FicheTempsReel carrefour={carrefourTempsReel} tram={contexteTram} />
             ) : (
               <Aide>
-                Les feux des carrefours programmés sont rejoués sur l'heure légale, calés par des tops relevés sur place.
-                Cliquer sur un carrefour pour voir son cycle.
+                Les feux des carrefours programmés sont rejoués sur l'heure légale, calés par des tops relevés sur place ;
+                les autres restent en gris. Cliquer sur un feu pour voir le cycle de son carrefour.
               </Aide>
             )}
           </Box>

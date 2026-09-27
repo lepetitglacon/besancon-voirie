@@ -16,7 +16,7 @@ import { CalqueRues } from '../reseau/CalqueRues'
 import type { Poignee } from '../configuration/modele'
 import type { AffichageConfiguration } from '../configuration/ConfigurationCarrefour'
 import { Aide, BarreOutils, ControleZoom, PopupCarte, PopupSurCarte } from '../ds'
-import { coucheCarrefours, coucheFeux } from './couches'
+import { coucheCarrefours, coucheFeux, coucheFeuxNonRejoues } from './couches'
 import { FondDeCarte, type OptionsFond } from './FondDeCarte'
 
 /** Centre de Besançon (Pont Battant). */
@@ -66,6 +66,8 @@ interface Props {
   afficherCarrefours: boolean
   /** Mode Temps réel : carte en lecture seule, les feux sont dessinés par la couche temps réel. */
   tempsReel: boolean
+  /** Temps réel : carrefours dont la couche temps réel rejoue les feux ; ceux des autres restent en gris. */
+  carrefoursRejoues?: string[]
   fond: OptionsFond
   /** Couches supplémentaires (trams…). */
   children?: ReactNode
@@ -328,8 +330,9 @@ export function CarteCarrefours(props: Props) {
           <Layer
             {...(configuration
               ? coucheFeux(configuration.feuxSurlignes, configuration.carrefourId, true)
-              : coucheFeux(edition?.selection ?? [], edition?.carrefourId ?? null, edition !== null))}
-            layout={{ visibility: props.tempsReel ? 'none' : 'visible' }}
+              : props.tempsReel
+                ? coucheFeuxNonRejoues(props.carrefoursRejoues ?? [])
+                : coucheFeux(edition?.selection ?? [], edition?.carrefourId ?? null, edition !== null))}
           />
         </Source>
       )}

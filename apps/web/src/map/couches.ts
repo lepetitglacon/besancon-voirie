@@ -7,6 +7,8 @@ export const COULEURS = {
   feuLibre: '#e0561e',
   feuRattache: '#4b5563',
   feuAutreCarrefour: '#c3c8d1',
+  /** Temps réel : feu dont le carrefour n'a pas de programme (même gris que la phase inconnue). */
+  feuNonRejoue: '#9aa1ad',
   statut: STATUT,
 } as const
 
@@ -67,6 +69,27 @@ export function coucheFeux(selection: string[], carrefourEdite: string | null, e
       ],
       'circle-stroke-width': ['case', ['==', ['get', 'present_osm'], false], 2, 1],
       'circle-stroke-color': ['case', ['==', ['get', 'present_osm'], false], '#c0392b', '#ffffff'],
+    },
+  }
+}
+
+/**
+ * Temps réel : les feux que la couche temps réel ne rejoue pas (carrefour sans programme, feu
+ * libre), en gris. Ceux des carrefours rejoués sont dessinés à leur couleur par cette couche.
+ */
+export function coucheFeuxNonRejoues(rejoues: string[]): CircleLayerSpecification {
+  return {
+    id: 'feux',
+    type: 'circle',
+    source: 'feux',
+    minzoom: 13,
+    filter: ['!', ['in', ['coalesce', ['get', 'carrefour_id'], ''], ['literal', rejoues]]],
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 2, 18, ['case', ['==', ['get', 'type'], 'pieton'], 6, 7]],
+      'circle-color': COULEURS.feuNonRejoue,
+      'circle-opacity': 0.85,
+      'circle-stroke-width': 1.5,
+      'circle-stroke-color': '#ffffff',
     },
   }
 }
