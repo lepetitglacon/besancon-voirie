@@ -2,16 +2,19 @@
  * Réseau routier sur la carte (docs/RESEAU.md) : tronçons à la largeur de leurs voies, nœuds
  * (feux, passages piétons, carrefours), sens de circulation, tracé en cours. Un clic vise le
  * nœud ou le tronçon sous le pointeur ; l'outil actif décide quoi en faire (popup, point du
- * tracé, coupe, nœud du carrefour). Au zoom des voies, le calque SVG dessine tout, et ces
- * couches ne servent plus qu'aux clics.
+ * tracé, coupe, nœud du carrefour). Au zoom des voies, la couche des voies (CoucheVoies) prend
+ * le relais : le clic y cherche aussi la voie ou le nœud visé.
  */
-import type { LonLat } from '@voirie/engine'
+import { largeurTroncon, type LonLat } from '@voirie/engine'
 import type { ReseauGeoJson } from '@voirie/schema'
 import type { ExpressionSpecification, MapLayerMouseEvent, MapMouseEvent } from 'maplibre-gl'
 import { useEffect, useEffectEvent, useMemo, useState, type ReactNode } from 'react'
 import { Layer, Source, useMap } from 'react-map-gl/maplibre'
 import { PopupSurCarte } from '../ds'
 import { COULEURS_RESEAU } from './couleurs'
+import { useCoucheDessous, ZONES } from './couchesVoies'
+import { metresEnPixels } from './largeurs'
+import { ZOOM_VOIES } from './modeReseau'
 import type { Cible, Trace } from './trace'
 
 /** Outils de l'éditeur des voies (le dernier seulement avec un carrefour ouvert). */
@@ -31,23 +34,15 @@ interface Props {
   popup: { position: LonLat; contenu: ReactNode } | null
 }
 
-const total: ExpressionSpecification = ['+', ['get', 'voies_avant'], ['get', 'voies_arriere']]
-/**
- * Largeur d'un tronçon à l'écran : ~3,25 m au sol par voie (5,4 px au zoom 18 à Besançon), au
- * moins `minimum` px. MapLibre n'accepte le zoom qu'en tête de l'expression.
- */
-const largeur = (minimum: number, marge = 0): ExpressionSpecification => [
-  'interpolate', ['exponential', 2], ['zoom'],
-  13, ['+', ['max', minimum, ['*', total, 0.17]], marge],
-  18, ['+', ['max', minimum, ['*', total, 5.4]], marge],
-  21, ['+', ['max', minimum, ['*', total, 43]], marge],
-]
-/** Opacité qui s'efface quand les voies sont dessinées une à une (zoom 16), sans disparaître des requêtes. */
-const auZoomDesVoies = (opacite: number): ExpressionSpecification => ['interpolate', ['linear'], ['zoom'], 15.5, opacite, 16, 0.02]
+/** Largeur d'un tronçon à l'écran : celle de sa chaussée au sol (voies vélo moins larges), au moins `minimum` px. */
+const largeur = (minimum: number, marge = 0) => metresEnPixels(['get', 'largeur_m'], minimum, marge)
+/** Opacité qui s'efface quand les voies sont dessinées une à une (CoucheVoies apparaît au même moment). */
+const auZoomDesVoies = (opacite: number): ExpressionSpecification => ['interpolate', ['linear'], ['zoom'], ZOOM_VOIES - 0.5, opacite, ZOOM_VOIES, 0]
 const sensUnique: ExpressionSpecification = ['any', ['==', ['get', 'voies_avant'], 0], ['==', ['get', 'voies_arriere'], 0]]
 
 export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }: Props) {
   const { current: carte } = useMap()
+  const dessous = useCoucheDessous()
   const [curseur, setCurseur] = useState<LonLat | null>(null)
 
   // Le gestionnaire lit toujours les dernières props, sans réabonner la carte à chaque rendu.
@@ -68,17 +63,22 @@ export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }
         [x - TOLERANCE_PX, y - TOLERANCE_PX],
         [x + TOLERANCE_PX, y + TOLERANCE_PX],
       ]
-      const couches = ['reseau-noeuds', 'reseau-troncons'].filter((id) => map.getLayer(id))
+      // Au zoom des voies, les couches de CoucheVoies ; en dessous, celles des tronçons.
+      const couches = [ZONES.noeuds, 'reseau-noeuds', 'reseau-voies', 'reseau-troncons'].filter((id) => map.getLayer(id))
       const objets = map.queryRenderedFeatures(zone, { layers: couches })
-      const noeud = objets.find((f) => f.layer.id === 'reseau-noeuds')
+      const noeud = objets.find((f) => f.layer.id === ZONES.noeuds || f.layer.id === 'reseau-noeuds')
       if (noeud) return { type: 'noeud', id: noeud.properties.id as string }
+      const voie = objets.find((f) => f.layer.id === 'reseau-voies')
+      if (voie) return { type: 'troncon', id: voie.properties.troncon as string }
       const troncon = objets.find((f) => f.layer.id === 'reseau-troncons')
       return troncon ? { type: 'troncon', id: troncon.properties.id as string } : null
     }
     const cliquer = (e: MapLayerMouseEvent) => {
-      // Un feu (sa popup) ou le disque d'un carrefour (il s'ouvre) : le réseau ne répond pas en même temps.
-      const autres = ['feux', 'carrefours'].filter((id) => map.getLayer(id))
-      if (autres.length > 0 && map.queryRenderedFeatures(e.point, { layers: autres }).length > 0) return
+      // Un feu (sa popup) ou le disque d'un carrefour (il s'ouvre) : le réseau ne répond pas en même
+      // temps. Au zoom des voies, les voies et les nœuds sont dessinés par-dessus le disque et passent avant.
+      const couches = ['feux', 'carrefours', ZONES.noeuds, 'reseau-voies'].filter((id) => map.getLayer(id))
+      const dessus = couches.length > 0 ? map.queryRenderedFeatures(e.point, { layers: couches })[0] : undefined
+      if (dessus?.layer.id === 'feux' || dessus?.layer.id === 'carrefours') return
       relayerClic([e.lngLat.lng, e.lngLat.lat], cibleSous(e), memePoint)
     }
     const bouger = (e: MapMouseEvent) => setCurseur([e.lngLat.lng, e.lngLat.lat])
@@ -109,16 +109,28 @@ export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }
     }
   }, [trace, curseur, outil])
 
+  // Largeur de chaussée de chaque tronçon, pour le dessiner à sa largeur au sol.
+  const troncons = useMemo(
+    () =>
+      donnees && {
+        ...donnees.troncons,
+        features: donnees.troncons.features.map((t) => ({ ...t, properties: { ...t.properties, largeur_m: largeurTroncon(t.properties) } })),
+      },
+    [donnees],
+  )
+
   const estSelection: ExpressionSpecification = ['==', ['get', 'id'], selection ?? '']
 
   return (
     <>
-      {donnees && (
+      {donnees && troncons && (
         <>
-          <Source id="reseau-troncons" type="geojson" data={donnees.troncons} promoteId="id">
+          <Source id="reseau-troncons" type="geojson" data={troncons} promoteId="id">
             <Layer
               id="reseau-troncons-halo"
               type="line"
+              maxzoom={ZOOM_VOIES}
+              beforeId={dessous}
               filter={estSelection}
               layout={{ 'line-cap': 'round', 'line-join': 'round' }}
               paint={{ 'line-color': COULEURS_RESEAU.selection, 'line-width': largeur(1.5, 6), 'line-opacity': auZoomDesVoies(0.9) }}
@@ -126,6 +138,8 @@ export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }
             <Layer
               id="reseau-troncons"
               type="line"
+              maxzoom={ZOOM_VOIES}
+              beforeId={dessous}
               layout={{ 'line-cap': 'round', 'line-join': 'round' }}
               paint={{
                 'line-color': [
@@ -135,7 +149,6 @@ export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }
                   COULEURS_RESEAU.osm,
                 ],
                 'line-width': largeur(1.5),
-                // Au zoom des voies, le calque SVG les dessine une à une : la ligne reste pour les clics.
                 'line-opacity': auZoomDesVoies(0.75),
               }}
             />
@@ -144,6 +157,7 @@ export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }
               id="reseau-sens"
               type="symbol"
               minzoom={15}
+              beforeId={dessous}
               filter={['any', sensUnique, estSelection]}
               layout={{
                 'symbol-placement': 'line',
@@ -163,6 +177,8 @@ export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }
               id="reseau-noeuds"
               type="circle"
               minzoom={15}
+              maxzoom={ZOOM_VOIES}
+              beforeId={dessous}
               paint={{
                 'circle-radius': [
                   'interpolate', ['linear'], ['zoom'],

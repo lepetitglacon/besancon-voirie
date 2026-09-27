@@ -15,7 +15,7 @@
  */
 import { HIERARCHIE_VOIES } from './nommage.js';
 import { boutsAuNoeud, liaisonsRetenues, type Liaison, type TypeVoieReseau } from './reseau.js';
-import type { LonLat } from './geometrie.js';
+import { LARGEUR_VOIE_VELO_M, type LonLat } from './geometrie.js';
 
 export interface NoeudSumo {
   id: string;
@@ -187,13 +187,13 @@ export function exporterSumo(reseau: ReseauSumo): ExportSumo {
       ].join(' ');
       const voiesTypees = (a.types ?? [])
         .slice(0, a.voies)
-        .map((type, rang) => ({ index: indexSumo(a.voies, rang), allow: ALLOW[type] }))
+        .map((type, rang) => ({ index: indexSumo(a.voies, rang), allow: ALLOW[type], velo: type === 'velo' }))
         .filter((v) => v.allow !== null)
         .sort((p, q) => p.index - q.index);
       if (voiesTypees.length === 0) return `  <edge ${attributs}/>`;
       return [
         `  <edge ${attributs}>`,
-        ...voiesTypees.map((v) => `    <lane index="${v.index}" allow="${v.allow}"/>`),
+        ...voiesTypees.map((v) => `    <lane index="${v.index}" allow="${v.allow}"${v.velo ? ` width="${LARGEUR_VOIE_VELO_M.toFixed(2)}"` : ''}/>`),
         '  </edge>',
       ].join('\n');
     }),

@@ -24,7 +24,7 @@ export function useRelaisCarte(refSvg: RefObject<SVGSVGElement | null>) {
     }
     let appui: XY | null = null
     const relayerAppui = (e: globalThis.MouseEvent) => {
-      if (e.button !== 0 || (e.target as Element).closest('.calque-poignee, .calque-zone-trace, .calque-noeud-reseau.interactive')) return
+      if (e.button !== 0 || (e.target as Element).closest('.calque-poignee, .calque-zone-trace')) return
       appui = [e.clientX, e.clientY]
       canvas.dispatchEvent(new globalThis.MouseEvent('mousedown', e))
     }

@@ -28,6 +28,8 @@ export function repereLocal([lon0, lat0]: LonLat): Repere {
 
 /** Largeur d'une voie de circulation (m). */
 export const LARGEUR_VOIE_M = 3.25;
+/** Largeur d'une voie cyclable (m) : bande, ou piste dans un sens. */
+export const LARGEUR_VOIE_VELO_M = 1.5;
 /** Distance entre le centre du carrefour et la ligne d'arrêt proposée (m). */
 export const DISTANCE_ARRET_M = 15;
 /** Longueur des voies dessinées en amont de la ligne d'arrêt (m). */

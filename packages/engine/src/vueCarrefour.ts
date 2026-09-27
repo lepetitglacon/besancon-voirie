@@ -16,7 +16,7 @@
 import { codeCardinal } from './branches.js';
 import { cleVoie } from './connexions.js';
 import { LARGEUR_VOIE_M, repereLocal, type LonLat, type Segment, type XY } from './geometrie.js';
-import { boutsAuNoeud, liaisonsRetenues, retraitAuNoeud, typesVoies, voiesTroncon, type Liaison, type TypeVoieReseau } from './reseau.js';
+import { boutsAuNoeud, largeurTroncon, liaisonsRetenues, retraitAuNoeud, typesVoies, voiesTroncon, type Liaison, type TypeVoieReseau } from './reseau.js';
 
 export interface NoeudVue {
   id: string;
@@ -146,13 +146,16 @@ export function vueCarrefour({ noeuds, troncons, degres }: EntreeVue): VueCarref
   const noeudA = (t: TronconVue, extremite: 'de' | 'vers') => (extremite === 'de' ? t.noeud_de : t.noeud_vers);
 
   // ── Voies de chaque tronçon, reculées aux intersections (degré ≥ 3) ──
-  const voiesMax = new Map<string, number>();
+  const largeurMax = new Map<string, number>();
   for (const t of troncons) {
-    for (const n of [t.noeud_de, t.noeud_vers]) voiesMax.set(n, Math.max(voiesMax.get(n) ?? 0, t.voies_avant + t.voies_arriere));
+    for (const n of [t.noeud_de, t.noeud_vers]) largeurMax.set(n, Math.max(largeurMax.get(n) ?? 0, largeurTroncon(t)));
   }
-  const retrait = (n: string) => ((degres.get(n) ?? 0) >= 3 ? retraitAuNoeud(degres.get(n)!, voiesMax.get(n) ?? 1) : 0);
+  const retrait = (n: string) => ((degres.get(n) ?? 0) >= 3 ? retraitAuNoeud(degres.get(n)!, largeurMax.get(n) ?? LARGEUR_VOIE_M) : 0);
   const voies = new Map(
-    troncons.map((t) => [t.id, voiesTroncon(t.points, t.voies_avant, t.voies_arriere, retrait(t.noeud_de), retrait(t.noeud_vers))]),
+    troncons.map((t) => [
+      t.id,
+      voiesTroncon(t.points, t.voies_avant, t.voies_arriere, retrait(t.noeud_de), retrait(t.noeud_vers), { avant: t.types_avant, arriere: t.types_arriere }),
+    ]),
   );
   /** Voies d'un tronçon qui arrivent au nœud (dans le sens de circulation) et leurs types. */
   const arrivant = (t: TronconVue, noeud: string) =>
@@ -284,7 +287,7 @@ export function vueCarrefour({ noeuds, troncons, degres }: EntreeVue): VueCarref
     const axe = (noeud === t.noeud_de ? t.points : [...t.points].reverse()).map(repere.versXY);
     const [x, y] = axe[1] ?? [0, 1];
     const l = Math.hypot(x, y) || 1;
-    const demi = ((t.voies_avant + t.voies_arriere) * LARGEUR_VOIE_M) / 2 + DEBORD_PASSAGE_M;
+    const demi = largeurTroncon(t) / 2 + DEBORD_PASSAGE_M;
     const n: XY = [-y / l, x / l];
     return [repere.versLonLat([n[0] * demi, n[1] * demi]), repere.versLonLat([-n[0] * demi, -n[1] * demi])];
   }

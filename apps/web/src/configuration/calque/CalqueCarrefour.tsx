@@ -6,8 +6,8 @@
  * les clics vers la carte (pointer-events: none). La molette et l'appui de la souris, eux, sont
  * relayés au canvas : la carte zoome et se déplace aussi depuis une voie ou une liaison.
  */
-import { azimutsVoiesGiratoire, cleVoie, flechesParVoie, repereLocal, type LonLat, type XY } from '@voirie/engine'
-import type { Anneau, Branche, Connexion, EmpriseIa, TypeFeu } from '@voirie/schema'
+import { azimutsVoiesGiratoire, cleVoie, flechesParVoie, largeurVoie, repereLocal, type LonLat, type XY } from '@voirie/engine'
+import type { Anneau, Branche, Connexion, EmpriseIa, TypeFeu, TypeVoie } from '@voirie/schema'
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
 import { useMap } from 'react-map-gl/maplibre'
 import { FLECHES } from '../libelles'
@@ -89,8 +89,8 @@ interface Props {
   cadrePhoto?: { emprise: EmpriseIa; libelle: string } | null
 }
 
-/** Part de la largeur réelle (3,25 m) occupée par le dessin d'une voie. */
-const LARGEUR_VOIE_M = 3.25 * 0.8
+/** Part de la largeur réelle d'une voie (3,25 m, 1,5 m pour une voie vélo) occupée par son dessin. */
+const PART_DESSINEE = 0.8
 const LARGEUR_PASSAGE_M = 2.5
 /** Distance (px) à laquelle une voie sortante attire l'élastique de connexion. */
 const TOLERANCE_CIBLE_PX = 14
@@ -198,7 +198,7 @@ export function CalqueCarrefour(props: Props) {
 
   if (!projection) return null
   const { px, lonLat, metresParPixel } = projection
-  const largeurVoie = Math.max(2, LARGEUR_VOIE_M / metresParPixel)
+  const largeurDessinee = (type: TypeVoie) => Math.max(2, (largeurVoie(type) * PART_DESSINEE) / metresParPixel)
   const largeurPassage = Math.max(2, LARGEUR_PASSAGE_M / metresParPixel)
 
   const voies = new Map(
@@ -448,7 +448,7 @@ export function CalqueCarrefour(props: Props) {
         <Voie
           key={cle}
           segment={segmentPx(voie.geom)}
-          largeur={largeurVoie}
+          largeur={largeurDessinee(voie.type)}
           couleur={couleurs.get(cle) ?? GRIS_SORTANTE}
           sortante={voie.sens === 'sortante'}
           etat={etatVoie(cle, voie.sens === 'sortante')}

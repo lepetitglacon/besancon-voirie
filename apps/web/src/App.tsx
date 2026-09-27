@@ -42,7 +42,8 @@ import { FIABILITES } from './tempsReel/libelles'
 import { carrefoursSurLeTrace, type ContexteTram } from './tempsReel/priorite'
 import { preparerReseau } from './tram/positionsTrams'
 import { PALIERS_PERTE } from './tram/pertes'
-import type { OutilVoies } from './reseau/CalqueRues'
+import { couchesInteractivesVoies, type OutilVoies } from './reseau/couchesVoies'
+import { CoucheVoies } from './reseau/CoucheVoies'
 import { CoucheReseau } from './reseau/CoucheReseau'
 import { EnTeteReseau } from './reseau/EnTeteReseau'
 import { useModeReseau, ZOOM_VOIES } from './reseau/modeReseau'
@@ -159,6 +160,8 @@ function App() {
     [],
   )
   const outilEditeur: OutilVoies | null = !editeur ? null : configuration ? affichageConfiguration.outilGraphe : reseau.outil
+  /** Rues voie par voie : à l'approche du zoom des voies, où le réseau par tronçons s'efface. */
+  const voiesDessinees = editeur && zoom >= ZOOM_VOIES - 0.5
   const dessinerZoneIa = useCallback<ConfigurationCarrefourHandle['dessinerZoneIa']>(
     (emprise) => panneauConfiguration.current?.dessinerZoneIa(emprise),
     [],
@@ -451,20 +454,7 @@ function App() {
             onEmprise={changerEmprise}
             reseauActif={modeReseau && !configuration}
             curseur={outilEditeur === 'tracer' || outilEditeur === 'couper' ? 'crosshair' : undefined}
-            rues={
-              editeur && zoom >= ZOOM_VOIES && reseau.donnees.data
-                ? {
-                    reseau: reseau.donnees.data,
-                    outil: outilEditeur,
-                    selection: reseau.selection,
-                    carrefourOuvert: carrefourGraphe?.id ?? null,
-                    onClicNoeud: (id, position) => reseau.selectionner('noeud', id, position),
-                    onClicTroncon: (id, position) => reseau.clic(position, { type: 'troncon', id }, () => false, outilEditeur ?? 'autre'),
-                    onDeplacerNoeud: (id, position) => reseau.modifierNoeud(id, { position }),
-                    onBasculerLiaison: reseau.basculerLiaison,
-                  }
-                : null
-            }
+            couchesReseau={voiesDessinees ? couchesInteractivesVoies(outilEditeur) : undefined}
             onBasculerFeu={basculerFeu}
             onAjouterFeux={ajouterFeux}
             onComposerDepuis={(feu) =>
@@ -500,6 +490,16 @@ function App() {
             {tempsReel && feuxTempsReel.data && <CoucheFeuxTempsReel tempsReel={feuxTempsReel.data} tram={contexteTram} />}
             {tramAffiche && reseauTram.data && (
               <CoucheTrams reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
+            )}
+            {voiesDessinees && reseau.donnees.data && (
+              <CoucheVoies
+                reseau={reseau.donnees.data}
+                outil={outilEditeur}
+                selection={reseau.selection}
+                carrefourOuvert={carrefourGraphe?.id ?? null}
+                onDeplacerNoeud={(id, position) => reseau.modifierNoeud(id, { position })}
+                onBasculerLiaison={reseau.basculerLiaison}
+              />
             )}
             {editeur && (
               <CoucheReseau

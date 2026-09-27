@@ -45,7 +45,7 @@ import { OngletGraphe, type Scenario } from './OngletGraphe'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
 import { OngletProgramme } from './OngletProgramme'
 import { OUTILS, OUTILS_GRAPHE, OUTILS_RESEAU, RACCOURCIS, RACCOURCIS_GRAPHE, type ActionConfiguration, type OutilCarte } from './actions'
-import type { OutilVoies } from '../reseau/CalqueRues'
+import type { OutilVoies } from '../reseau/couchesVoies'
 import { PopupBranche, PopupFeu, PopupLiaison, PopupNoeud, PopupVoie, ReglageAnneau } from './PopupsConfiguration'
 import { feuxDesLignes, geometrieEnregistree, lignesPourMoteur, plansSaisis } from './programme'
 

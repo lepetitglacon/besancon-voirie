@@ -3,7 +3,7 @@
  * et leurs valeurs par défaut.
  */
 import { directionMouvement } from './branches.js';
-import { LARGEUR_VOIE_M, repereLocal, type LonLat, type XY } from './geometrie.js';
+import { LARGEUR_VOIE_M, LARGEUR_VOIE_VELO_M, repereLocal, type LonLat, type XY } from './geometrie.js';
 
 /** Type d'une voie : générale, réservée aux bus, aux vélos ou au tram. */
 export type TypeVoieReseau = 'generale' | 'bus' | 'velo' | 'tram';
@@ -66,6 +66,23 @@ function decaler(points: readonly XY[], d: number): XY[] {
   });
 }
 
+/** Largeur d'une voie selon son type (m) : les voies vélo sont moins larges. */
+export const largeurVoie = (type: TypeVoieReseau) => (type === 'velo' ? LARGEUR_VOIE_VELO_M : LARGEUR_VOIE_M);
+
+/** Voies d'un tronçon, par sens, et leurs types. */
+export interface VoiesParSens {
+  voies_avant: number;
+  voies_arriere: number;
+  types_avant?: readonly TypeVoieReseau[] | null;
+  types_arriere?: readonly TypeVoieReseau[] | null;
+}
+
+/** Largeur de la chaussée d'un tronçon, toutes voies comprises (m). */
+export function largeurTroncon(t: VoiesParSens): number {
+  const somme = (nombre: number, types: VoiesParSens['types_avant']) => typesVoies(nombre, types).reduce((s, type) => s + largeurVoie(type), 0);
+  return somme(t.voies_avant, t.types_avant) + somme(t.voies_arriere, t.types_arriere);
+}
+
 export interface VoiesTroncon {
   /** Voies dans le sens du tracé, de `de` vers `vers` ; rang 0 = la plus à gauche du conducteur. */
   avant: LonLat[][];
@@ -76,26 +93,43 @@ export interface VoiesTroncon {
 /**
  * Voies d'une rue le long de son axe, circulation à droite : un double sens a ses voies `avant`
  * à droite de l'axe et `arriere` à gauche, la voie de rang 0 contre l'axe ; un sens unique est
- * centré sur l'axe. Les bouts sont reculés de `retraitDe` et `retraitVers` mètres, pour laisser
- * la place aux liaisons du nœud (au plus 40 % de la longueur chacun).
+ * centré sur l'axe. Chaque voie a la largeur de son type (`types`). Les bouts sont reculés de
+ * `retraitDe` et `retraitVers` mètres, pour laisser la place aux liaisons du nœud (au plus 40 %
+ * de la longueur chacun).
  */
-export function voiesTroncon(points: readonly LonLat[], avant: number, arriere: number, retraitDe = 0, retraitVers = 0): VoiesTroncon {
+export function voiesTroncon(
+  points: readonly LonLat[],
+  avant: number,
+  arriere: number,
+  retraitDe = 0,
+  retraitVers = 0,
+  types: { avant?: readonly TypeVoieReseau[] | null; arriere?: readonly TypeVoieReseau[] | null } = {},
+): VoiesTroncon {
   const repere = repereLocal(points[0]!);
   const xy = points.map(repere.versXY);
   const longueur = longueurXY(xy);
   const axe = raccourcir(xy, Math.min(retraitDe, longueur * 0.4), Math.min(retraitVers, longueur * 0.4));
-  const w = LARGEUR_VOIE_M;
   const voie = (d: number) => decaler(axe, d).map(repere.versLonLat);
+  /** Décalage (m) du milieu de chaque voie : côte à côte depuis l'axe, ou centrées sur lui. */
+  const milieux = (nombre: number, typesSens: readonly TypeVoieReseau[] | null | undefined, centre: boolean) => {
+    const largeurs = typesVoies(nombre, typesSens).map(largeurVoie);
+    let bord = centre ? -largeurs.reduce((s, l) => s + l, 0) / 2 : 0;
+    return largeurs.map((l) => {
+      const milieu = bord + l / 2;
+      bord += l;
+      return milieu;
+    });
+  };
   return {
-    avant: Array.from({ length: avant }, (_, k) => voie(arriere > 0 ? (k + 0.5) * w : (k - (avant - 1) / 2) * w)),
-    arriere: Array.from({ length: arriere }, (_, k) => voie(avant > 0 ? -(k + 0.5) * w : -(k - (arriere - 1) / 2) * w).reverse()),
+    avant: milieux(avant, types.avant, arriere === 0).map(voie),
+    arriere: milieux(arriere, types.arriere, avant === 0).map((d) => voie(-d).reverse()),
   };
 }
 
-/** Recul (m) des voies au bout d'un tronçon, selon le nœud : rien à un cul-de-sac. */
-export function retraitAuNoeud(degre: number, voiesMax: number): number {
+/** Recul (m) des voies au bout d'un tronçon, selon le nœud et la plus large de ses rues (m) : rien à un cul-de-sac. */
+export function retraitAuNoeud(degre: number, largeurMax: number): number {
   if (degre <= 1) return 0;
-  return degre === 2 ? 3 : 4 + voiesMax * LARGEUR_VOIE_M * 0.6;
+  return degre === 2 ? 3 : 4 + largeurMax * 0.6;
 }
 
 // ── Liaisons voie à voie à un nœud ──

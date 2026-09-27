@@ -211,7 +211,9 @@ voie, passage piéton, connexion et poignée est un composant React, avec ses é
 (survol, voies liées, cible possible, cible, « à retirer »…) et des événements pointeur natifs.
 Le calque suit la carte à chaque déplacement (projection lon/lat → pixels recalculée une fois
 par image). Son fond laisse passer les gestes vers la carte. La vue d'ensemble de la ville
-(feux, carrefours) reste en couches MapLibre, plus efficaces pour des centaines d'éléments.
+(feux, carrefours) et les rues voie par voie ([RESEAU.md](RESEAU.md) §7) restent en couches
+MapLibre, plus efficaces pour des centaines ou des milliers d'éléments. Une voie vélo y est
+dessinée moins large (1,5 m au sol au lieu de 3,25 m).
 
 Sur la **photo aérienne** (fond de carte « Satellite »), l'éditeur dessine :
 - les voies à leur largeur réelle, en couleur pour les entrantes (une couleur par voie,

@@ -50,8 +50,8 @@ describe('export SUMO plain XML', () => {
     expect(sortie.edg).toContain('<edge id="tnord" from="n" to="s" numLanes="2" speed="13.89" priority="9" name="Rue &amp; Cie"');
     expect(sortie.edg).toContain('<edge id="-tnord" from="s" to="n" numLanes="1"');
     expect(sortie.edg).toContain('<edge id="tbas" from="j" to="sud" numLanes="1" speed="8.33"');
-    // Voie vélo au rang 1 (la plus à droite) parmi 2 : index SUMO 0.
-    expect(sortie.edg).toMatch(/<edge id="tnord" [^>]*>\n {4}<lane index="0" allow="bicycle"\/>\n {2}<\/edge>/);
+    // Voie vélo au rang 1 (la plus à droite) parmi 2 : index SUMO 0, moins large.
+    expect(sortie.edg).toMatch(/<edge id="tnord" [^>]*>\n {4}<lane index="0" allow="bicycle" width="1\.50"\/>\n {2}<\/edge>/);
   });
 
   it('traduit les liaisons de chaque nœud en index SUMO (0 = la voie de droite)', () => {

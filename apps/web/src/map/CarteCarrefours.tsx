@@ -2,7 +2,7 @@ import { Badge, Box, Button } from '@chakra-ui/react'
 import type { LonLat } from '@voirie/engine'
 import type { Bbox, CarrefourResume, CarrefoursGeoJson, EmpriseIa, FeuResume, FeuxGeoJson } from '@voirie/schema'
 import { AttributionControl, type Map as CarteMapLibre, type MapGeoJSONFeature } from 'maplibre-gl'
-import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Map, {
   Layer,
   Source,
@@ -12,7 +12,6 @@ import Map, {
   type MapRef,
 } from 'react-map-gl/maplibre'
 import { CalqueCarrefour, type ApercuFeu, type ClicCalque, type FeuPlacable } from '../configuration/calque/CalqueCarrefour'
-import { CalqueRues } from '../reseau/CalqueRues'
 import type { Poignee } from '../configuration/modele'
 import type { AffichageConfiguration } from '../configuration/ConfigurationCarrefour'
 import { Aide, BarreOutils, ControleZoom, PopupCarte, PopupSurCarte } from '../ds'
@@ -80,8 +79,8 @@ interface Props {
    * carrefour ou ses feux, qui l'ouvrent ; pas de bulle de feu.
    */
   reseauActif?: boolean
-  /** Voies du réseau de la vue (éditeur des voies, zoom ≥ 16). */
-  rues?: ComponentProps<typeof CalqueRues> | null
+  /** Couches de l'éditeur des voies qui répondent au pointeur (curseur), selon l'outil. */
+  couchesReseau?: string[]
   /** Curseur imposé (tracé d'un tronçon). */
   curseur?: string
   onBasculerFeu: (feu: FeuResume) => void
@@ -283,7 +282,7 @@ export function CarteCarrefours(props: Props) {
       style={{ width: '100%', height: '100%' }}
       hash
       attributionControl={false}
-      interactiveLayerIds={['feux', 'carrefours', 'feux-temps-reel']}
+      interactiveLayerIds={['feux', 'carrefours', 'feux-temps-reel', ...(props.couchesReseau ?? [])]}
       cursor={props.curseur ?? (traceActif ? 'crosshair' : survol ? 'pointer' : 'grab')}
       dragPan={!traceActif}
       boxZoom={edition === null}
@@ -336,7 +335,6 @@ export function CarteCarrefours(props: Props) {
           />
         </Source>
       )}
-      {props.rues && <CalqueRues {...props.rues} />}
       {configuration && (
         <CalqueCarrefour
           branches={configuration.branches}

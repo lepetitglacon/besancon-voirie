@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { repereLocal, type LonLat } from './geometrie.js';
-import { boutsAuNoeud, liaisonsParDefaut, liaisonsRetenues, liensParDefaut, voiesTroncon } from './reseau.js';
+import { boutsAuNoeud, largeurTroncon, liaisonsParDefaut, liaisonsRetenues, liensParDefaut, voiesTroncon } from './reseau.js';
 
 const centre: LonLat = [6.03, 47.25];
 const { versLonLat, versXY } = repereLocal(centre);
@@ -52,6 +52,17 @@ describe('voies d’une rue tout du long', () => {
     expect(avant.map((v) => x(v[0]!))).toEqual([expect.closeTo(-1.625, 3), expect.closeTo(1.625, 3)]);
     expect(y(avant[0]![0]!)).toBeCloseTo(10, 3);
     expect(y(avant[0]!.at(-1)!)).toBeCloseTo(95, 3);
+  });
+
+  it('donne à une voie vélo sa largeur (1,5 m), et à la rue la somme de ses voies', () => {
+    const { avant, arriere } = voiesTroncon([m(0, 0), m(0, 100)], 2, 1, 0, 0, { avant: ['generale', 'velo'] });
+    // Générale contre l'axe (3,25 m), vélo à sa droite : milieu à 3,25 + 0,75 m.
+    expect(avant.map((v) => x(v[0]!))).toEqual([expect.closeTo(1.625, 3), expect.closeTo(4, 3)]);
+    expect(x(arriere[0]![0]!)).toBeCloseTo(-1.625, 3);
+    // Piste cyclable à double sens, centrée sur l'axe de part et d'autre.
+    const piste = voiesTroncon([m(0, 0), m(0, 100)], 1, 1, 0, 0, { avant: ['velo'], arriere: ['velo'] });
+    expect(x(piste.avant[0]![0]!)).toBeCloseTo(0.75, 3);
+    expect(largeurTroncon({ voies_avant: 2, voies_arriere: 1, types_avant: ['generale', 'velo'] })).toBeCloseTo(8, 6);
   });
 
   it('suit les coudes de l’axe', () => {

@@ -33,6 +33,19 @@ describe('voies des rues', () => {
     expect(geometrie.voies.map((v) => v.cle)).toEqual(['t1:a0', 't1:a1', 't1:r0', 't2:a0', 't2:r0'])
   })
 
+  it('donne à chaque voie son type et sa largeur, et à chaque nœud la largeur de sa plus large rue', () => {
+    const velo = geometrieRues(
+      [{ ...troncon('t1', 'a', 'n', [m(-100, 0), m(0, 0)], 2, 1), properties: { ...troncon('t1', 'a', 'n', [], 2, 1).properties, types_avant: ['generale', 'velo'] } }],
+      [noeud('a', 1), noeud('n', 1)],
+    )
+    expect(velo.voies.map((v) => [v.cle, v.type, v.largeur])).toEqual([
+      ['t1:a0', 'generale', 3.25],
+      ['t1:a1', 'velo', 1.5],
+      ['t1:r0', 'generale', 3.25],
+    ])
+    expect(velo.largeurs.get('n')).toBeCloseTo(8, 6)
+  })
+
   it('range les bouts de voies par nœud, reculés à une intersection mais pas au bout du réseau', () => {
     expect(geometrie.arrivees.get('n')?.map((b) => [b.troncon, b.rang])).toEqual([
       ['t1', 0],

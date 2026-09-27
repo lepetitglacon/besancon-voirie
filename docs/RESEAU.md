@@ -173,7 +173,7 @@ longitude, latitude : netconvert les projette en UTM (`proj.plain-geo`, `proj.ut
 |---|---|
 | Nœud du réseau | uuid du nœud, `type="priority"` |
 | Nœud d'un carrefour | `type="traffic_light" tl="c<carrefour>"` : tous les nœuds du carrefour partagent un feu, comme un feu temporisé TM:PE sur plusieurs nœuds (programme par défaut de netconvert, en attendant `versTlLogic`) |
-| Tronçon, sens avant / arrière | `t<tronçon>` / `-t<tronçon>` ; voies bus, vélo, tram : `<lane allow="bus\|bicycle\|tram"/>` |
+| Tronçon, sens avant / arrière | `t<tronçon>` / `-t<tronçon>` ; voies bus, vélo, tram : `<lane allow="bus\|bicycle\|tram"/>`, une voie vélo avec `width="1.50"` |
 | Liaisons de chaque nœud | `<connection>` (saisies, ou à défaut proposées) : ce qu'on voit dans l'éditeur est ce que SUMO simule. SUMO numérote les voies de la droite vers la gauche : index = nombre de voies − 1 − rang. |
 
 ## 6. API
@@ -198,11 +198,19 @@ transaction. Un tronçon OSM corrigé (voies, tracé, nœud déplacé, coupé) e
 ## 7. Éditeur des voies
 
 **≡ Voies** sur la carte (touche <kbd>R</kbd>, mode Édition) : tout le réseau sur la photo IGN,
-imposée à plat. À partir du zoom 16, chaque tronçon est dessiné voie par voie, à sa largeur :
-voies vélo en vert, bus en rouge, tram en violet, les autres en gris (OSM), orange (corrigées)
-ou vert clair (tracées à la main). Chaque nœud montre sa ligne d'arrêt à feux (pastille rouge),
-son passage piéton (zébras en travers de la rue) et son carrefour (cercle violet, orange pour
-le carrefour ouvert). Un clic sur le disque d'un carrefour l'ouvre.
+imposée à plat. En dessous du zoom 16, chaque tronçon est un trait de la largeur de sa chaussée ;
+à partir du zoom 16, il est dessiné voie par voie, chaque voie à sa largeur au sol (3,25 m, 1,5 m
+pour une voie vélo) : voies vélo en vert, bus en rouge, tram en violet, les autres en gris
+(OSM), orange (corrigées) ou vert clair (tracées à la main). Chaque nœud montre sa ligne d'arrêt
+à feux (pastille rouge), son passage piéton (zébras en travers de la rue) et son carrefour
+(cercle violet, orange pour le carrefour ouvert). Un clic sur le disque d'un carrefour l'ouvre ;
+au zoom des voies, les voies et les nœuds qu'il recouvre passent avant lui, pas les feux.
+
+Tout est dessiné en couches MapLibre (`CoucheReseau`, puis `CoucheVoies` au zoom des voies),
+pas en SVG : quelques milliers de voies dans la vue restent fluides au déplacement de la carte.
+Des zones de prise invisibles, plus larges que les nœuds, les poignées et les liaisons,
+reçoivent le pointeur. Seul le carrefour ouvert garde son calque SVG (`CalqueCarrefour`), qui
+ne dessine que quelques dizaines d'éléments.
 
 | Outil | Geste |
 |---|---|
