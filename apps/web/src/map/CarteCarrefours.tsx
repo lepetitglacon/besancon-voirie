@@ -339,7 +339,6 @@ export function CarteCarrefours(props: Props) {
         <CalqueCarrefour
           branches={configuration.branches}
           connexions={configuration.connexions}
-          traces={configuration.traces}
           anneau={configuration.anneau}
           mode={configuration.mode}
           surlignees={new Set(configuration.connexionsSurlignees)}

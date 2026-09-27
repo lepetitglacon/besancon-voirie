@@ -30,6 +30,7 @@ import type {
 } from '@voirie/schema';
 import { DRIZZLE, type Db } from '../db/db.module.js';
 import { tableExiste, type Executeur } from '../db/sql.js';
+import { materialiserCarrefour } from '../reseau/carrefours.js';
 import { proposerBranches, type Passage } from './detection.js';
 
 /** Marge ajoutée au feu le plus éloigné du centre pour tracer le cercle de détection. */
@@ -70,15 +71,15 @@ function sensDe(branche: Branche): SensBranche {
 
 /**
  * Complète branches et connexions avec ce qui s'en déduit : sens, mouvements, flèches, alertes.
- * `reseau` : carrefour bâti sur le réseau (docs/RESEAU.md §4), avec le tracé réel de ses
- * connexions ; le sens des mouvements s'y lit sur les voies elles-mêmes.
+ * `reseau` : carrefour bâti sur le réseau (docs/RESEAU.md §4), dont les connexions sont saisies
+ * ou proposées ; le sens des mouvements s'y lit sur les voies elles-mêmes.
  */
 export function deduire(
   centre: [number, number],
   branches: Branche[],
   connexions: Connexion[],
   anneau: Anneau | null = null,
-  reseau: { traces: Record<string, Array<[number, number]>> } | null = null,
+  reseau: { connexions_saisies: boolean } | null = null,
 ): BranchesCarrefour {
   const avecDepart = new Set(connexions.map((c) => c.de));
   const alertes = branches.flatMap((b) =>
@@ -105,18 +106,15 @@ export function deduire(
     fleches: flechesParVoie(branches, connexions, azimutsVoies),
     alertes,
     graphe: reseau !== null,
-    traces: reseau?.traces ?? {},
+    connexions_saisies: reseau?.connexions_saisies ?? false,
   };
 }
-
-/** Connexion à écrire, avec le chemin réel qu'elle suit dans un carrefour de plusieurs nœuds. */
-export type ConnexionTracee = Connexion & { trace?: LonLat[] | null };
 
 /** Remplace branches, voies, passages piétons, connexions et anneau du carrefour (dans une transaction). */
 export async function ecrireBranches(
   tx: Executeur,
   carrefourId: string,
-  { branches, connexions, anneau }: { branches: Branche[]; connexions: ConnexionTracee[]; anneau: Anneau | null },
+  { branches, connexions, anneau }: { branches: Branche[]; connexions: Connexion[]; anneau: Anneau | null },
 ): Promise<void> {
   const ligne = (coords: unknown) => (coords ? JSON.stringify({ type: 'LineString', coordinates: coords }) : null);
   await tx.execute(sql`UPDATE carrefour SET anneau = ${anneau ? JSON.stringify(anneau) : null}::jsonb WHERE id = ${carrefourId}`);
@@ -140,14 +138,34 @@ export async function ecrireBranches(
       idsVoies.set(cleVoie(b.code, v.sens, v.rang), voie[0]!.id);
     }
   }
+  await insererConnexions(tx, carrefourId, connexions, idsVoies);
+}
+
+/** Écrit les connexions dont les deux voies existent (clé de voie → id) ; renvoie celles écartées. */
+async function insererConnexions(tx: Executeur, carrefourId: string, connexions: Connexion[], idsVoies: ReadonlyMap<string, string>): Promise<Connexion[]> {
+  const ecartees: Connexion[] = [];
   for (const c of connexions) {
     const [entree, sortie] = [idsVoies.get(c.de), idsVoies.get(c.vers)];
-    if (!entree || !sortie) continue;
-    await tx.execute(sql`
-      INSERT INTO connexion (carrefour_id, voie_entree_id, voie_sortie_id, trace)
-      VALUES (${carrefourId}, ${entree}, ${sortie}, ST_SetSRID(ST_GeomFromGeoJSON(${c.trace && c.trace.length >= 2 ? ligne(c.trace) : null}), 4326))
-    `);
+    if (!entree || !sortie) {
+      ecartees.push(c);
+      continue;
+    }
+    await tx.execute(sql`INSERT INTO connexion (carrefour_id, voie_entree_id, voie_sortie_id) VALUES (${carrefourId}, ${entree}, ${sortie})`);
   }
+  return ecartees;
+}
+
+/** Connexions enregistrées d'un carrefour, par clés de voies (« S:e0 » → « O:s1 »). */
+export async function connexionsEnregistrees(db: Executeur, carrefourId: string): Promise<Connexion[]> {
+  const { rows } = await db.execute<Connexion>(sql`
+    SELECT be.code || ':e' || ve.rang AS de, bs.code || ':s' || vs.rang AS vers
+    FROM connexion c
+    JOIN voie ve ON ve.id = c.voie_entree_id JOIN branche be ON be.id = ve.branche_id
+    JOIN voie vs ON vs.id = c.voie_sortie_id JOIN branche bs ON bs.id = vs.branche_id
+    WHERE c.carrefour_id = ${carrefourId}
+    ORDER BY 1, 2
+  `);
+  return rows;
 }
 
 /** Le carrefour est bâti sur le réseau : il a des nœuds. */
@@ -163,7 +181,7 @@ export class BranchesService {
 
   /** Branches, voies, passages piétons et connexions enregistrés, avec ce qui s'en déduit. */
   async lire(carrefourId: string): Promise<BranchesCarrefour> {
-    const { centre, anneau } = await this.carrefour(this.db, carrefourId);
+    const { centre, anneau, connexions_saisies } = await this.carrefour(this.db, carrefourId);
     const { rows: branches } = await this.db.execute<Branche>(sql`
       SELECT b.code, b.nom, b.azimut_deg AS azimut, b.osm_way_id::float8 AS osm_way_id,
              (ST_AsGeoJSON(b.geom)::json)->'coordinates' AS geom,
@@ -181,19 +199,8 @@ export class BranchesService {
       WHERE b.carrefour_id = ${carrefourId}
       ORDER BY b.azimut_deg
     `);
-    const { rows: lues } = await this.db.execute<Connexion & { trace: Array<[number, number]> | null }>(sql`
-      SELECT be.code || ':e' || ve.rang AS de, bs.code || ':s' || vs.rang AS vers,
-             (ST_AsGeoJSON(c.trace)::json)->'coordinates' AS trace
-      FROM connexion c
-      JOIN voie ve ON ve.id = c.voie_entree_id JOIN branche be ON be.id = ve.branche_id
-      JOIN voie vs ON vs.id = c.voie_sortie_id JOIN branche bs ON bs.id = vs.branche_id
-      WHERE c.carrefour_id = ${carrefourId}
-      ORDER BY 1, 2
-    `);
-    const connexions = lues.map(({ de, vers }) => ({ de, vers }));
-    const reseau = (await surLeReseau(this.db, carrefourId))
-      ? { traces: Object.fromEntries(lues.flatMap((c) => (c.trace ? [[`${c.de}>${c.vers}`, c.trace] as const] : []))) }
-      : null;
+    const connexions = await connexionsEnregistrees(this.db, carrefourId);
+    const reseau = (await surLeReseau(this.db, carrefourId)) ? { connexions_saisies } : null;
     return deduire(centre, branches, connexions, anneau, reseau);
   }
 
@@ -266,8 +273,9 @@ export class BranchesService {
   }
 
   /**
-   * Remplace branches, voies, passages piétons, connexions et anneau du carrefour. Refusé pour un
-   * carrefour bâti sur le réseau : ses branches se déduisent de ses nœuds.
+   * Remplace branches, voies, passages piétons, connexions et anneau du carrefour. Carrefour bâti
+   * sur le réseau : ses branches se déduisent de ses nœuds, seules ses connexions s'enregistrent
+   * (et sont gardées quand le réseau change) ; une connexion vers une voie qu'il n'a pas est refusée.
    */
   async enregistrer(carrefourId: string, { branches, connexions, anneau }: ConfigurationBranches): Promise<BranchesCarrefour> {
     const horsNoeud = anneau ? liaisonsHorsNoeud(branches, connexions, anneau) : [];
@@ -279,20 +287,53 @@ export class BranchesService {
     }
     await this.db.transaction(async (tx) => {
       await this.carrefour(tx, carrefourId); // 404 si le carrefour n'existe pas
-      if (await surLeReseau(tx, carrefourId)) {
-        throw new ConflictException('Carrefour bâti sur le réseau : ses branches se déduisent de ses nœuds et de leurs voies');
-      }
+      if (await surLeReseau(tx, carrefourId)) return this.enregistrerConnexions(tx, carrefourId, connexions);
       await ecrireBranches(tx, carrefourId, { branches, connexions, anneau });
     });
     return this.lire(carrefourId);
   }
 
-  private async carrefour(db: Executeur, carrefourId: string): Promise<{ centre: [number, number]; anneau: Anneau | null }> {
-    const { rows } = await db.execute<{ lon: number; lat: number; anneau: Anneau | null }>(
-      sql`SELECT ST_X(geom) AS lon, ST_Y(geom) AS lat, anneau FROM carrefour WHERE id = ${carrefourId}`,
+  /**
+   * Carrefour bâti sur le réseau : oublie les connexions saisies et reprend celles proposées
+   * d'après les liaisons de ses nœuds.
+   */
+  async proposerConnexions(carrefourId: string): Promise<BranchesCarrefour> {
+    await this.db.transaction(async (tx) => {
+      await this.carrefour(tx, carrefourId);
+      if (!(await surLeReseau(tx, carrefourId))) throw new ConflictException('Carrefour dessiné à la main : ses connexions ne se proposent pas d’après le réseau');
+      await tx.execute(sql`UPDATE carrefour SET connexions_saisies = false WHERE id = ${carrefourId}`);
+      await materialiserCarrefour(tx, carrefourId);
+    });
+    return this.lire(carrefourId);
+  }
+
+  private async enregistrerConnexions(tx: Executeur, carrefourId: string, connexions: Connexion[]): Promise<void> {
+    const { rows } = await tx.execute<{ id: string; cle: string }>(sql`
+      SELECT v.id, b.code || ':' || CASE WHEN v.sens = 'entrante' THEN 'e' ELSE 's' END || v.rang AS cle
+      FROM voie v JOIN branche b ON b.id = v.branche_id WHERE b.carrefour_id = ${carrefourId}
+    `);
+    const idsVoies = new Map(rows.map((r) => [r.cle, r.id]));
+    const inconnues = connexions.filter((c) => !idsVoies.has(c.de) || !idsVoies.has(c.vers));
+    if (inconnues.length > 0) {
+      throw new BadRequestException({
+        message: 'Connexions vers des voies que le carrefour n’a pas',
+        erreurs: inconnues.map((c) => `${c.de} → ${c.vers} : voie inconnue (le réseau a changé ?)`),
+      });
+    }
+    await tx.execute(sql`DELETE FROM connexion WHERE carrefour_id = ${carrefourId}`);
+    await insererConnexions(tx, carrefourId, connexions, idsVoies);
+    await tx.execute(sql`UPDATE carrefour SET connexions_saisies = true WHERE id = ${carrefourId}`);
+  }
+
+  private async carrefour(
+    db: Executeur,
+    carrefourId: string,
+  ): Promise<{ centre: [number, number]; anneau: Anneau | null; connexions_saisies: boolean }> {
+    const { rows } = await db.execute<{ lon: number; lat: number; anneau: Anneau | null; connexions_saisies: boolean }>(
+      sql`SELECT ST_X(geom) AS lon, ST_Y(geom) AS lat, anneau, connexions_saisies FROM carrefour WHERE id = ${carrefourId}`,
     );
     if (!rows[0]) throw new NotFoundException('Carrefour inconnu');
-    return { centre: [rows[0].lon, rows[0].lat], anneau: rows[0].anneau };
+    return { centre: [rows[0].lon, rows[0].lat], anneau: rows[0].anneau, connexions_saisies: rows[0].connexions_saisies };
   }
 
   /**
@@ -409,7 +450,6 @@ export function geometrieDe(config: BranchesCarrefour) {
     ),
     traversees: new Map(config.branches.flatMap((b) => (b.traversee ? [[b.code, b.traversee] as const] : []))),
     troncons: new Set(config.branches.filter((b) => b.troncon).map((b) => b.code)),
-    traces: new Map(Object.entries(config.traces ?? {})),
   };
 }
 

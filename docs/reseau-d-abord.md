@@ -3,7 +3,7 @@
 > **Objectif** : passer de « les carrefours d'abord, les rues raccordées autour » à un graphe de
 > toute la ville à la TM:PE, semé une fois depuis OSM puis corrigé sur la photo IGN, où un
 > carrefour est un groupe de nœuds qu'on configure.
-> **Statut** : en cours (étapes 1 à 6 et 8 faites sur `reseau-voies`)
+> **Statut** : en cours (étapes 1 à 6 et 8 faites sur `reseau-voies` ; 3, 7 et 9 à faire)
 > **Dernière mise à jour** : 2026-09-27
 
 ## Contexte
@@ -35,6 +35,7 @@ Hors périmètre : programme des feux dans SUMO (`versTlLogic`), demande de traf
 | R4 | `branche` / `voie` / `connexion` restent, **écrites par le serveur** d'après le graphe (vue calculée), pour un carrefour qui a des nœuds | Réécrire d'un coup moteur, lignes, programme, temps réel et IA | Lignes de feux, conflits, programme et temps réel marchent sans changement. Un carrefour sans nœud garde ses branches saisies à la main (tests, réseau non semé). |
 | R5 | Le semis prend les **routes, pistes cyclables, feux et passages piétons** ; la **composition** reste le choix des feux, et le carrefour prend les **nœuds parmi eux** (enveloppe des feux + 8 m, tout l'anneau d'un giratoire), ajustables à la main | Détection automatique des carrefours | Décision 009 : un carrefour = un contrôleur, ce qu'aucune distance ne devine. |
 | R6 | Feu véhicule (`highway=traffic_signals`) = **ligne d'arrêt** ; feu piéton (`crossing=traffic_signals`) = **passage piéton à feux** | Tout feu OSM est une ligne d'arrêt | Sur les vrais carrefours, le passage piéton à feux est entre la ligne d'arrêt et l'intersection : le traiter en ligne d'arrêt coupait chaque approche en deux branches. |
+| R7 | Vu de l'éditeur, un carrefour est une **boîte noire** : ses **connexions vont d'une voie entrante à une voie sortante** (outil Liaison de son calque, comme un carrefour dessiné à la main), **proposées** d'après les liaisons de ses nœuds, puis **saisies** et gardées quand le réseau change ; son cœur (nœuds et tronçons entre les lignes d'arrêt) n'est ni dessiné voie par voie ni relié nœud par nœud | Connexions déduites des liaisons de chaque nœud du groupe, dessinées selon leur tracé à travers les nœuds | Sur un carrefour de 10 à 20 nœuds, les liaisons nœud par nœud étaient illisibles et régler un mouvement demandait de retoucher plusieurs nœuds. C'est aussi ce que fait SUMO avec des nœuds joints. |
 
 ## Correspondances
 
@@ -126,8 +127,10 @@ types de voies par tronçon ; passage piéton par nœud.
 
 ### Étape 6 — Calculer la vue carrefour pour le moteur ✅
 
-Fait (`174b7b8`) : `vueCarrefour`, écrite dans `branche` / `voie` / `connexion` (avec le tracé
-réel de chaque connexion) à chaque modification du réseau autour. Les tables restent (R4).
+Fait (`174b7b8`) : `vueCarrefour`, écrite dans `branche` / `voie` / `connexion` à chaque
+modification du réseau autour. Les tables restent (R4). Depuis R7, les connexions sont proposées
+d'après les liaisons des nœuds tant qu'elles n'ont pas été saisies (`carrefour.connexions_saisies`),
+et dessinées en courbe d'une voie à l'autre.
 
 **Résultat attendu** : Boulevard Léon Blum × Rue Frédéric Chopin (chaussées séparées, 18 nœuds)
 donne 9 branches, 43 connexions, et les conflits de ses lignes proposées.
@@ -147,6 +150,21 @@ Fait (`4fb7b34`) : tous les nœuds d'un carrefour partagent `tl="c<carrefour>"`.
 ```bash
 pnpm reseau:sumo && cd data/sumo && netconvert -c reseau.netccfg
 ```
+
+### Étape 9 — Joindre les nœuds d'un carrefour dans l'export SUMO ⏳
+
+Depuis R7, les connexions saisies d'un carrefour ne sont pas dans l'export, qui écrit encore les
+liaisons (proposées) de chacun de ses nœuds. À faire :
+
+- `nod.xml` : `<join nodes="…"/>` des nœuds de chaque carrefour (netconvert en fait une seule
+  jonction et retire les tronçons du cœur) ;
+- `con.xml` : chaque connexion, de l'arête qui arrive à la branche (le tronçon de la ligne
+  d'arrêt, suivi vers l'extérieur jusqu'au bord du carrefour) à celle qui en repart ; les
+  branches internes (R1…) se composent (O → R1 puis R1 → E donne O → E).
+
+**Résultat attendu** : netconvert construit une jonction par carrefour, avec exactement les
+liaisons vues dans son calque. netconvert n'est pas installé sur le poste : à vérifier avant de
+s'appuyer sur `<join>` (identifiant `cluster_…`, feu gardé).
 
 ## Vérification finale
 
@@ -193,3 +211,4 @@ pnpm reseau:sumo && cd data/sumo && netconvert -c reseau.netccfg
 
 - 2026-09-27 — création : modèle cible, couches de données, inventaire avant fusion, plan en 8 étapes
 - 2026-09-27 — décisions R5 (semis : routes, pistes cyclables, feux, passages ; composition par les feux) et R6 (feu véhicule = ligne d'arrêt) ; étapes 1, 2, 4, 5, 6 et 8 faites, R3 et R4 révisées
+- 2026-09-27 — décision R7 (carrefour en boîte noire, connexions d'une voie à l'autre, saisies et gardées) ; étape 6 révisée, étape 9 ajoutée (export SUMO des nœuds joints)

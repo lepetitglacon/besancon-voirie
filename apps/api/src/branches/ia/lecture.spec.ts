@@ -33,7 +33,7 @@ const detection: DetectionBranches = {
   fleches: {},
   alertes: [],
   graphe: false,
-  traces: {},
+  connexions_saisies: false,
   sources: { S: 'defaut' },
 };
 

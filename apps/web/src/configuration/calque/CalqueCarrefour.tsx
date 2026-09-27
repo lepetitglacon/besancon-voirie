@@ -63,8 +63,6 @@ export interface ApercuFeu {
 interface Props {
   branches: Branche[]
   connexions: Connexion[]
-  /** Chemin réel des connexions (« de>vers ») d'un carrefour bâti sur le réseau. */
-  traces?: Record<string, LonLat[]>
   /** Nœuds de l'anneau d'un giratoire ; null pour un carrefour ordinaire. */
   anneau: Anneau | null
   /** null : dessin seul, sans poignées ni clics. */
@@ -121,7 +119,6 @@ export function CalqueCarrefour(props: Props) {
   const {
     branches,
     connexions,
-    traces,
     anneau,
     mode,
     surlignees,
@@ -469,7 +466,6 @@ export function CalqueCarrefour(props: Props) {
             key={cle}
             entree={segmentPx(entree.geom)}
             sortie={segmentPx(sortie.geom)}
-            trace={traces?.[cle]?.map(px)}
             couleur={couleurs.get(c.de) ?? '#ffffff'}
             etat={etatCourbe(cle)}
             feu={feux ? (feux.connexions.get(cle) ?? 'libre') : undefined}

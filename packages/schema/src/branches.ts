@@ -164,12 +164,15 @@ export interface BranchesCarrefour {
   /** Voies entrantes sans connexion, etc. */
   alertes: string[];
   /**
-   * Carrefour bâti sur le réseau (docs/RESEAU.md §4) : ses branches, voies et connexions se
-   * déduisent de ses nœuds et ne se saisissent pas à la main.
+   * Carrefour bâti sur le réseau (docs/RESEAU.md §4) : ses branches et leurs voies se déduisent
+   * de ses nœuds ; seules ses connexions se saisissent à la main.
    */
   graphe: boolean;
-  /** Chemin réel de certaines connexions (« de>vers »), à travers un carrefour de plusieurs nœuds. */
-  traces: Record<string, Array<[number, number]>>;
+  /**
+   * Carrefour bâti sur le réseau : connexions saisies (gardées quand le réseau change) ; false :
+   * celles proposées d'après les liaisons de ses nœuds.
+   */
+  connexions_saisies: boolean;
 }
 
 /** Proposition de branches, voies et connexions détectée depuis OSM, non enregistrée. */

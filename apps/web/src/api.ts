@@ -92,6 +92,9 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(configuration),
     }),
+  /** Carrefour bâti sur le réseau : oublie ses liaisons saisies, reprend celles proposées. */
+  proposerConnexions: (carrefourId: string) =>
+    requete<BranchesCarrefour>(`/api/carrefours/${carrefourId}/branches/connexions`, { method: 'DELETE' }),
   lignes: (carrefourId: string) => requete<LignesCarrefour>(`/api/carrefours/${carrefourId}/lignes`),
   enregistrerLignes: (carrefourId: string, configuration: ConfigurationLignes) =>
     requete<LignesCarrefour>(`/api/carrefours/${carrefourId}/lignes`, {

@@ -1,13 +1,14 @@
 /**
  * Carrefours bâtis sur le réseau — docs/RESEAU.md §4. Un carrefour est un groupe de nœuds : ceux
  * qui se trouvent parmi ses feux quand on le compose, complétés ou retirés à la main. Ses
- * branches, voies et connexions (tables `branche`, `voie`, `connexion`) se déduisent de ces nœuds
- * et sont recalculées à chaque modification du réseau autour d'eux.
+ * branches et leurs voies (tables `branche`, `voie`) se déduisent de ces nœuds et sont
+ * recalculées à chaque modification du réseau autour d'eux ; ses connexions aussi, tant qu'elles
+ * n'ont pas été saisies à la main (`carrefour.connexions_saisies`), après quoi elles sont gardées.
  */
 import { vueCarrefour, type LonLat, type NoeudVue, type TronconVue, type TypeVoieReseau } from '@voirie/engine';
 import type { Branche, Liaison } from '@voirie/schema';
 import { sql } from 'drizzle-orm';
-import { ecrireBranches } from '../branches/branches.service.js';
+import { connexionsEnregistrees, ecrireBranches } from '../branches/branches.service.js';
 import { tableExiste, type Executeur } from '../db/sql.js';
 
 /** Marge (m) autour de l'enveloppe des feux : les nœuds qu'elle couvre entrent dans le carrefour. */
@@ -45,8 +46,9 @@ export async function rattacherNoeuds(db: Executeur, carrefourId: string): Promi
 
 /**
  * Recalcule les branches, voies et connexions d'un carrefour d'après ses nœuds, et garde les
- * codes de ses branches sur les bouts de tronçons. Sans effet (false) pour un carrefour sans nœud,
- * dont les branches se saisissent à la main.
+ * codes de ses branches sur les bouts de tronçons. Des connexions saisies à la main sont gardées,
+ * sauf celles dont une voie a disparu. Sans effet (false) pour un carrefour sans nœud, dont les
+ * branches se saisissent à la main.
  */
 export async function materialiserCarrefour(db: Executeur, carrefourId: string): Promise<boolean> {
   const { rows: noeuds } = await db.execute<{ id: string; lon: number; lat: number; feux: boolean; pieton: string | null; liaisons: Liaison[] | null }>(sql`
@@ -84,7 +86,9 @@ export async function materialiserCarrefour(db: Executeur, carrefourId: string):
     noeud: null,
     troncon: false,
   }));
-  await ecrireBranches(db, carrefourId, { branches, connexions: vue.connexions, anneau: null });
+  const { rows: etat } = await db.execute<{ saisies: boolean }>(sql`SELECT connexions_saisies AS saisies FROM carrefour WHERE id = ${carrefourId}`);
+  const connexions = etat[0]?.saisies ? await connexionsEnregistrees(db, carrefourId) : vue.connexions;
+  await ecrireBranches(db, carrefourId, { branches, connexions, anneau: null });
   for (const { troncon, extremite, code } of vue.codes) {
     await db.execute(
       extremite === 'de'

@@ -96,10 +96,6 @@ describe('vue d’un carrefour tirée du réseau', () => {
     expect(cles(vue)).toContain('N:e0>E:s0');
     expect(cles(vue)).toContain('S:e0>O:s0');
     expect(cles(vue)).not.toContain('N:e0>N:s0');
-    // Le tracé part de la ligne d'arrêt, passe par l'intersection et rejoint la sortie.
-    const trace = vue.connexions.find((c) => c.de === 'N:e0' && c.vers === 'S:s0')!.trace.map(repereLocal(centre).versXY);
-    expect(trace[0]![1]).toBeCloseTo(20, 0);
-    expect(trace.at(-1)![1]).toBeLessThan(-19);
   });
 
   it('prend le passage piéton entre la ligne d’arrêt et l’intersection', () => {

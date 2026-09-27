@@ -12,7 +12,7 @@ import { useEffect, useEffectEvent, useMemo, useState, type ReactNode } from 're
 import { Layer, Source, useMap } from 'react-map-gl/maplibre'
 import { PopupSurCarte } from '../ds'
 import { COULEURS_RESEAU } from './couleurs'
-import { useCoucheDessous, ZONES } from './couchesVoies'
+import { COUCHE_COEUR, useCoucheDessous, ZONES } from './couchesVoies'
 import { metresEnPixels } from './largeurs'
 import { ZOOM_VOIES } from './modeReseau'
 import type { Cible, Trace } from './trace'
@@ -64,11 +64,11 @@ export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }
         [x + TOLERANCE_PX, y + TOLERANCE_PX],
       ]
       // Au zoom des voies, les couches de CoucheVoies ; en dessous, celles des tronçons.
-      const couches = [ZONES.noeuds, 'reseau-noeuds', 'reseau-voies', 'reseau-troncons'].filter((id) => map.getLayer(id))
+      const couches = [ZONES.noeuds, 'reseau-noeuds', 'reseau-voies', COUCHE_COEUR, 'reseau-troncons'].filter((id) => map.getLayer(id))
       const objets = map.queryRenderedFeatures(zone, { layers: couches })
       const noeud = objets.find((f) => f.layer.id === ZONES.noeuds || f.layer.id === 'reseau-noeuds')
       if (noeud) return { type: 'noeud', id: noeud.properties.id as string }
-      const voie = objets.find((f) => f.layer.id === 'reseau-voies')
+      const voie = objets.find((f) => f.layer.id === 'reseau-voies' || f.layer.id === COUCHE_COEUR)
       if (voie) return { type: 'troncon', id: voie.properties.troncon as string }
       const troncon = objets.find((f) => f.layer.id === 'reseau-troncons')
       return troncon ? { type: 'troncon', id: troncon.properties.id as string } : null

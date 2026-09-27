@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, UseGuards } from '@nestjs/common';
 import { ConfigurationBranches, DemandeAnalyseIa } from '@voirie/schema';
 import { EditionGuard } from '../common/edition.guard.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
@@ -52,5 +52,12 @@ export class BranchesController {
     @Body(new ZodValidationPipe(ConfigurationBranches)) configuration: ConfigurationBranches,
   ) {
     return this.branches.enregistrer(id, configuration);
+  }
+
+  /** Carrefour bâti sur le réseau : oublie les connexions saisies, reprend celles proposées. */
+  @Delete('connexions')
+  @UseGuards(EditionGuard)
+  proposerConnexions(@Param('id', ParseUUIDPipe) id: string) {
+    return this.branches.proposerConnexions(id);
   }
 }

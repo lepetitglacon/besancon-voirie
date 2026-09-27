@@ -4,7 +4,9 @@
  *   larges) ; les voies vélo, bus et tram dans leur couleur, les autres dans celle de leur
  *   origine (OSM, corrigée, tracée à la main) ;
  * - chaque nœud montre ce qu'il porte : ligne d'arrêt à feux, passage piéton (zébras en travers
- *   de la rue), appartenance à un carrefour (cercle) ;
+ *   de la rue), appartenance à un carrefour (cercle, avec l'outil Nœuds) ;
+ * - un carrefour est une boîte noire : ses liaisons vont d'une branche à l'autre (calque du
+ *   carrefour) ; en son cœur, on ne dessine que l'axe des tronçons, sans nœuds ni liaisons ;
  * - outil Sélection : glisser un nœud le déplace (les tronçons suivent) ;
  * - outil Liaison : du bout d'une voie qui arrive au début d'une voie qui repart (« lane
  *   connector »), à chaque nœud ; refaire le geste, ou cliquer une liaison, la retire.
@@ -19,7 +21,7 @@ import { Layer, Source, useMap } from 'react-map-gl/maplibre'
 import { TOLERANCE_CLIC_PX } from '../configuration/calque/relais'
 import { FEU } from '../theme/couleurs'
 import { COULEURS_RESEAU } from './couleurs'
-import { couchesInteractivesVoies, useCoucheDessous, ZONES, type OutilVoies } from './couchesVoies'
+import { COUCHE_COEUR, couchesInteractivesVoies, useCoucheDessous, ZONES, type OutilVoies } from './couchesVoies'
 import { metresEnPixels } from './largeurs'
 import { ZOOM_VOIES, type SelectionReseau } from './modeReseau'
 import { geometrieRues, type BoutVoie } from './voiesRues'
@@ -99,12 +101,35 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
     return parNoeud
   }, [troncons])
 
+  // Un carrefour est une boîte noire : ses liaisons vont d'une branche à l'autre (calque du
+  // carrefour). Au cœur, entre ses lignes d'arrêt, on ne dessine ni voies, ni nœuds, ni liaisons.
+  const { coeur, interieurs } = useMemo(() => {
+    const carrefourDe = new Map(noeuds.map((n) => [n.id, n.properties.carrefour_id]))
+    /** Tronçon au cœur d'un carrefour : ses deux bouts en sont, et il ne porte aucune de ses branches. */
+    const auCoeur = new Set(
+      troncons
+        .filter((t) => {
+          const { noeud_de, noeud_vers, branche_de, branche_vers } = t.properties
+          const carrefour = carrefourDe.get(noeud_de)
+          return carrefour != null && carrefour === carrefourDe.get(noeud_vers) && !branche_de && !branche_vers
+        })
+        .map((t) => t.id),
+    )
+    /** Nœud d'un carrefour dont tous les tronçons sont au cœur. */
+    const dedans = new Set(
+      noeuds.filter((n) => n.properties.carrefour_id && (autour.get(n.id) ?? []).every((t) => auCoeur.has(t.id))).map((n) => n.id),
+    )
+    return { coeur: auCoeur, interieurs: dedans }
+  }, [troncons, noeuds, autour])
+  // L'outil Nœuds montre tous les nœuds : on y ajoute ou retire ceux des carrefours.
+  const tousLesNoeuds = outil === 'noeuds'
+
   // ── Données des couches : ne changent qu'avec le réseau ──
 
   const voies = useMemo(() => {
     const parId = new Map(troncons.map((t) => [t.id, t.properties]))
     return collection<Ligne>(
-      geometrie.voies.map((v) => {
+      geometrie.voies.filter((v) => !coeur.has(v.troncon)).map((v) => {
         const t = parId.get(v.troncon)!
         const origine = t.source === 'manuel' ? 'manuel' : t.modifie ? 'modifie' : 'osm'
         return {
@@ -114,18 +139,30 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
         }
       }),
     )
-  }, [geometrie, troncons])
+  }, [geometrie, troncons, coeur])
+
+  const axesCoeur = useMemo(
+    () =>
+      collection<Ligne>(
+        troncons
+          .filter((t) => coeur.has(t.id))
+          .map((t) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: t.geometry.coordinates }, properties: { troncon: t.id } })),
+      ),
+    [troncons, coeur],
+  )
 
   const pastilles = useMemo(
     () =>
       collection<Point>(
-        noeuds.map((n) => ({
-          type: 'Feature',
-          geometry: n.geometry,
-          properties: { id: n.id, feux: n.properties.feux, cul_de_sac: n.properties.degre === 1, carrefour_id: n.properties.carrefour_id ?? '' },
-        })),
+        noeuds
+          .filter((n) => tousLesNoeuds || !interieurs.has(n.id))
+          .map((n) => ({
+            type: 'Feature',
+            geometry: n.geometry,
+            properties: { id: n.id, feux: n.properties.feux, cul_de_sac: n.properties.degre === 1, carrefour_id: n.properties.carrefour_id ?? '' },
+          })),
       ),
-    [noeuds],
+    [noeuds, interieurs, tousLesNoeuds],
   )
 
   // Zébras en travers de la rue, sur la plus large de celles qui arrivent au nœud.
@@ -134,7 +171,7 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
       collection<Ligne>(
         noeuds.flatMap((n) => {
           const t = autour.get(n.id)?.[0]
-          if (!n.properties.pieton || !t) return []
+          if (!n.properties.pieton || !t || interieurs.has(n.id)) return []
           const repere = repereLocal(n.geometry.coordinates)
           const points = t.properties.noeud_de === n.id ? t.geometry.coordinates : [...t.geometry.coordinates].reverse()
           const [x, y] = repere.versXY(points[1] ?? points[0]!)
@@ -150,17 +187,18 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
           ]
         }),
       ),
-    [noeuds, autour, geometrie],
+    [noeuds, autour, geometrie, interieurs],
   )
 
   const connecter = outil === 'connecter'
-  // Liaisons de chaque nœud, saisies ou proposées (outil Liaison seulement : c'est le calcul le plus long).
+  // Liaisons de chaque nœud hors des carrefours, saisies ou proposées (outil Liaison seulement :
+  // c'est le calcul le plus long). Celles d'un carrefour se relient dans son calque.
   const liaisons = useMemo(() => {
     if (!connecter) return collection<Ligne>([])
     return collection<Ligne>(
       noeuds.flatMap((n) => {
         const touchent = autour.get(n.id) ?? []
-        if (touchent.length < 2) return []
+        if (touchent.length < 2 || n.properties.carrefour_id) return []
         const bouts = boutsAuNoeud(
           n.id,
           touchent.map((t) => ({ ...t.properties, points: t.geometry.coordinates })),
@@ -185,7 +223,7 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
   // Bouts des voies qui arrivent (à tirer) et débuts de celles qui repartent (cibles), aux nœuds où l'on peut relier.
   const poignees = useMemo(() => {
     if (!connecter) return null
-    const relies = noeuds.filter((n) => (autour.get(n.id)?.length ?? 0) >= 2)
+    const relies = noeuds.filter((n) => (autour.get(n.id)?.length ?? 0) >= 2 && !n.properties.carrefour_id)
     const point = (noeud: string, b: BoutVoie, sens: 'arrivee' | 'depart') => ({
       type: 'Feature' as const,
       geometry: { type: 'Point' as const, coordinates: b.bout },
@@ -337,6 +375,15 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
           }}
         />
       </Source>
+      <Source id={COUCHE_COEUR} type="geojson" data={axesCoeur}>
+        <Layer
+          id={COUCHE_COEUR}
+          type="line"
+          minzoom={minzoom}
+          beforeId={dessous}
+          paint={{ 'line-color': '#ffffff', 'line-width': 1.5, 'line-dasharray': [2, 2], 'line-opacity': enApparaissant(0.5) }}
+        />
+      </Source>
       <Source id="reseau-voies-zebras" type="geojson" data={zebras}>
         <Layer
           id="reseau-voies-zebras"
@@ -358,7 +405,8 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
           type="circle"
           minzoom={minzoom}
           beforeId={dessous}
-          filter={['!=', ['get', 'carrefour_id'], '']}
+          // Appartenance à un carrefour : montrée avec l'outil Nœuds seulement.
+          filter={['all', tousLesNoeuds, ['!=', ['get', 'carrefour_id'], '']]}
           paint={{
             'circle-radius': 9,
             'circle-opacity': 0,

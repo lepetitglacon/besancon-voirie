@@ -63,6 +63,11 @@ export const carrefour = pgTable(
     conflitsAdmis: jsonb('conflits_admis').$type<Array<[string, string]>>().notNull().default([]),
     /** Giratoire : nœuds de l'anneau, dans l'ordre de circulation — docs/CONFIGURATION.md §7. */
     anneau: jsonb('anneau').$type<Anneau>(),
+    /**
+     * Carrefour bâti sur le réseau : connexions saisies à la main, gardées quand le réseau change
+     * (docs/RESEAU.md §4) ; false : proposées d'après les liaisons de ses nœuds.
+     */
+    connexionsSaisies: boolean('connexions_saisies').notNull().default(false),
     creeLe: creeLe(),
     modifieLe: timestamp('modifie_le', { withTimezone: true })
       .notNull()
@@ -166,8 +171,6 @@ export const connexion = pgTable(
     voieSortieId: uuid('voie_sortie_id')
       .notNull()
       .references(() => voie.id, { onDelete: 'cascade' }),
-    /** Chemin suivi à travers un carrefour de plusieurs nœuds (vue tirée du réseau) ; null : courbe entre les voies. */
-    trace: ligne('trace'),
   },
   (t) => [unique().on(t.voieEntreeId, t.voieSortieId)],
 );

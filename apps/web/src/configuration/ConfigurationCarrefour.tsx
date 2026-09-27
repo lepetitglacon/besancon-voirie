@@ -55,7 +55,6 @@ const AUCUNE_CONNEXION: Connexion[] = []
 const AUCUN_FEU: string[] = []
 const AUCUNE_LIGNE: never[] = []
 const AUCUNE_SOURCE: Record<string, SourceBranche> = {}
-const AUCUNE_TRACE: Record<string, LonLat[]> = {}
 
 /** Ce qui s'enregistre : sans les champs déduits (sens des branches). */
 const pourEnregistrer = (brouillon: Brouillon) => ({
@@ -69,14 +68,15 @@ const pourEnregistrer = (brouillon: Brouillon) => ({
 
 /** Ce que la carte doit dessiner pendant la configuration. */
 export interface AffichageConfiguration {
-  /** Carrefour bâti sur le réseau : ses voies se modifient avec l'éditeur des voies (docs/RESEAU.md §7). */
+  /**
+   * Carrefour bâti sur le réseau : ses rues se modifient avec l'éditeur des voies (docs/RESEAU.md
+   * §7), ses liaisons d'une voie entrante à une voie sortante comme pour un carrefour dessiné.
+   */
   graphe: boolean
   /** Outil de l'éditeur des voies (carrefour bâti sur le réseau) ; `autre` : outil propre au carrefour. */
   outilGraphe: OutilVoies | null
   branches: Branche[]
   connexions: Connexion[]
-  /** Chemin réel des connexions (« de>vers ») d'un carrefour bâti sur le réseau. */
-  traces: Record<string, LonLat[]>
   /** Nœuds de l'anneau d'un giratoire ; null pour un carrefour ordinaire. */
   anneau: Anneau | null
   /** Outil actif sur le calque ; null : dessin seul. */
@@ -225,18 +225,22 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   })
   const champImport = useRef<HTMLInputElement>(null)
   const enregistre: BranchesCarrefour | undefined = branchesEnregistrees.data
-  /** Carrefour bâti sur le réseau : ses branches se déduisent de ses nœuds, sans brouillon. */
+  /**
+   * Carrefour bâti sur le réseau : ses branches se lisent toujours du réseau (elles suivent ses
+   * modifications) ; seules ses liaisons ont un brouillon, sans celles dont une voie a disparu.
+   */
   const graphe = enregistre?.graphe ?? false
-  const configuration: Brouillon = useMemo(
-    () =>
-      (!graphe && brouillonBranches) || {
-        branches: enregistre?.branches ?? AUCUNE_BRANCHE,
-        connexions: enregistre?.connexions ?? AUCUNE_CONNEXION,
-        anneau: enregistre?.anneau ?? null,
-      },
-    [graphe, brouillonBranches, enregistre],
-  )
-  const traces = enregistre?.traces ?? AUCUNE_TRACE
+  const configuration: Brouillon = useMemo(() => {
+    const lu = {
+      branches: enregistre?.branches ?? AUCUNE_BRANCHE,
+      connexions: enregistre?.connexions ?? AUCUNE_CONNEXION,
+      anneau: enregistre?.anneau ?? null,
+    }
+    if (!graphe) return brouillonBranches ?? lu
+    if (!brouillonBranches) return lu
+    const voies = new Set(lu.branches.flatMap((b) => b.voies.map((v) => cleVoie(b.code, v.sens, v.rang))))
+    return { ...lu, connexions: brouillonBranches.connexions.filter((c) => voies.has(c.de) && voies.has(c.vers)) }
+  }, [graphe, brouillonBranches, enregistre])
   const branches = configuration.branches
   const giratoire = carrefour.nature === 'giratoire'
   const centre: LonLat = useMemo(() => enregistre?.centre ?? [0, 0], [enregistre])
@@ -352,6 +356,20 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       await queryClient.invalidateQueries({ queryKey: ['programme', carrefour.id] })
     },
   })
+
+  /** Carrefour bâti sur le réseau : oublie les liaisons saisies et reprend celles proposées d'après le réseau. */
+  const proposition = useMutation({
+    mutationFn: () => api.proposerConnexions(carrefour.id),
+    onSuccess: async (resultat) => {
+      queryClient.setQueryData(['branches', carrefour.id], resultat)
+      setBrouillonBranches(null)
+      await queryClient.invalidateQueries({ queryKey: ['lignes', carrefour.id] })
+      await queryClient.invalidateQueries({ queryKey: ['programme', carrefour.id] })
+    },
+  })
+  const reprendreProposees = () => {
+    if (window.confirm('Oublier les liaisons saisies et reprendre celles proposées d’après le réseau ?')) proposition.mutate()
+  }
 
   // ── Étape 2 : lignes de feux ──
   const lignesEnregistrees = useQuery({
@@ -500,9 +518,9 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         outilGraphe: graphe ? ((OUTILS_RESEAU as readonly string[]).includes(outil) ? (outil as OutilVoies) : 'autre') : null,
         branches,
         connexions: configuration.connexions,
-        traces,
         anneau: configuration.anneau,
-        mode: graphe ? (outil === 'feux' ? 'feux' : null) : cadrage ? null : (outil as ModeEdition),
+        // Sur le réseau, le calque du carrefour sert à poser les feux et à relier ses voies.
+        mode: graphe ? (outil === 'feux' || outil === 'connecter' ? outil : null) : cadrage ? null : (outil as ModeEdition),
         feuxSurlignes,
         connexionsSurlignees,
         feux,
@@ -515,7 +533,6 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       graphe,
       branches,
       configuration.connexions,
-      traces,
       configuration.anneau,
       outil,
       cadrage,
@@ -531,7 +548,9 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
     ],
   )
 
-  const erreur = [detection, cadreAuto, demandeIa, chargementIa, importJson, enregistrementBranches, enregistrementLignes, enregistrementProgramme].find((m) => m.error)?.error
+  const erreur = [detection, cadreAuto, demandeIa, chargementIa, importJson, enregistrementBranches, proposition, enregistrementLignes, enregistrementProgramme].find(
+    (m) => m.error,
+  )?.error
 
   const modifications = [brouillonBranches, brouillonLignes, brouillonProgramme].filter((b) => b !== null).length
   const enregistrementEnCours = [enregistrementBranches, enregistrementLignes, enregistrementProgramme].some((m) => m.isPending)
@@ -639,6 +658,8 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       if (outil === 'selection') setPopup({ type: 'feu', feu, position })
     },
     clicCalque: (clic) => {
+      // Sur le réseau, voies et branches se modifient avec l'éditeur des voies : seules les liaisons ont une popup.
+      if (graphe && clic.type !== 'connexion') return
       if (outil !== 'pieton') return setPopup(clic)
       const code = clic.type === 'voie' ? clic.cle.split(':')[0] : clic.type === 'branche' ? clic.code : undefined
       if (code) setBrouillonBranches(basculerTraversee(configuration, code, centre))
@@ -760,7 +781,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
               </Badge>
             )}
             {graphe && (
-              <Badge colorPalette="purple" title="Branches, voies et liaisons se déduisent de ses nœuds et de leurs voies">
+              <Badge colorPalette="purple" title="Branches et voies se déduisent des rues qui y arrivent ; les liaisons se saisissent ici">
                 Sur le réseau
               </Badge>
             )}
@@ -817,10 +838,22 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
           </Indice>
         )}
         {graphe && branches.length > 0 && (
-          <Aide mt="2">
-            Branches et liaisons se déduisent du réseau : déplacez, coupez ou reliez ses voies sur la photo ; <Kbd>N</Kbd>{' '}
-            ajoute ou retire des nœuds.
-          </Aide>
+          <Stack gap="1.5" mt="2">
+            <Aide>
+              Les branches sont les bouts des rues qui arrivent au carrefour : déplacez ou coupez ces rues sur la photo, <Kbd>N</Kbd>{' '}
+              ajoute ou retire des nœuds. <Kbd>C</Kbd> relie une voie entrante à une voie sortante.
+            </Aide>
+            <HStack gap="2">
+              <Aide flex="1">
+                {enregistre?.connexions_saisies ? 'Liaisons saisies, gardées quand le réseau change.' : 'Liaisons proposées d’après le réseau.'}
+              </Aide>
+              {enregistre?.connexions_saisies && (
+                <Button size="2xs" variant="outline" loading={proposition.isPending} onClick={reprendreProposees}>
+                  Reprendre les proposées
+                </Button>
+              )}
+            </HStack>
+          </Stack>
         )}
         {cadrage && (
           <CadrageIa

@@ -57,10 +57,11 @@ manuelle**. Les détections depuis OSM ne sont que des propositions que l'on cor
 ## 3. Étape 1 — Branches, voies et connexions
 
 > 💡 **Carrefour bâti sur le réseau** (il a des nœuds : [RESEAU.md §4](RESEAU.md#4-carrefours-bâtis-sur-le-réseau)) :
-> branches, voies, passages et connexions ne se dessinent pas ici, ils se déduisent de ses nœuds
-> et de leurs voies, qu'on corrige avec l'éditeur des voies. Les tables ci-dessous sont alors
-> écrites par le serveur ; ce qui suit (dessin, détection OSM, IA, JSON) vaut pour un carrefour
-> sans nœud.
+> branches, voies et passages ne se dessinent pas ici, ils se déduisent des rues qui arrivent au
+> carrefour, qu'on corrige avec l'éditeur des voies. Les **connexions**, elles, se relient ici
+> comme ci-dessous (outil ⤳ Connecter, touche <kbd>C</kbd>) : proposées d'après le réseau, puis
+> saisies et gardées quand il change. Le reste (dessin des voies, détection OSM, IA, JSON) vaut
+> pour un carrefour sans nœud.
 
 ### Modèle
 

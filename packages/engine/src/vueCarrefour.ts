@@ -7,8 +7,10 @@
  *   arrivent à sa ligne d'arrêt (premier feu de son approche), ses voies sortantes en repartent.
  *   À l'intérieur du groupe, un feu véhicule sur un tronçon interne (nœud de degré 2 : terre-plein
  *   central, anneau d'un giratoire) ouvre une **branche interne** : on y arrive, puis on en repart.
- * - **Connexion** : un chemin voie à voie, qui suit les liaisons de chaque nœud du groupe, d'une
- *   voie entrante jusqu'à une voie sortante. Son tracé réel sert au calcul des conflits.
+ * - **Connexion** : d'une voie entrante à une voie sortante, comme dans un carrefour dessiné à la
+ *   main ; le carrefour est une boîte noire dont on ne voit que les bouts de rues. Celles
+ *   proposées suivent les liaisons de chaque nœud du groupe (le chemin existe dans le réseau) ;
+ *   une fois retouchées et enregistrées, elles sont gardées telles quelles (docs/RESEAU.md §4).
  * - **Code** : point cardinal de la branche (N, S2…) ou R1, R2… pour une branche interne ; un
  *   code déjà donné est gardé (`branche_de` / `branche_vers` du tronçon), car les lignes de feux
  *   y renvoient.
@@ -79,8 +81,6 @@ export interface BrancheVue {
 export interface ConnexionVue {
   de: string;
   vers: string;
-  /** Chemin suivi par la voie, de la ligne d'arrêt à la voie de sortie. */
-  trace: LonLat[];
 }
 
 export interface VueCarrefour {
@@ -292,45 +292,44 @@ export function vueCarrefour({ noeuds, troncons, degres }: EntreeVue): VueCarref
     return [repere.versLonLat([n[0] * demi, n[1] * demi]), repere.versLonLat([-n[0] * demi, -n[1] * demi])];
   }
 
-  // ── Connexions : chemins voie à voie à travers le groupe ──
+  // ── Connexions proposées : chemins voie à voie à travers le groupe, en suivant les liaisons ──
   const connexions = new Map<string, ConnexionVue>();
-  const ajouter = (de: string, vers: string, trace: LonLat[]) => {
+  const ajouter = (de: string, vers: string) => {
     const cle = `${de}>${vers}`;
-    if (!connexions.has(cle)) connexions.set(cle, { de, vers, trace });
+    if (!connexions.has(cle)) connexions.set(cle, { de, vers });
   };
   for (const p of toutes) {
     const entrantes = arrivant(p.troncon, p.noeud).polylignes;
-    entrantes.forEach((polyligne, rang) => {
+    entrantes.forEach((_, rang) => {
       const de = cleVoie(p.code, 'entrante', rang);
-      const parcourir = (noeud: string, troncon: string, voie: number, trace: LonLat[], vus: Set<string>, profondeur: number) => {
+      const parcourir = (noeud: string, troncon: string, voie: number, vus: Set<string>, profondeur: number) => {
         if (profondeur > PROFONDEUR_MAX) return;
         for (const l of liaisons.get(noeud) ?? []) {
           if (l.de !== troncon || l.voie_de !== voie) continue;
           const suite = troncons.find((t) => t.id === l.vers);
           if (!suite) continue;
-          const depart = partant(suite, noeud).polylignes[l.voie_vers];
-          if (!depart) continue;
+          if (!partant(suite, noeud).polylignes[l.voie_vers]) continue;
           const bout = suite.noeud_de === noeud ? 'vers' : 'de';
           const loin = noeudA(suite, bout);
           // Sortie par une branche de bord (le tronçon quitte le groupe).
           const sortie = porteDe(suite.id, noeud);
           if (sortie && !sortie.interne) {
-            ajouter(de, cleVoie(sortie.code, 'sortante', l.voie_vers), [...trace, depart[0]!]);
+            ajouter(de, cleVoie(sortie.code, 'sortante', l.voie_vers));
             continue;
           }
           if (!dans.has(loin)) continue;
           // Arrivée sur une ligne d'arrêt interne : la connexion s'arrête là.
           const interne = porteDe(suite.id, loin);
           if (interne?.interne) {
-            ajouter(de, cleVoie(interne.code, 'sortante', l.voie_vers), [...trace, depart[0]!]);
+            ajouter(de, cleVoie(interne.code, 'sortante', l.voie_vers));
             continue;
           }
           const cle = `${suite.id}:${bout}:${l.voie_vers}`;
           if (vus.has(cle)) continue;
-          parcourir(loin, suite.id, l.voie_vers, [...trace, ...depart], new Set([...vus, cle]), profondeur + 1);
+          parcourir(loin, suite.id, l.voie_vers, new Set([...vus, cle]), profondeur + 1);
         }
       };
-      parcourir(p.noeud, p.troncon.id, rang, [polyligne.at(-1)!], new Set(), 0);
+      parcourir(p.noeud, p.troncon.id, rang, new Set(), 0);
     });
   }
 

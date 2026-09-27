@@ -15,6 +15,12 @@ export const ZONES = {
   liaisons: 'reseau-liaisons-zone',
 } as const
 
+/**
+ * Axe des tronçons au cœur d'un carrefour : le carrefour est une boîte noire (ses liaisons vont
+ * d'une branche à l'autre), on n'en dessine pas les voies.
+ */
+export const COUCHE_COEUR = 'reseau-voies-coeur'
+
 /** Couches de CoucheVoies qui répondent au pointeur selon l'outil (curseur de la carte, survols). */
 export function couchesInteractivesVoies(outil: OutilVoies | null): string[] {
   if (outil === 'selection' || outil === 'couper') return [ZONES.noeuds, 'reseau-voies']

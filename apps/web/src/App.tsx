@@ -125,7 +125,6 @@ function App() {
     outilGraphe: null,
     branches: [],
     connexions: [],
-    traces: {},
     anneau: null,
     mode: null,
     feuxSurlignes: [],

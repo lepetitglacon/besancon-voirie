@@ -144,19 +144,27 @@ nœuds ce qu'attendent les lignes de feux, les conflits et le programme :
 - **Branche interne** : un feu véhicule sur un tronçon interne, hors des approches (terre-plein
   central d'une chaussée séparée, anneau d'un giratoire). Codes R1, R2… On y arrive (voies
   sortantes, prises à leur départ du nœud d'avant), puis on en repart (voies entrantes).
-- **Connexion** : un chemin voie à voie qui suit les liaisons de chaque nœud du groupe, d'une
-  voie entrante jusqu'à une voie sortante (ou une ligne d'arrêt interne). Son tracé réel
-  (`connexion.trace`) remplace, pour le calcul des conflits et le dessin, la courbe entre les
-  deux voies.
+- **Connexion** : d'une voie entrante à une voie sortante (ou une ligne d'arrêt interne),
+  dessinée en courbe entre les deux voies, comme dans un carrefour dessiné à la main. Le
+  carrefour est une **boîte noire** : on n'en voit que les bouts des rues, pas les nœuds ni les
+  liaisons de son cœur. Celles **proposées** suivent les liaisons de chaque nœud du groupe (le
+  chemin existe dans le réseau) ; une fois retouchées dans le calque du carrefour (outil
+  Liaison) et enregistrées, elles sont **saisies** (`carrefour.connexions_saisies`) et gardées
+  quand le réseau change, sauf celles dont une voie a disparu. « Reprendre les proposées »
+  (`DELETE /branches/connexions`) les oublie.
 - **Passage piéton** d'une branche : sur sa ligne d'arrêt, entre elle et l'intersection, sinon en
   amont ; en travers du tronçon, de la largeur de ses voies plus 1,5 m de chaque côté.
 
 La vue est **écrite** dans `branche`, `voie` et `connexion` (`materialiserCarrefour`) à chaque
 modification du réseau autour du carrefour : nœud déplacé, ajouté ou retiré, tronçon tracé,
 coupé, fusionné, modifié ou supprimé, liaisons saisies. Lignes de feux, conflits, programme et
-temps réel les lisent sans changement ; le sens des mouvements s'y lit sur les voies. Un
-carrefour bâti sur le réseau refuse `PUT /branches` (409). Un carrefour sans nœud (réseau non
-semé, tests) garde ses branches saisies à la main.
+temps réel les lisent sans changement ; le sens des mouvements s'y lit sur les voies. Pour un
+carrefour bâti sur le réseau, `PUT /branches` n'enregistre que les connexions (ses branches se
+déduisent du réseau) ; une connexion vers une voie qu'il n'a pas est refusée (400). Un carrefour
+sans nœud (réseau non semé, tests) garde ses branches saisies à la main.
+
+> 💡 L'export SUMO écrit encore les liaisons de chaque nœud du carrefour (proposées) : les
+> connexions saisies n'y sont pas reprises (voir [reseau-d-abord.md](reseau-d-abord.md), étape 9).
 
 ## 5. Export SUMO
 
@@ -190,7 +198,9 @@ longitude, latitude : netconvert les projette en UTM (`proj.plain-geo`, `proj.ut
 | DELETE | `/api/reseau/noeuds/:id` | Retire un nœud entre deux tronçons de mêmes voies : ils n'en font plus qu'un ; 400 sinon (`EditionGuard`) |
 | PUT | `/api/reseau/noeuds/:id/liaisons` | `{ liaisons: [...] \| null }` (null : proposées) ; 400 pour une voie qui n'arrive pas au nœud (`EditionGuard`) |
 | GET | `/api/reseau/sumo/:fichier[?bbox=]` | `reseau.nod.xml`, `reseau.edg.xml`, `reseau.con.xml`, `reseau.netccfg` |
-| GET | `/api/carrefours/:id/branches` | Vue du carrefour : `graphe: true` et `traces` pour un carrefour bâti sur le réseau |
+| GET | `/api/carrefours/:id/branches` | Vue du carrefour : `graphe: true` pour un carrefour bâti sur le réseau, et `connexions_saisies` |
+| PUT | `/api/carrefours/:id/branches` | Carrefour bâti sur le réseau : n'enregistre que ses connexions, gardées ensuite quand le réseau change ; 400 pour une voie qu'il n'a pas (`EditionGuard`) |
+| DELETE | `/api/carrefours/:id/branches/connexions` | Oublie les connexions saisies, reprend celles proposées d'après les liaisons des nœuds (`EditionGuard`) |
 
 Chaque modification recalcule les carrefours dont les nœuds sont touchés, dans la même
 transaction. Un tronçon OSM corrigé (voies, tracé, nœud déplacé, coupé) est marqué `modifie`.
@@ -202,9 +212,11 @@ imposée à plat. En dessous du zoom 16, chaque tronçon est un trait de la larg
 à partir du zoom 16, il est dessiné voie par voie, chaque voie à sa largeur au sol (3,25 m, 1,5 m
 pour une voie vélo) : voies vélo en vert, bus en rouge, tram en violet, les autres en gris
 (OSM), orange (corrigées) ou vert clair (tracées à la main). Chaque nœud montre sa ligne d'arrêt
-à feux (pastille rouge), son passage piéton (zébras en travers de la rue) et son carrefour
-(cercle violet, orange pour le carrefour ouvert). Un clic sur le disque d'un carrefour l'ouvre ;
-au zoom des voies, les voies et les nœuds qu'il recouvre passent avant lui, pas les feux.
+à feux (pastille rouge) et son passage piéton (zébras en travers de la rue). Un carrefour est
+une boîte noire : au cœur, entre ses lignes d'arrêt, seul l'axe des tronçons est dessiné, en
+pointillés, sans nœuds ni liaisons ; l'outil Nœuds les montre tous, cerclés de violet (d'orange
+pour le carrefour ouvert). Un clic sur le disque d'un carrefour l'ouvre ; au zoom des voies, les
+voies et les nœuds qu'il recouvre passent avant lui, pas les feux.
 
 Tout est dessiné en couches MapLibre (`CoucheReseau`, puis `CoucheVoies` au zoom des voies),
 pas en SVG : quelques milliers de voies dans la vue restent fluides au déplacement de la carte.
@@ -217,14 +229,18 @@ ne dessine que quelques dizaines d'éléments.
 | ↖ **Sélection** (<kbd>V</kbd>) | Glisser un nœud le déplace. Un clic sur une voie ouvre la popup du tronçon (nom, voies par sens et leur type, vitesse, « Couper ici », « Inverser », « Supprimer ») ; sur un nœud, la sienne (ligne d'arrêt à feux, passage piéton, carrefour, liaisons proposées, « Retirer le nœud »). |
 | ＋ **Tracer** (<kbd>T</kbd>) | Cliquer le départ (un nœud, une rue, qui sera coupée à cet endroit, ou un point libre), les points de la rue, puis l'arrivée ; <kbd>Entrée</kbd> finit sur un point libre, <kbd>⌫</kbd> retire le dernier point, <kbd>Échap</kbd> annule. |
 | ✂ **Couper** (<kbd>X</kbd>) | Un clic sur une voie pose un nœud : ligne d'arrêt, passage piéton, début d'une voie de présélection (le tronçon d'approche a alors ses propres voies). |
-| ↝ **Liaison** (<kbd>C</kbd>) | Du bout d'une voie qui arrive (poignée bleue) vers le début d'une voie qui repart (poignée creuse), à n'importe quel nœud ; pointillés : proposées ; refaire le geste ou cliquer une liaison la retire. |
+| ↝ **Liaison** (<kbd>C</kbd>) | Du bout d'une voie qui arrive (poignée bleue) vers le début d'une voie qui repart (poignée creuse), à un nœud hors des carrefours ; pointillés : proposées ; refaire le geste ou cliquer une liaison la retire. |
 | ◎ **Nœuds** (<kbd>N</kbd>, carrefour ouvert) | Un clic sur un nœud l'ajoute au carrefour ou l'en retire. |
 
-**Carrefour ouvert** : les mêmes outils, plus ● **Feu** (<kbd>F</kbd>) pour poser les feux sur
-leur mât. La carte d'en-tête porte le badge « Sur le réseau » ; le calque du carrefour dessine
-sa vue (codes des branches, flèches, connexions selon leur tracé), relue à chaque modification.
-Les onglets Lignes de feux, Programme et Graphe s'en servent comme avant. OSM, IA et JSON ne
-servent qu'aux carrefours sans nœud.
+**Carrefour ouvert** : Sélection, Tracer, Couper et Nœuds agissent sur le réseau ; ↝ **Liaison**
+(<kbd>C</kbd>) relie ses voies comme dans un carrefour dessiné à la main : glisser d'une voie
+entrante (poignée de couleur) vers une voie sortante (poignée blanche), cliquer une liaison la
+retire, puis **Enregistrer** ; ● **Feu** (<kbd>F</kbd>) pose les feux sur leur mât. La carte
+d'en-tête porte le badge « Sur le réseau » et dit si les liaisons sont proposées ou saisies
+(« Reprendre les proposées »). Le calque du carrefour dessine ses branches (bouts des rues qui y
+arrivent, relus à chaque modification du réseau), leurs flèches et ses liaisons. Les onglets
+Lignes de feux, Programme et Graphe s'en servent comme avant. OSM, IA et JSON ne servent qu'aux
+carrefours sans nœud.
 
 Carte d'en-tête de l'éditeur (aucun carrefour ouvert) : aide de l'outil, légende, **⟳ Semer
 depuis OSM** (réseau vide) ou **Réinitialiser depuis OSM**, et liens d'**export SUMO** de la

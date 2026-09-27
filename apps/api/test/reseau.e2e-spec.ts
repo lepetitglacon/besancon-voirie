@@ -117,12 +117,36 @@ describe('Réseau routier, carrefours bâtis sur ses nœuds et export SUMO (e2e)
     expect(nord.traversee).not.toBeNull();
     expect(vue.mouvements.find((m) => m.origine === 'N' && m.destination === 'S')?.direction).toBe('tout_droit');
     expect(vue.mouvements.find((m) => m.origine === 'N' && m.destination === 'E')?.direction).toBe('gauche');
-    expect(Object.keys(vue.traces)).toContain('N:e0>S:s0');
+    // Connexions proposées d'après les liaisons des nœuds, d'une voie entrante à une voie sortante.
+    expect(vue.connexions).toContainEqual({ de: 'N:e0', vers: 'S:s0' });
+    expect(vue.connexions_saisies).toBe(false);
     expect(vue.alertes).toEqual([]);
   });
 
-  it('PUT /branches should be refused for a carrefour built on the network', async () => {
-    await http().put(`/api/carrefours/${carrefour}/branches`).send({ branches: [], connexions: [] }).expect(409);
+  it('PUT /branches should save only the connexions of a carrefour built on the network, kept when the network changes', async () => {
+    const vue = await branches();
+    const connexions = [
+      { de: 'N:e0', vers: 'S:s0' },
+      { de: 'S:e0', vers: 'N:s0' },
+    ];
+    const envoi = (liste: typeof connexions) => http().put(`/api/carrefours/${carrefour}/branches`).send({ branches: vue.branches, connexions: liste, anneau: null });
+    const { body } = await envoi(connexions).expect(200);
+    expect(body).toMatchObject({ graphe: true, connexions_saisies: true, connexions });
+    expect(body.mouvements.map((m: { origine: string; destination: string }) => `${m.origine}>${m.destination}`).sort()).toEqual(['N>S', 'S>N']);
+
+    // Le réseau change autour du carrefour : ses branches sont recalculées, ses connexions restent.
+    const passage = await noeudOsm(9013);
+    await http().patch(`/api/reseau/noeuds/${passage}`).send({ pieton: 'non_marquee' }).expect(200);
+    expect((await branches()).connexions).toEqual(connexions);
+    await http().patch(`/api/reseau/noeuds/${passage}`).send({ pieton: 'marquee' }).expect(200);
+
+    // Une voie que le carrefour n'a pas est refusée.
+    await envoi([{ de: 'N:e7', vers: 'S:s0' }]).expect(400);
+
+    // Retour aux connexions proposées.
+    const { body: proposees } = await http().delete(`/api/carrefours/${carrefour}/branches/connexions`).expect(200);
+    expect(proposees.connexions_saisies).toBe(false);
+    expect(proposees.connexions.length).toBeGreaterThan(8);
   });
 
   it('PUT /reseau/noeuds/:id/liaisons should change the carrefour movements, and refuse impossible links', async () => {

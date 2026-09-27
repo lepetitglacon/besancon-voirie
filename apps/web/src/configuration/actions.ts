@@ -2,8 +2,8 @@ import type { EntreeMenu } from '../ds'
 
 /**
  * Outil actif sur la carte pendant la configuration d'un carrefour. Carrefour bâti sur le réseau :
- * sélection, tracer, couper, liaison et nœuds agissent sur le réseau (docs/RESEAU.md §7) ; ajuster,
- * piéton et nœud (d'anneau) ne servent qu'aux branches dessinées à la main.
+ * sélection, tracer, couper et nœuds agissent sur le réseau (docs/RESEAU.md §7), liaison et feu
+ * sur le carrefour ; ajuster, piéton et nœud (d'anneau) ne servent qu'aux branches dessinées à la main.
  */
 export type OutilCarte = 'selection' | 'ajuster' | 'connecter' | 'feux' | 'pieton' | 'noeud' | 'tracer' | 'couper' | 'noeuds'
 
@@ -34,8 +34,11 @@ export const OUTILS_GRAPHE: Array<{ outil: OutilCarte; glyphe: string; libelle: 
 
 export const RACCOURCIS_GRAPHE: Record<string, ActionConfiguration> = { v: 'selection', t: 'tracer', x: 'couper', c: 'connecter', n: 'noeuds', f: 'feux' }
 
-/** Outils qui agissent sur le réseau (les autres sont propres au carrefour). */
-export const OUTILS_RESEAU = ['selection', 'tracer', 'couper', 'connecter', 'noeuds'] as const
+/**
+ * Outils qui agissent sur le réseau (les autres sont propres au carrefour). La liaison relie les
+ * voies du carrefour, d'une branche à l'autre, pas celles de ses nœuds : il est une boîte noire.
+ */
+export const OUTILS_RESEAU = ['selection', 'tracer', 'couper', 'noeuds'] as const
 
 /** Entrées du menu contextuel de la carte pendant la configuration. */
 export const MENU_CONFIGURATION: EntreeMenu[] = [
