@@ -22,7 +22,9 @@
     "db:prepare": "pnpm --filter api db:prepare",
     "db:verifier": "pnpm --filter api db:verifier",
     "osm:import": "pnpm --filter api osm:import",
-    "osm:seed": "pnpm --filter api osm:seed"
+    "osm:seed": "pnpm --filter api osm:seed",
+    "reseau:generer": "pnpm --filter api reseau:generer",
+    "reseau:sumo": "pnpm --filter api reseau:sumo"
   },
   "devDependencies": {
     "@types/node": "^24.13.6",

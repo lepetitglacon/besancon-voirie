@@ -18,6 +18,7 @@ import type {
   SensBranche,
   Voie,
 } from '@voirie/schema';
+import { raccorderCarrefour } from '../reseau/raccordement.js';
 import { DRIZZLE, type Db } from '../db/db.module.js';
 import { tableExiste, type Executeur } from '../db/sql.js';
 import { proposerBranches, type Passage } from './detection.js';
@@ -31,7 +32,7 @@ const RAYON_MAX_M = 80;
  * Voies prises en compte pour détecter les branches. Les voies `service` (parkings, accès
  * riverains) sont écartées : elles encombrent la proposition et sont rarement réglées par des feux.
  */
-const VOIES_CIRCULABLES = [
+export const VOIES_CIRCULABLES = [
   'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified',
   'residential', 'living_street', 'busway', 'road',
 ];
@@ -60,38 +61,51 @@ export function deduire(centre: [number, number], branches: Branche[], connexion
   };
 }
 
+async function centreCarrefour(db: Executeur, carrefourId: string): Promise<[number, number]> {
+  const { rows } = await db.execute<{ lon: number; lat: number }>(
+    sql`SELECT ST_X(geom) AS lon, ST_Y(geom) AS lat FROM carrefour WHERE id = ${carrefourId}`,
+  );
+  if (!rows[0]) throw new NotFoundException('Carrefour inconnu');
+  return [rows[0].lon, rows[0].lat];
+}
+
+/** Branches, voies, passages piétons et connexions enregistrés, avec ce qui s'en déduit. */
+export async function lireBranches(db: Executeur, carrefourId: string): Promise<BranchesCarrefour> {
+  const centre = await centreCarrefour(db, carrefourId);
+  const { rows: branches } = await db.execute<Branche>(sql`
+    SELECT b.code, b.nom, b.azimut_deg AS azimut, b.osm_way_id::float8 AS osm_way_id,
+           (ST_AsGeoJSON(b.geom)::json)->'coordinates' AS geom,
+           (ST_AsGeoJSON(b.traversee)::json)->'coordinates' AS traversee,
+           coalesce(
+             (SELECT json_agg(json_build_object(
+                        'sens', v.sens, 'rang', v.rang, 'type', v.type,
+                        'geom', (ST_AsGeoJSON(v.geom)::json)->'coordinates')
+                      ORDER BY v.sens, v.rang)
+              FROM voie v WHERE v.branche_id = b.id),
+             '[]'::json
+           ) AS voies
+    FROM branche b
+    WHERE b.carrefour_id = ${carrefourId}
+    ORDER BY b.azimut_deg
+  `);
+  const { rows: connexions } = await db.execute<Connexion>(sql`
+    SELECT be.code || ':e' || ve.rang AS de, bs.code || ':s' || vs.rang AS vers
+    FROM connexion c
+    JOIN voie ve ON ve.id = c.voie_entree_id JOIN branche be ON be.id = ve.branche_id
+    JOIN voie vs ON vs.id = c.voie_sortie_id JOIN branche bs ON bs.id = vs.branche_id
+    WHERE c.carrefour_id = ${carrefourId}
+    ORDER BY 1, 2
+  `);
+  return deduire(centre, branches, connexions);
+}
+
 @Injectable()
 export class BranchesService {
   constructor(@Inject(DRIZZLE) private readonly db: Db) {}
 
   /** Branches, voies, passages piétons et connexions enregistrés, avec ce qui s'en déduit. */
-  async lire(carrefourId: string): Promise<BranchesCarrefour> {
-    const centre = await this.centre(this.db, carrefourId);
-    const { rows: branches } = await this.db.execute<Branche>(sql`
-      SELECT b.code, b.nom, b.azimut_deg AS azimut, b.osm_way_id::float8 AS osm_way_id,
-             (ST_AsGeoJSON(b.geom)::json)->'coordinates' AS geom,
-             (ST_AsGeoJSON(b.traversee)::json)->'coordinates' AS traversee,
-             coalesce(
-               (SELECT json_agg(json_build_object(
-                          'sens', v.sens, 'rang', v.rang, 'type', v.type,
-                          'geom', (ST_AsGeoJSON(v.geom)::json)->'coordinates')
-                        ORDER BY v.sens, v.rang)
-                FROM voie v WHERE v.branche_id = b.id),
-               '[]'::json
-             ) AS voies
-      FROM branche b
-      WHERE b.carrefour_id = ${carrefourId}
-      ORDER BY b.azimut_deg
-    `);
-    const { rows: connexions } = await this.db.execute<Connexion>(sql`
-      SELECT be.code || ':e' || ve.rang AS de, bs.code || ':s' || vs.rang AS vers
-      FROM connexion c
-      JOIN voie ve ON ve.id = c.voie_entree_id JOIN branche be ON be.id = ve.branche_id
-      JOIN voie vs ON vs.id = c.voie_sortie_id JOIN branche bs ON bs.id = vs.branche_id
-      WHERE c.carrefour_id = ${carrefourId}
-      ORDER BY 1, 2
-    `);
-    return deduire(centre, branches, connexions);
+  lire(carrefourId: string): Promise<BranchesCarrefour> {
+    return lireBranches(this.db, carrefourId);
   }
 
   /**
@@ -134,7 +148,7 @@ export class BranchesService {
   /** Remplace branches, voies, passages piétons et connexions du carrefour. */
   async enregistrer(carrefourId: string, { branches, connexions }: ConfigurationBranches): Promise<BranchesCarrefour> {
     await this.db.transaction(async (tx) => {
-      await this.centre(tx, carrefourId); // 404 si le carrefour n'existe pas
+      await centreCarrefour(tx, carrefourId); // 404 si le carrefour n'existe pas
       await tx.execute(sql`DELETE FROM branche WHERE carrefour_id = ${carrefourId}`);
       const idsVoies = new Map<string, string>();
       for (const b of branches) {
@@ -162,16 +176,10 @@ export class BranchesService {
           VALUES (${carrefourId}, ${idsVoies.get(c.de)!}, ${idsVoies.get(c.vers)!})
         `);
       }
+      // Le réseau s'arrête sur le cercle du carrefour, qui dépend de ses voies.
+      await raccorderCarrefour(tx, carrefourId);
     });
     return this.lire(carrefourId);
-  }
-
-  private async centre(db: Executeur, carrefourId: string): Promise<[number, number]> {
-    const { rows } = await db.execute<{ lon: number; lat: number }>(
-      sql`SELECT ST_X(geom) AS lon, ST_Y(geom) AS lat FROM carrefour WHERE id = ${carrefourId}`,
-    );
-    if (!rows[0]) throw new NotFoundException('Carrefour inconnu');
-    return [rows[0].lon, rows[0].lat];
   }
 
   /** Points où les voies OSM circulables traversent le cercle autour du carrefour. */

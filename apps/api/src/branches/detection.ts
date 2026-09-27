@@ -22,7 +22,7 @@ const ECART_FUSION_DEG = 30;
 type Sens = 'avant' | 'arriere';
 const OUI = new Set(['yes', 'true', '1']);
 
-function sensAutorises(tags: Record<string, string>): Record<Sens, boolean> {
+export function sensAutorises(tags: Record<string, string>): Record<Sens, boolean> {
   const implicite = tags.junction === 'roundabout' || tags.junction === 'circular' || tags.highway === 'motorway';
   const oneway = tags.oneway ?? (implicite ? 'yes' : 'no');
   if (OUI.has(oneway)) return { avant: true, arriere: false };
@@ -36,7 +36,7 @@ function entier(valeur: string | undefined): number | undefined {
 }
 
 /** Voies circulant dans un sens de la voie OSM, avec leurs flèches si OSM les donne. */
-function voiesDansLeSens(tags: Record<string, string>, sens: Sens, unSeulSens: boolean) {
+export function voiesDansLeSens(tags: Record<string, string>, sens: Sens, unSeulSens: boolean) {
   const suffixe = sens === 'avant' ? 'forward' : 'backward';
   const turn = tags[`turn:lanes:${suffixe}`] ?? (unSeulSens ? tags['turn:lanes'] : undefined);
   if (turn) {

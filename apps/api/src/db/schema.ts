@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  check,
   customType,
   boolean,
   date,
@@ -19,7 +20,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import type { ArcGraphe, Controleur, Etape, IntervalleVert, Plage } from '@voirie/schema';
+import type { ArcGraphe, Controleur, Etape, IntervalleVert, LiensRaccordement, Plage } from '@voirie/schema';
 
 // Tables du projet — voir docs/ARCHITECTURE.md §4.
 // Les tables issues d'OpenStreetMap (osm_*) sont gérées par l'import, pas par Drizzle.
@@ -311,4 +312,80 @@ export const analyseIa = pgTable(
     consulteeLe: timestamp('consultee_le', { withTimezone: true }),
   },
   (t) => [index('analyse_ia_statut_idx').on(t.statut, t.demandeeLe), index('analyse_ia_carrefour_idx').on(t.carrefourId)],
+);
+
+// ── Réseau routier hors carrefours — docs/RESEAU.md ──
+
+export const sourceReseau = pgEnum('source_reseau', ['osm', 'manuel']);
+
+/**
+ * Nœud du réseau : intersection ou bout de voie OSM, point posé à la main, ou carrefour
+ * configuré (`carrefour_id`) : ses branches remplacent alors les intersections OSM de son emprise.
+ */
+export const noeud = pgTable(
+  'noeud',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    osmNodeId: bigint('osm_node_id', { mode: 'number' }).unique(),
+    carrefourId: uuid('carrefour_id')
+      .unique()
+      .references(() => carrefour.id, { onDelete: 'set null' }),
+    geom: geometry('geom', { type: 'point', mode: 'xy', srid: 4326 }).notNull(),
+    creeLe: creeLe(),
+  },
+  (t) => [index('noeud_geom_idx').using('gist', t.geom)],
+);
+
+/**
+ * Tronçon entre deux nœuds, tracé de `noeud_de` vers `noeud_vers`. `voies_avant` circulent dans
+ * ce sens, `voies_arriere` dans l'autre (0 : sens interdit). Au bout d'un carrefour configuré, le
+ * tronçon s'arrête sur son cercle et se raccorde à une branche (`branche_de`, `branche_vers`),
+ * voie par voie (`liens_*`, null : liens proposés par défaut).
+ */
+export const troncon = pgTable(
+  'troncon',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    noeudDe: uuid('noeud_de')
+      .notNull()
+      .references(() => noeud.id, { onDelete: 'cascade' }),
+    noeudVers: uuid('noeud_vers')
+      .notNull()
+      .references(() => noeud.id, { onDelete: 'cascade' }),
+    geom: ligne('geom').notNull(),
+    osmWayId: bigint('osm_way_id', { mode: 'number' }),
+    /**
+     * Nœuds OSM d'origine du tronçon (découpe aux intersections) : ils l'identifient à la
+     * régénération, même après une coupe au cercle d'un carrefour.
+     */
+    osmDe: bigint('osm_de', { mode: 'number' }),
+    osmVers: bigint('osm_vers', { mode: 'number' }),
+    nom: text('nom'),
+    highway: text('highway'),
+    voiesAvant: smallint('voies_avant').notNull().default(1),
+    voiesArriere: smallint('voies_arriere').notNull().default(1),
+    vitesseKmh: smallint('vitesse_kmh'),
+    source: sourceReseau('source').notNull(),
+    /** Tronçon OSM corrigé à la main : la régénération depuis OSM le garde tel quel. */
+    modifie: boolean('modifie').notNull().default(false),
+    /** Tronçon OSM supprimé à la main : masqué, et pas recréé à la régénération. */
+    supprime: boolean('supprime').notNull().default(false),
+    brancheDe: text('branche_de'),
+    brancheVers: text('branche_vers'),
+    liensDe: jsonb('liens_de').$type<LiensRaccordement>(),
+    liensVers: jsonb('liens_vers').$type<LiensRaccordement>(),
+    creeLe: creeLe(),
+    modifieLe: timestamp('modifie_le', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index('troncon_geom_idx').using('gist', t.geom),
+    index('troncon_noeud_de_idx').on(t.noeudDe),
+    index('troncon_noeud_vers_idx').on(t.noeudVers),
+    index('troncon_osm_way_idx').on(t.osmWayId),
+    check('troncon_voies_check', sql`${t.voiesAvant} BETWEEN 0 AND 9 AND ${t.voiesArriere} BETWEEN 0 AND 9 AND ${t.voiesAvant} + ${t.voiesArriere} > 0`),
+    check('troncon_noeuds_check', sql`${t.noeudDe} <> ${t.noeudVers}`),
+  ],
 );

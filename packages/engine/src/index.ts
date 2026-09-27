@@ -11,3 +11,5 @@ export * from './programme.js';
 export * from './graphe.js';
 export * from './polyligne.js';
 export * from './tram.js';
+export * from './reseau.js';
+export * from './sumo.js';
