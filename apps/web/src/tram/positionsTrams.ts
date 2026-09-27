@@ -94,6 +94,55 @@ export function preparerReseau(reseau: ReseauTram): ReseauPrepare {
 /** Dernière position affichée de chaque rame (par véhicule), pour lisser la suivante. */
 export type SuiviRames = Map<string, { parcours: string; distance: number; instant: number }>
 
+/** Position estimée d'une rame dans son tronçon, à l'instant `maintenant` (ms epoch). */
+function estimer(tram: TramEnCirculation, maintenant: number, age: number, calibration: TramsTempsReel['calibration']) {
+  const restant = (tram.arrivee - maintenant) / 1000
+  const position = estimerPositionTram(
+    {
+      longueur: tram.fin - tram.debut,
+      duree: tram.duree,
+      dureeRapide: tram.dureeRapide,
+      dureeLente: tram.dureeLente,
+    },
+    restant,
+    age,
+    calibration,
+  )
+  return { restant, position }
+}
+
+/** Rame repérée par sa distance le long de son parcours (priorité tram aux carrefours). */
+export interface RameSurParcours {
+  vehicule: string
+  parcours: string
+  /** Distance estimée depuis le début du tracé, en m. */
+  distance: number
+  /** Vitesse de roulage du tronçon, en m/s. */
+  vitesse: number
+  etat: TramEnCirculation['etat']
+  /** Temps avant le départ d'une rame à quai, en s. */
+  departDans?: number
+}
+
+/** Distance estimée de chaque rame le long de son parcours, sans lissage. */
+export function rames(reseau: ReseauPrepare, { horodatage, trams, calibration }: TramsTempsReel, maintenant: number): RameSurParcours[] {
+  const age = (maintenant - horodatage) / 1000
+  return trams.flatMap((tram) => {
+    if (!reseau.parcours.has(tram.parcours)) return []
+    const { position } = estimer(tram, maintenant, age, calibration)
+    return [
+      {
+        vehicule: tram.vehicule,
+        parcours: tram.parcours,
+        distance: tram.debut + position.distance,
+        vitesse: position.vitesse,
+        etat: tram.etat,
+        ...(position.departDans !== undefined && { departDans: position.departDans }),
+      },
+    ]
+  })
+}
+
 /**
  * Position estimée de chaque rame, et sa zone probable, à l'instant `maintenant` (ms epoch).
  * Avec `suivi`, la position affichée est lissée d'une image à l'autre, et `suivi` mis à jour.
@@ -111,18 +160,7 @@ export function positionnerRames(
   for (const tram of trams) {
     const parcours = reseau.parcours.get(tram.parcours)
     if (!parcours) continue
-    const restant = (tram.arrivee - maintenant) / 1000
-    const position = estimerPositionTram(
-      {
-        longueur: tram.fin - tram.debut,
-        duree: tram.duree,
-        dureeRapide: tram.dureeRapide,
-        dureeLente: tram.dureeLente,
-      },
-      restant,
-      age,
-      calibration,
-    )
+    const { restant, position } = estimer(tram, maintenant, age, calibration)
     const debutZone = tram.debut + position.distanceMin
     const finZone = tram.debut + position.distanceMax
     if (tram.etat === 'en_ligne' && finZone - debutZone > 1) {

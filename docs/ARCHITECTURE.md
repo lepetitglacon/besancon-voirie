@@ -495,6 +495,24 @@ quand on favorise les transports en commun. Sur ces carrefours (contrôleur `act
 peut aussi dépendre du trafic (« arbre de décision » du poste central) et pas seulement de
 l'heure.
 
+**Priorité tram.** Elle vaut par défaut pour tous les carrefours où passe le tram : `pres_tram`
+(à moins de 25 m d'une voie de tram OSM), ou carrefour à moins de 30 m d'un tracé GTFS. Elle ne
+s'applique pas si le contrôleur est saisi avec `priorite_tc` `aucune` ou `bus`. Chaque carrefour
+est projeté sur les tracés GTFS qui le croisent. Une rame estimée (§8.1) sur l'un de ces
+parcours demande la priorité quand elle arrive à moins de 150 m du carrefour, et la garde
+jusqu'à 40 m après. Une rame à quai ne la demande qu'à moins de 10 s de son départ. Pendant la
+priorité :
+
+- si le plan a une **étape tram** (étape qui met au vert une ligne R17 ou R18, de préférence
+  hors cycle), ses lignes sont au vert et toutes les autres au rouge ;
+- sinon, les lignes R17/R18 sont au vert, et les lignes qui **coupent la voie de tram** sont au
+  rouge (`coupe_tram` : une connexion, prise comme la corde entre les bouts côté carrefour de
+  ses voies, ou la traversée piétonne, croise une voie `osm_tram` à moins de 80 m). Les autres
+  lignes suivent le cycle.
+
+La carte entoure le carrefour d'un anneau à la couleur de la ligne, avec le temps estimé avant
+le passage. Le retour au cycle après le passage (recoordination) n'est pas modélisé.
+
 ---
 
 ## 7. API NestJS
@@ -529,7 +547,7 @@ Public :
 | GET | `/api/carrefours/:id/lignes` | Lignes de feux, matrice des conflits, mouvements non commandés ([CONFIGURATION.md](CONFIGURATION.md) §4) |
 | GET | `/api/carrefours/:id/programme` | Plans de feux par étapes, rouges de dégagement calculés ([CONFIGURATION.md](CONFIGURATION.md) §5) |
 | GET | `/api/carrefours/:id/tops` | Tops relevés, avec le plan et le décalage de chacun, et la synchronisation de chaque plan (§6.1) |
-| GET | `/api/temps-reel/feux?bbox=…` | Carrefours programmés : lignes et où les dessiner, plans, diagrammes de feux, décalages (§6.1) |
+| GET | `/api/temps-reel/feux?bbox=…` | Carrefours programmés : position, lignes (où les dessiner, R17/R18, coupe la voie de tram), plans, diagrammes de feux, étape tram, décalages (§6.1) |
 | GET | `/api/carrefours/:slug` | Carrefour complet : branches, lignes, plans, synthèse des relevés validés |
 | GET | `/api/corridors` | Liste + géométrie |
 | GET | `/api/corridors/:slug` | Corridor, carrefours ordonnés, distances, plans, décalages actuels |
@@ -672,8 +690,10 @@ du temps, ni la fiabilité réelle des estimations. L'API enregistre donc chaque
   programmés sont rejoués sur l'heure légale (§6.1), avec les trams. Chaque ligne est dessinée
   sur ses feux physiques ; à défaut, au bout des voies entrantes qu'elle commande, ou au milieu
   de la traversée pour les piétons. L'opacité suit la confiance (synchronisé, estimé, indicatif,
-  phase inconnue). Un clic sur un carrefour ouvre sa fiche : plan en vigueur, position dans le
-  cycle, tête de feu de chaque ligne. Passer en Temps réel ferme l'édition en cours (les
+  phase inconnue). La priorité tram (§6.1) arrête les lignes qui coupent la voie quand une rame
+  approche : les rames sont suivies même quand leur affichage est désactivé. Un clic sur un
+  carrefour ouvre sa fiche : plan en vigueur, position dans le cycle, tête de feu de chaque
+  ligne, rame prioritaire. Passer en Temps réel ferme l'édition en cours (les
   brouillons restent).
 - **Édition** : composition et configuration des carrefours (§5.3,
   [CONFIGURATION.md](CONFIGURATION.md)). L'onglet Programme reçoit les tops (§6.1) et peut

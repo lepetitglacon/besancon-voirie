@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { LonLat } from '@voirie/engine'
 import type { AnalyseIa, Bbox, CarrefourResume, FeuResume, TypeJour } from '@voirie/schema'
 import { Badge, Box, Button, HStack, IconButton, Kbd, Popover, Portal, Stack, Tabs, Text } from '@chakra-ui/react'
-import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { useMap } from 'react-map-gl/maplibre'
 import { api } from './api'
 import { abandonnerBrouillons, useBrouillons, type BrouillonsCarrefour } from './configuration/brouillons'
@@ -39,6 +39,8 @@ import type { OptionsFond } from './map/FondDeCarte'
 import { usePreference } from './preferences'
 import { FicheTempsReel } from './tempsReel/FicheTempsReel'
 import { FIABILITES } from './tempsReel/libelles'
+import { carrefoursSurLeTrace, type ContexteTram } from './tempsReel/priorite'
+import { preparerReseau } from './tram/positionsTrams'
 import { PALIERS_PERTE } from './tram/pertes'
 
 /** Le flux Ginko est mis en cache 10 s par l'API. */
@@ -271,13 +273,14 @@ function App() {
   const reseauTram = useQuery({
     queryKey: ['tram', 'reseau'],
     queryFn: api.reseauTram,
-    enabled: tramAffiche || pertes,
+    // En Temps réel, les rames servent aussi à la priorité tram, même masquées.
+    enabled: tramAffiche || pertes || tempsReel,
     staleTime: Infinity,
   })
   const tramsTempsReel = useQuery({
     queryKey: ['tram', 'temps-reel'],
     queryFn: api.tramsTempsReel,
-    enabled: (couchesTram.rames || couchesTram.zones) && reseauTram.isSuccess,
+    enabled: (couchesTram.rames || couchesTram.zones || tempsReel) && reseauTram.isSuccess,
     refetchInterval: RAFRAICHISSEMENT_TRAMS_MS,
     placeholderData: (precedent) => precedent,
   })
@@ -287,6 +290,18 @@ function App() {
     enabled: pertes,
     placeholderData: (precedent) => precedent,
   })
+  const reseauPrepare = useMemo(() => reseauTram.data && preparerReseau(reseauTram.data), [reseauTram.data])
+  const surLeTrace = useMemo(
+    () => reseauPrepare && feuxTempsReel.data && carrefoursSurLeTrace(reseauPrepare, feuxTempsReel.data.carrefours),
+    [reseauPrepare, feuxTempsReel.data],
+  )
+  const contexteTram: ContexteTram | null = useMemo(
+    () =>
+      reseauPrepare && surLeTrace && tramsTempsReel.data
+        ? { reseau: reseauPrepare, trams: tramsTempsReel.data, surLeTrace }
+        : null,
+    [reseauPrepare, surLeTrace, tramsTempsReel.data],
+  )
   const etatHistorique = useQuery({
     queryKey: ['tram', 'historique', 'etat'],
     queryFn: api.historiqueEtat,
@@ -405,7 +420,7 @@ function App() {
             {pertes && reseauTram.data && historique.data && (
               <CouchePertes reseau={reseauTram.data} historique={historique.data} />
             )}
-            {tempsReel && feuxTempsReel.data && <CoucheFeuxTempsReel tempsReel={feuxTempsReel.data} />}
+            {tempsReel && feuxTempsReel.data && <CoucheFeuxTempsReel tempsReel={feuxTempsReel.data} tram={contexteTram} />}
             {tramAffiche && reseauTram.data && (
               <CoucheTrams reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
             )}
@@ -457,7 +472,7 @@ function App() {
         >
           <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
             {ficheTempsReel ? (
-              <FicheTempsReel carrefour={carrefourTempsReel} />
+              <FicheTempsReel carrefour={carrefourTempsReel} tram={contexteTram} />
             ) : (
               <Aide>
                 Les feux des carrefours programmés sont rejoués sur l'heure légale, calés par des tops relevés sur place.

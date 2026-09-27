@@ -47,19 +47,31 @@ export interface PlanTempsReel {
   jaune_s: number | null;
   /** Diagramme de feux : intervalles de vert par ligne, dans [0, cycle]. */
   verts: Record<string, IntervalleVert[]> | null;
+  /** Lignes au vert pendant la priorité tram (étape qui sert une ligne R17/R18), null sans étape tram. */
+  etape_tram: string[] | null;
   synchro: SynchronisationPlan | null;
 }
 
 export interface CarrefourTempsReel {
   id: string;
   nom: string;
+  position: [number, number];
+  /** À moins de 25 m d'une voie de tram (OSM). */
   pres_tram: boolean;
   controleur: Pick<Controleur, 'mode' | 'priorite_tc'>;
   /**
    * Lignes de feux et où dessiner leur état : les feux physiques qui les affichent, sinon le bout
    * des voies entrantes qu'elles commandent (ou le milieu de la traversée pour les piétons).
    */
-  lignes: Array<{ code: string; pieton: boolean; positions: Array<[number, number]> }>;
+  lignes: Array<{
+    code: string;
+    pieton: boolean;
+    /** Ligne de transports en commun (R17, R18) : au vert pendant la priorité tram. */
+    tc: boolean;
+    /** Ses trajectoires ou sa traversée coupent la voie de tram : au rouge pendant la priorité. */
+    coupe_tram: boolean;
+    positions: Array<[number, number]>;
+  }>;
   plans: PlanTempsReel[];
 }
 

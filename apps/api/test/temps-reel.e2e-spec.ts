@@ -144,5 +144,28 @@ describe('Tops et feux en temps réel (e2e)', () => {
     expect(jour).toMatchObject({ mode: 'cycle', cycle_s: cycle, jaune_s: 3, synchro: { confiance: 'synchronisee' } });
     expect(jour.verts!.F1![0]).toEqual([0, 25]);
     expect(carrefour.plans.find((p) => p.code === 'nuit')).toMatchObject({ mode: 'jaune_clignotant', synchro: null });
+    expect(jour.etape_tram).toBeNull(); // pas de ligne R17 ni R18
+    expect(carrefour.lignes.every((l) => !l.tc && !l.coupe_tram)).toBe(true); // pas de tram à A
+  });
+
+  it('GET /temps-reel/feux should mark the signal groups that cross a tram track', async () => {
+    // Voie de tram nord-sud par le centre du carrefour A : les mouvements venus de l'est et de
+    // l'ouest la coupent.
+    await client.query(`
+      INSERT INTO osm_tram (osm_id, tags, nodes, geom)
+      SELECT 999001, '{"railway": "tram"}', '{}',
+             ST_MakeLine(ST_Translate(geom, 0, -0.001), ST_Translate(geom, 0, 0.001))
+      FROM carrefour WHERE id = $1
+    `, [carrefourA]);
+    try {
+      const { body } = await http().get('/api/temps-reel/feux').query({ bbox: '5.95,47.2,6.1,47.3' }).expect(200);
+      const carrefour = (body as FeuxTempsReel).carrefours.find((c) => c.id === carrefourA)!;
+      const coupe = (code: string) => carrefour.lignes.find((l) => l.code === code)!.coupe_tram;
+      expect(coupe('F3')).toBe(true);
+      expect(coupe('F4')).toBe(true);
+      expect(carrefour.position).toHaveLength(2);
+    } finally {
+      await client.query('DELETE FROM osm_tram WHERE osm_id = 999001');
+    }
   });
 });

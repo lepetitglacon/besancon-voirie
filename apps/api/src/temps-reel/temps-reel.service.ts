@@ -7,6 +7,7 @@ import {
   type Bbox,
   type CarrefourTempsReel,
   type Controleur,
+  type Etape,
   type FeuxTempsReel,
   type IntervalleVert,
   type Plage,
@@ -17,7 +18,13 @@ import {
   type TopSynchro,
 } from '@voirie/schema';
 import { DRIZZLE, type Db } from '../db/db.module.js';
-import { uuids } from '../db/sql.js';
+import { tableExiste, uuids } from '../db/sql.js';
+
+/** Voies de tram prises en compte autour d'un carrefour. */
+const RAYON_TRAM_M = 80;
+
+/** Signaux des transports en commun (tram, bus en site propre) : la ligne que sert la priorité. */
+const SIGNAUX_TC: readonly Signal[] = ['R17', 'R18'];
 
 type LignePlan = {
   carrefour_id: string;
@@ -27,7 +34,18 @@ type LignePlan = {
   cycle_s: number | null;
   jaune_s: number | null;
   lignes: Record<string, IntervalleVert[]> | null;
+  etapes?: Etape[] | null;
 };
+
+/**
+ * Lignes au vert pendant la priorité tram : l'étape qui sert une ligne de transports en commun,
+ * de préférence une étape hors cycle (l'« étape prioritaire » du graphe) — CONFIGURATION.md §6.
+ */
+export function etapeTram(etapes: readonly Etape[] | null | undefined, lignesTc: ReadonlySet<string>): string[] | null {
+  const servies = (etapes ?? []).filter((e) => e.lignes.some((code) => lignesTc.has(code)));
+  const etape = servies.find((e) => e.hors_cycle) ?? servies[0];
+  return etape ? [...etape.lignes] : null;
+}
 
 type LigneTop = { id: string; carrefour_id: string; ligne: string; instant: Date };
 
@@ -70,7 +88,7 @@ export class TempsReelService {
 
   private async plans(carrefours: readonly string[]): Promise<LignePlan[]> {
     const { rows } = await this.db.execute<LignePlan>(sql`
-      SELECT carrefour_id, code, mode, plages, cycle_s, jaune_s, lignes
+      SELECT carrefour_id, code, mode, plages, cycle_s, jaune_s, lignes, etapes
       FROM plan_feux WHERE carrefour_id = ANY (${uuids(carrefours)}) ORDER BY code
     `);
     return rows;
@@ -150,6 +168,39 @@ export class TempsReelService {
     return new Map([...parLigne].map(([cle, { feu, voie }]) => [cle, feu.length > 0 ? feu : voie]));
   }
 
+  /**
+   * Lignes qui coupent une voie de tram (clé « carrefour|code ») : une connexion d'une voie
+   * entrante à une voie sortante (corde entre leurs bouts côté carrefour) ou la traversée
+   * piétonne croise la voie de tram d'OpenStreetMap. Elles passent au rouge quand le tram passe.
+   */
+  private async lignesQuiCoupentLeTram(carrefours: readonly string[]): Promise<Set<string>> {
+    if (!(await tableExiste(this.db, 'osm_tram'))) return new Set();
+    const { rows } = await this.db.execute<{ carrefour_id: string; code: string }>(sql`
+      WITH trams AS (
+        SELECT c.id AS carrefour_id, t.geom
+        FROM carrefour c
+        JOIN osm_tram t ON ST_DWithin(t.geom::geography, c.geom::geography, ${RAYON_TRAM_M})
+        WHERE c.id = ANY (${uuids(carrefours)})
+      )
+      SELECT l.carrefour_id, l.code
+      FROM connexion cx
+      JOIN voie ve ON ve.id = cx.voie_entree_id
+      JOIN branche be ON be.id = ve.branche_id
+      JOIN voie vs ON vs.id = cx.voie_sortie_id
+      JOIN branche bs ON bs.id = vs.branche_id
+      JOIN ligne_feux l ON l.carrefour_id = cx.carrefour_id AND be.code || '>' || bs.code = ANY (l.mouvements)
+      JOIN trams t ON t.carrefour_id = cx.carrefour_id
+      WHERE ve.type <> 'tram' AND ST_Intersects(ST_MakeLine(ST_StartPoint(ve.geom), ST_StartPoint(vs.geom)), t.geom)
+      UNION
+      SELECT l.carrefour_id, l.code
+      FROM ligne_feux l
+      JOIN branche b ON b.carrefour_id = l.carrefour_id AND b.code = l.traverse
+      JOIN trams t ON t.carrefour_id = l.carrefour_id
+      WHERE b.traversee IS NOT NULL AND ST_Intersects(b.traversee, t.geom)
+    `);
+    return new Set(rows.map((r) => `${r.carrefour_id}|${r.code}`));
+  }
+
   /** Carrefours programmés de l'emprise, prêts à rejouer : lignes, feux physiques, plans et décalages. */
   async feux([minLon, minLat, maxLon, maxLat]: Bbox): Promise<FeuxTempsReel> {
     const { rows: carrefours } = await this.db.execute<{
@@ -157,8 +208,10 @@ export class TempsReelService {
       nom: string;
       pres_tram: boolean;
       controleur: Partial<Controleur>;
+      lon: number;
+      lat: number;
     }>(sql`
-      SELECT c.id, c.nom, c.pres_tram, c.controleur
+      SELECT c.id, c.nom, c.pres_tram, c.controleur, ST_X(c.geom) AS lon, ST_Y(c.geom) AS lat
       FROM carrefour c
       WHERE c.geom && ST_MakeEnvelope(${minLon}, ${minLat}, ${maxLon}, ${maxLat}, 4326)
         AND EXISTS (SELECT 1 FROM plan_feux p WHERE p.carrefour_id = c.id)
@@ -170,6 +223,7 @@ export class TempsReelService {
       SELECT carrefour_id, code, signal FROM ligne_feux WHERE carrefour_id = ANY (${uuids(ids)}) ORDER BY code
     `);
     const positions = await this.positionsDesLignes(ids);
+    const coupentLeTram = await this.lignesQuiCoupentLeTram(ids);
     const plans = await this.plans(ids);
     const tops = await this.topsDe(ids);
 
@@ -177,18 +231,21 @@ export class TempsReelService {
       carrefours: carrefours.map((c): CarrefourTempsReel => {
         const sesPlans = plans.filter((p) => p.carrefour_id === c.id);
         const { plans: synchros } = synchroniserPlans(sesPlans, tops.filter((t) => t.carrefour_id === c.id));
+        const sesLignes = lignes.filter((l) => l.carrefour_id === c.id);
+        const lignesTc = new Set(sesLignes.filter((l) => SIGNAUX_TC.includes(l.signal)).map((l) => l.code));
         return {
           id: c.id,
           nom: c.nom,
+          position: [c.lon, c.lat],
           pres_tram: c.pres_tram,
           controleur: { mode: c.controleur.mode ?? 'inconnu', priorite_tc: c.controleur.priorite_tc ?? 'inconnue' },
-          lignes: lignes
-            .filter((l) => l.carrefour_id === c.id)
-            .map((l) => ({
-              code: l.code,
-              pieton: typeLigne(l.signal) === 'pieton',
-              positions: positions.get(`${c.id}|${l.code}`) ?? [],
-            })),
+          lignes: sesLignes.map((l) => ({
+            code: l.code,
+            pieton: typeLigne(l.signal) === 'pieton',
+            tc: lignesTc.has(l.code),
+            coupe_tram: !lignesTc.has(l.code) && coupentLeTram.has(`${c.id}|${l.code}`),
+            positions: positions.get(`${c.id}|${l.code}`) ?? [],
+          })),
           plans: sesPlans.map((p) => ({
             code: p.code,
             mode: p.mode,
@@ -196,6 +253,7 @@ export class TempsReelService {
             cycle_s: p.cycle_s,
             jaune_s: p.jaune_s,
             verts: p.lignes,
+            etape_tram: p.mode === 'cycle' ? etapeTram(p.etapes, lignesTc) : null,
             synchro: synchros[p.code] ?? null,
           })),
         };
