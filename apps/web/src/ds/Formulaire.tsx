@@ -1,4 +1,13 @@
-import { Checkbox, NativeSelect, Switch, type CheckboxRootProps, type NativeSelectRootProps, type SwitchRootProps } from '@chakra-ui/react'
+import {
+  Checkbox,
+  NativeSelect,
+  Slider,
+  Switch,
+  type CheckboxRootProps,
+  type NativeSelectRootProps,
+  type SliderRootProps,
+  type SwitchRootProps,
+} from '@chakra-ui/react'
 import type { ReactNode } from 'react'
 
 interface SelecteurProps extends Omit<NativeSelectRootProps, 'onChange'> {
@@ -53,5 +62,26 @@ export function Case({ coche, onChange, children, ...props }: CaseProps) {
       <Checkbox.Control />
       {children && <Checkbox.Label>{children}</Checkbox.Label>}
     </Checkbox.Root>
+  )
+}
+
+interface CurseurProps extends Omit<SliderRootProps, 'onChange' | 'value' | 'defaultValue'> {
+  valeur: number
+  onChange: (valeur: number) => void
+  children?: ReactNode
+}
+
+/** Curseur : choisir une valeur dans une plage (heure, seuil). */
+export function Curseur({ valeur, onChange, children, ...props }: CurseurProps) {
+  return (
+    <Slider.Root value={[valeur]} onValueChange={(e) => onChange(e.value[0] ?? valeur)} {...props}>
+      {children && <Slider.Label>{children}</Slider.Label>}
+      <Slider.Control>
+        <Slider.Track>
+          <Slider.Range />
+        </Slider.Track>
+        <Slider.Thumbs />
+      </Slider.Control>
+    </Slider.Root>
   )
 }

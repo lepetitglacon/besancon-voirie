@@ -14,17 +14,23 @@ import type {
   CreerCarrefour,
   DetectionBranches,
   EmpriseIa,
+  EssaiSumo,
+  EssaiSumoResume,
   EtatHistoriqueTram,
+  LancementSumo,
+  LancerEssaiSumo,
   FeuxGeoJson,
   FeuxTempsReel,
   HistoriqueTroncons,
   LignesCarrefour,
   ModifierCarrefour,
   NatureCarrefour,
+  OptionsSumo,
   ProgrammeCarrefour,
   ReseauTram,
   TopsCarrefour,
   TramsTempsReel,
+  TronconsSumoGeoJson,
   TypeJour,
 } from '@voirie/schema'
 
@@ -113,4 +119,29 @@ export const api = {
       `/api/tram/historique/troncons?typeJour=${typeJour}${heure === null ? '' : `&heure=${heure}`}`,
     ),
   historiqueEtat: () => requete<EtatHistoriqueTram>('/api/tram/historique/etat'),
+  /** Essais SUMO de la ville, du plus récent au plus ancien. */
+  essaisSumo: () => requete<EssaiSumoResume[]>('/api/sumo/essais'),
+  essaiSumo: (id: string) => requete<EssaiSumo>(`/api/sumo/essais/${encodeURIComponent(id)}`),
+  tronconsSumo: (id: string) => requete<TronconsSumoGeoJson>(`/api/sumo/essais/${encodeURIComponent(id)}/troncons`),
+  /** Mesures par tranche et par tronçon : uint16 [tranche][grandeur][tronçon]. */
+  seriesSumo: async (id: string) => {
+    const reponse = await fetch(`/api/sumo/essais/${encodeURIComponent(id)}/series`)
+    if (!reponse.ok) throw new Error(`HTTP ${reponse.status}`)
+    return new Uint16Array(await reponse.arrayBuffer())
+  },
+  /** Itinéraire et heures de sortie de chaque voiture (format dans data/sumo/ville/essai.py). */
+  vehiculesSumo: async (id: string) => {
+    const reponse = await fetch(`/api/sumo/essais/${encodeURIComponent(id)}/vehicules`)
+    if (!reponse.ok) throw new Error(`HTTP ${reponse.status}`)
+    return reponse.arrayBuffer()
+  },
+  /** Toutes les options de SUMO, par catégorie. */
+  optionsSumo: () => requete<OptionsSumo>('/api/sumo/options'),
+  lancementsSumo: () => requete<LancementSumo[]>('/api/sumo/lancements'),
+  lancerEssaiSumo: (demande: LancerEssaiSumo) =>
+    requete<LancementSumo>('/api/sumo/lancements', { method: 'POST', body: JSON.stringify(demande) }),
+  annulerLancementSumo: (id: string) =>
+    requete<LancementSumo>(`/api/sumo/lancements/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** URL du flux SSE d'avancement d'un lancement. */
+  fluxLancementSumo: (id: string) => `/api/sumo/lancements/${encodeURIComponent(id)}/flux`,
 }

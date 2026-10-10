@@ -20,6 +20,7 @@ import {
   BarreOutils,
   Bascule,
   CarteEnTete,
+  Curseur,
   MenuContextuel,
   Message,
   ModeCouleur,
@@ -37,6 +38,10 @@ import { CoucheFeuxTempsReel } from './map/CoucheFeuxTempsReel'
 import { CoucheTrams, type CouchesTram } from './map/CoucheTrams'
 import type { OptionsFond } from './map/FondDeCarte'
 import { usePreference } from './preferences'
+import { CoucheFlux } from './sumo/CoucheFlux'
+import { CoucheSumo } from './sumo/CoucheSumo'
+import { CoucheVehicules } from './sumo/CoucheVehicules'
+import { ModeSumo } from './sumo/ModeSumo'
 import { FicheTempsReel } from './tempsReel/FicheTempsReel'
 import { FIABILITES } from './tempsReel/libelles'
 import { carrefoursSurLeTrace, type ContexteTram } from './tempsReel/priorite'
@@ -52,9 +57,9 @@ const RAFRAICHISSEMENT_FEUX_MS = 60_000
 /**
  * « Temps réel » : la vue grand public, feux et trams à l'heure réelle, en lecture seule.
  * « Édition » : composition et configuration des carrefours. « Données brutes » : toutes les
- * couches, une par une.
+ * couches, une par une. « SUMO » : les essais de simulation de la ville, en lecture seule.
  */
-type Mode = 'temps_reel' | 'edition' | 'brut'
+type Mode = 'temps_reel' | 'edition' | 'brut' | 'sumo'
 
 interface CouchesBrutes extends CouchesTram {
   carrefours: boolean
@@ -62,7 +67,15 @@ interface CouchesBrutes extends CouchesTram {
   pertes: boolean
 }
 
-const FOND_DEFAUT: OptionsFond = { fond: 'satellite', relief3d: false, batiments: false }
+const FOND_DEFAUT: OptionsFond = {
+  fond: 'satellite',
+  batiments: false,
+  affichage3d: false,
+  batiments3d: true,
+  elevation: true,
+  soleil: false,
+  heure: null,
+}
 const COUCHES_BRUTES_DEFAUT: CouchesBrutes = {
   carrefours: true,
   lignes: true,
@@ -84,11 +97,34 @@ function typeJour(date: Date): TypeJour {
   return jour === 6 ? 'samedi' : jour === 0 ? 'dimanche' : 'semaine'
 }
 
+/** Heure du soleil simulé : l'heure réelle, ou une heure choisie au curseur (aujourd'hui). */
+function ReglageHeure({ heure, onChange }: { heure: number | null; onChange: (heure: number | null) => void }) {
+  const maintenant = new Date()
+  const minutes = heure ?? maintenant.getHours() * 60 + maintenant.getMinutes()
+  const libelle = `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+  return (
+    <Stack gap="1">
+      <HStack justify="space-between">
+        <Text textStyle="xs" color="fg.muted">
+          {heure === null ? `Heure réelle (${libelle})` : `Aujourd'hui à ${libelle}`}
+        </Text>
+        {heure !== null && (
+          <Button size="2xs" variant="ghost" onClick={() => onChange(null)}>
+            Maintenant
+          </Button>
+        )}
+      </HStack>
+      <Curseur size="sm" aria-label={['Heure du soleil']} min={0} max={1435} step={5} valeur={minutes} onChange={onChange} />
+    </Stack>
+  )
+}
+
 function App() {
   const queryClient = useQueryClient()
   const [bbox, setBbox] = useState<Bbox>()
   const [mode, setMode] = usePreference<Mode>('mode-carte', 'temps_reel')
   const tempsReel = mode === 'temps_reel'
+  const sumo = mode === 'sumo'
   const [fond, setFond] = usePreference<OptionsFond>('fond', FOND_DEFAUT)
   const [trams, setTrams] = usePreference<boolean>('trams', true)
   const [brut, setBrut] = usePreference<CouchesBrutes>('couches-brutes', COUCHES_BRUTES_DEFAUT)
@@ -138,7 +174,11 @@ function App() {
 
 
   const couchesTram: CouchesTram =
-    mode === 'brut' ? brut : { lignes: trams, arrets: trams, zones: trams, rames: trams }
+    mode === 'brut'
+      ? brut
+      : sumo
+        ? { lignes: false, arrets: false, zones: false, rames: false }
+        : { lignes: trams, arrets: trams, zones: trams, rames: trams }
   const tramAffiche = Object.values(couchesTram).some(Boolean)
   const pertes = mode === 'brut' && brut.pertes
 
@@ -169,7 +209,7 @@ function App() {
   /** Le mode Temps réel est en lecture seule : on quitte l'édition en cours (les brouillons restent). */
   const changerMode = (suivant: Mode) => {
     setMode(suivant)
-    if (suivant === 'temps_reel') {
+    if (suivant === 'temps_reel' || suivant === 'sumo') {
       setEdition(null)
       setConfiguration(null)
     } else setFicheTempsReel(null)
@@ -375,8 +415,9 @@ function App() {
         <Box position="fixed" inset="0">
           <CarteCarrefours
             carrefours={carrefours.data}
-            afficherCarrefours={mode !== 'brut' || brut.carrefours || edition !== null || configuration !== null}
-            tempsReel={tempsReel}
+            afficherCarrefours={sumo ? false : mode !== 'brut' || brut.carrefours || edition !== null || configuration !== null}
+            // SUMO : lecture seule comme le Temps réel, sans fiche de carrefour.
+            tempsReel={tempsReel || sumo}
             fond={fond}
             feux={feux.data}
             edition={
@@ -398,7 +439,7 @@ function App() {
                 modeRectangle: false,
               })
             }
-            onOuvrir={tempsReel ? setFicheTempsReel : configurer}
+            onOuvrir={sumo ? () => {} : tempsReel ? setFicheTempsReel : configurer}
             configuration={
               configuration && {
                 carrefourId: configuration.carrefour.id,
@@ -416,6 +457,9 @@ function App() {
             onDessinerZoneIa={dessinerZoneIa}
             onPlacerFeu={placerFeu}
           >
+            {sumo && <CoucheSumo />}
+            {sumo && <CoucheVehicules />}
+            {sumo && <CoucheFlux />}
             {pertes && reseauTram.data && historique.data && (
               <CouchePertes reseau={reseauTram.data} historique={historique.data} />
             )}
@@ -445,6 +489,8 @@ function App() {
           onSupprimer={() => confirmerSuppression(configuration.carrefour)}
           onFermer={() => setConfiguration(null)}
         />
+      ) : sumo ? (
+        <ModeSumo />
       ) : tempsReel ? (
         <CarteEnTete
           position="fixed"
@@ -558,7 +604,7 @@ function App() {
         </>
       )}
 
-      {!tempsReel && <CarteSuivi
+      {!tempsReel && !sumo && <CarteSuivi
         position="fixed"
         right="3"
         bottom={configuration && panneauBasOuvert ? `calc(${hauteurPanneau} + 12px)` : '3'}
@@ -605,6 +651,7 @@ function App() {
                       <Tabs.Trigger value="temps_reel">Temps réel</Tabs.Trigger>
                       <Tabs.Trigger value="edition">Édition</Tabs.Trigger>
                       <Tabs.Trigger value="brut">Données brutes</Tabs.Trigger>
+                      <Tabs.Trigger value="sumo">SUMO</Tabs.Trigger>
                     </Tabs.List>
                   </Tabs.Root>
                   {tempsReel && (
@@ -624,7 +671,9 @@ function App() {
                       <Aide>Cycle calé sur l'heure légale (base de temps à 3 h), d'après les tops relevés au carrefour.</Aide>
                     </Stack>
                   )}
-                  {mode !== 'brut' ? (
+                  {sumo ? (
+                    <Aide>Essais, indicateurs et lecture : dans les cartes du mode SUMO.</Aide>
+                  ) : mode !== 'brut' ? (
                     <Stack gap="2.5">
                       <Bascule coche={trams} onChange={setTrams}>
                         Trams en temps réel
@@ -724,9 +773,32 @@ function App() {
                     <Bascule coche={fond.batiments} onChange={(batiments) => setFond((options) => ({ ...options, batiments }))}>
                       Bâtiments
                     </Bascule>
-                    <Bascule coche={fond.relief3d} onChange={(relief3d) => setFond((options) => ({ ...options, relief3d }))}>
-                      3D (plus gourmand)
+                    <Bascule coche={fond.affichage3d} onChange={(affichage3d) => setFond((options) => ({ ...options, affichage3d }))}>
+                      Affichage 3D (gourmand)
                     </Bascule>
+                    {fond.affichage3d && (
+                      <Stack gap="2" ps="6">
+                        <Bascule
+                          size="sm"
+                          coche={fond.batiments3d}
+                          disabled={!fond.batiments}
+                          onChange={(batiments3d) => setFond((options) => ({ ...options, batiments3d }))}
+                        >
+                          Bâtiments en volume
+                        </Bascule>
+                        <Bascule
+                          size="sm"
+                          coche={fond.elevation}
+                          onChange={(elevation) => setFond((options) => ({ ...options, elevation }))}
+                        >
+                          Relief du terrain
+                        </Bascule>
+                        <Bascule size="sm" coche={fond.soleil} onChange={(soleil) => setFond((options) => ({ ...options, soleil }))}>
+                          Soleil et luminosité
+                        </Bascule>
+                        {fond.soleil && <ReglageHeure heure={fond.heure} onChange={(heure) => setFond((options) => ({ ...options, heure }))} />}
+                      </Stack>
+                    )}
                   </Section>
 
                   <Text textStyle="2xs" color="fg.muted">
