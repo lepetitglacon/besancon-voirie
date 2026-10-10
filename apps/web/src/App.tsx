@@ -51,6 +51,7 @@ import { preparerReseau } from './tram/positionsTrams'
 import { PALIERS_PERTE } from './tram/pertes'
 import { couchesInteractivesVoies, type OutilVoies } from './reseau/couchesVoies'
 import { CoucheVoies } from './reseau/CoucheVoies'
+import { CoucheForme } from './reseau/CoucheForme'
 import { CoucheReseau } from './reseau/CoucheReseau'
 import { EnTeteReseau } from './reseau/EnTeteReseau'
 import { useModeReseau, ZOOM_VOIES } from './reseau/modeReseau'
@@ -453,15 +454,15 @@ function App() {
       e.stopImmediatePropagation()
       return void reseau.annulerOuRefaire(lettre === 'y' || e.shiftKey)
     }
-    // Hors carrefour, le mode réseau traite Suppr avec ses autres raccourcis.
-    if (e.key === 'Delete' && configuration && reseau.supprimerSelection()) {
+    if (reseau.geste && ['Enter', 'Backspace', 'Escape', 'Delete'].includes(e.key) && reseau.toucheGeste(e)) {
       e.preventDefault()
       return e.stopImmediatePropagation()
     }
-    if (!reseau.geste || !['Enter', 'Backspace', 'Escape'].includes(e.key)) return
-    reseau.toucheGeste(e)
-    e.preventDefault()
-    e.stopImmediatePropagation()
+    // Hors carrefour, le mode réseau traite Suppr avec ses autres raccourcis.
+    if (e.key === 'Delete' && configuration && reseau.supprimerSelection()) {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+    }
   })
   useEffect(() => {
     window.addEventListener('keydown', toucheTrace, { capture: true })
@@ -609,6 +610,15 @@ function App() {
               carrefourOuvert={carrefourGraphe?.id ?? null}
               onDeplacerNoeud={(id, position) => reseau.modifierNoeud(id, { position })}
               onBasculerLiaison={reseau.basculerLiaison}
+            />
+          )}
+          {outilEditeur === 'forme' && reseau.forme && reseau.tronconForme && (
+            <CoucheForme
+              key={reseau.forme.troncon}
+              points={reseau.tronconForme.geometry.coordinates}
+              sommet={reseau.forme.sommet}
+              onSommet={reseau.choisirSommet}
+              onChanger={(points) => reseau.modifierTroncon(reseau.forme!.troncon, { points })}
             />
           )}
           {editeur && (

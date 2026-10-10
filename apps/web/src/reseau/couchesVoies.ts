@@ -15,6 +15,9 @@ export const ZONES = {
   liaisons: 'reseau-liaisons-zone',
 } as const
 
+/** Zones de prise de l'outil Forme (CoucheForme) : sommets et milieux des segments. */
+export const ZONES_FORME = { sommets: 'reseau-forme-sommets-zone', milieux: 'reseau-forme-milieux-zone' } as const
+
 /**
  * Axe des tronçons au cœur d'un carrefour : le carrefour est une boîte noire (ses liaisons vont
  * d'une branche à l'autre), on n'en dessine pas les voies.
@@ -25,6 +28,7 @@ export const COUCHE_COEUR = 'reseau-voies-coeur'
 export function couchesInteractivesVoies(outil: OutilVoies | null): string[] {
   if (outil === 'selection' || outil === 'couper' || outil === 'passage') return [ZONES.noeuds, 'reseau-voies']
   if (outil === 'voie' || outil === 'emprise') return ['reseau-voies']
+  if (outil === 'forme') return ['reseau-voies', ZONES_FORME.sommets, ZONES_FORME.milieux]
   if (outil === 'noeuds') return [ZONES.noeuds]
   if (outil === 'connecter') return [ZONES.arrivees, ZONES.liaisons]
   return []

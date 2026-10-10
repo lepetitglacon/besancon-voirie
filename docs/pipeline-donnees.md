@@ -3,7 +3,7 @@
 > **Objectif** : dire qui fait quoi, quand, et comment savoir que c'est bon, de la donnée
 > brute (OSM, photo IGN, IA, Ginko, terrain) jusqu'aux sorties (feux, onde verte, SUMO) ; puis
 > rendre l'éditeur des voies capable de modéliser finement un carrefour.
-> **Statut** : étapes 1 à 7 faites (worktree `pipeline-donnees`, bâti sur `reseau-voies` + `main`) ; étape 8 à planifier
+> **Statut** : étapes 1 à 7 faites, 8 à 11 en cours (worktree `pipeline-donnees`, bâti sur `reseau-voies` + `main`)
 > **Dernière mise à jour** : 2026-10-10
 
 ## Contexte
@@ -169,7 +169,72 @@ demande plus confirmation avant de se fermer. Ils restent propres à ce navigate
 **Résultat attendu** : après un rechargement, la carte de suivi (en bas à droite) liste le
 carrefour modifié, avec « Reprendre ».
 
-### Étape 8 — Suites (hors de ce chantier)
+### Étape 8 — Corriger le tracé d'un tronçon OSM ✅
+
+Outil **◇ Forme (D)** : un clic sur une rue montre ses sommets. On glisse un sommet pour le
+déplacer, on glisse le losange au milieu d'un segment pour créer un sommet, un clic droit sur un
+sommet le retire. Les bouts restent sur leurs nœuds : pour les déplacer, on glisse le nœud
+(Sélection). Chaque geste est enregistré aussitôt (`PATCH … { points }`) et s'annule
+(`Ctrl Z`). Un tronçon OSM corrigé passe en « OSM corrigé ».
+
+**Résultat attendu** : une rue OSM mal placée se recale sur la photo, sommet par sommet.
+
+> 💡 Un clic sur un sommet le sélectionne (il grossit) ; `Suppr` ou `⌫` le retire ; `Échap`
+> désélectionne, puis quitte le tronçon. Il faut viser une voie dessinée (zoom 16 et plus).
+
+### Étape 9 — Régler les embranchements d'un nœud, à la TM:PE
+
+Outil **⑂ Embranchements (J)**, à la manière des « junction restrictions » de TM:PE : un clic
+sur un nœud ouvre, pour chaque rue qui y arrive, la liste des rues où elle peut aller. Décocher
+une rue retire toutes les liaisons de l'une vers l'autre ; cocher en ajoute, voie à voie, comme
+le ferait la proposition par défaut (demi-tour compris s'il est coché). Le réglage voie à voie
+reste possible avec l'outil Liaison (C).
+
+Dans un carrefour ouvert, le même réglage se fait par branche : un clic sur le code d'une branche
+(N, S…) ouvre « depuis N, on peut aller vers… », qui ajoute ou retire ses connexions (à
+enregistrer).
+
+**Résultat attendu** : « à ce nœud, la rue A peut aller vers B et C, pas vers D » se dit en
+trois clics.
+
+### Étape 10 — Fusionner les nœuds d'un carrefour en un seul
+
+OSM découpe un carrefour complexe en beaucoup de nœuds (chaussées séparées, îlots, passages).
+Dans un carrefour ouvert, **Fusionner les nœuds** (carte d'en-tête) les réunit en un seul :
+
+- au choix, **tous** les nœuds du carrefour, ou seulement **le cœur** (les nœuds d'approche,
+  lignes d'arrêt et passages, restent) ;
+- les tronçons entre deux nœuds fusionnés disparaissent (masqués s'ils viennent d'OSM) ; les
+  autres sont raccordés au nœud restant, au barycentre ;
+- le nœud restant porte une ligne d'arrêt si l'un des nœuds fusionnés en portait une ; ses
+  liaisons repartent des propositions par défaut ;
+- les codes des branches sont gardés, les connexions saisies du carrefour aussi tant que leurs
+  voies existent.
+
+`POST /api/reseau/noeuds/fusion { noeuds, position? }`. Ne s'annule pas : confirmation demandée.
+
+**Résultat attendu** : un carrefour de 15 nœuds devient un nœud unique, dont on règle les
+connexions et les lignes à la main.
+
+### Étape 11 — Créer des passages piétons libres, reliés à des feux et des tronçons
+
+Jusqu'ici, un passage piéton est une propriété d'un nœud, posé en travers de sa rue. Il devient
+aussi un objet à part (`passage_pieton`) :
+
+- **tracé librement** avec l'outil Passage (P), réglage « Libre » : deux clics, d'un trottoir à
+  l'autre ; type marqué, à feux ou non marqué ;
+- **relié à des tronçons** (ceux qu'il traverse, trouvés à la création, modifiables) et **à des
+  feux** (feux piétons proches, à cocher dans sa popup) ;
+- dans un carrefour, un passage libre qui traverse une rue d'une branche devient la traversée de
+  cette branche (à la place du passage sur nœud) ; une ligne de feux piétonne qui traverse cette
+  branche reçoit ses feux d'office.
+
+Le passage sur nœud reste (semis OSM, outil Couper) ; les deux se dessinent pareil.
+
+**Résultat attendu** : un passage décalé de l'intersection, en biais, se dessine tel qu'il est
+sur la photo, et ses feux piétons sont ceux de sa ligne de feux.
+
+### Étape 12 — Suites (hors de ce chantier)
 
 - Réconciliation OSM relue (reseau-d-abord étape 3).
 - IA réorientée vers le graphe (reseau-d-abord étape 7) : elle proposerait des corrections de
@@ -232,3 +297,5 @@ carrefour modifié, avec « Reprendre ».
 - 2026-10-10 — réécrit sur `reseau-voies` (réseau d'abord) ; emprise de voie ; pas de table
   `suggestion` ; panneaux existants gardés.
 - 2026-10-10 — étapes 1 à 7 faites ; export SUMO par cœur de carrefour (sans `<join>`), S4 révisée.
+- 2026-10-10 — ajout des étapes 8 à 11 : tracé des tronçons, embranchements à la TM:PE, fusion
+  des nœuds d'un carrefour, passages piétons libres.

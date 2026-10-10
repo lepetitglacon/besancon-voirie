@@ -126,6 +126,13 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     empriseActuelle.current = suivante
     setEmprise(suivante)
   }
+  /** Outil Forme : tronçon dont on modifie le tracé, et sommet sélectionné. */
+  const [forme, setForme] = useState<{ troncon: string; sommet: number | null } | null>(null)
+  const formeActuelle = useRef(forme)
+  const changerForme = (suivante: typeof forme) => {
+    formeActuelle.current = suivante
+    setForme(suivante)
+  }
   const historique = useHistorique()
 
   const visible = actif && bbox !== undefined && zoom >= ZOOM_MIN_RESEAU
@@ -469,6 +476,11 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
       return
     }
     if (outilActif === 'passage') return poserPassage(cible, position)
+    if (outilActif === 'forme') {
+      // Un clic sur un sommet du tronçon en cours vise aussi ce tronçon : la sélection du sommet reste.
+      if (cible?.type === 'troncon' && cible.id !== formeActuelle.current?.troncon) changerForme({ troncon: cible.id, sommet: null })
+      return
+    }
     if (outilActif === 'emprise') return clicEmprise(cible, position, memePoint)
     if (creation.isPending) return
     const { trace: suivant, termine } = cliquer(traceActuel.current, position, cible, memePoint)
@@ -481,6 +493,18 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     setSelection(null)
     changerTrace([])
     changerEmprise(null)
+    changerForme(null)
+  }
+
+  /** Outil Forme : retire le sommet sélectionné (les bouts restent sur leurs nœuds). */
+  const retirerSommet = () => {
+    const encours = formeActuelle.current
+    const t = encours && tronconEnCache(encours.troncon)
+    if (!encours || encours.sommet === null || !t) return
+    const points = t.geometry.coordinates
+    if (encours.sommet <= 0 || encours.sommet >= points.length - 1) return
+    changerForme({ ...encours, sommet: null })
+    modifierTroncon(t.id, { points: points.filter((_, i) => i !== encours.sommet) })
   }
 
   /** Ctrl Z / Ctrl Maj Z : annule ou refait la dernière modification du réseau. */
@@ -503,11 +527,16 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     return true
   }
 
-  /** Geste en cours (tracé, emprise) : Entrée, ⌫ et Échap lui reviennent avant tout autre raccourci. */
-  const geste = trace.length > 0 || emprise !== null
+  /** Geste en cours (tracé, emprise, forme) : Entrée, ⌫, Suppr et Échap lui reviennent avant tout autre raccourci. */
+  const geste = trace.length > 0 || emprise !== null || forme !== null
 
-  /** Entrée, ⌫ et Échap pendant un geste ; false s'il n'y en a pas. */
+  /** Entrée, ⌫, Suppr et Échap pendant un geste ; false s'il n'y en a pas. */
   const toucheGeste = (e: KeyboardEvent): boolean => {
+    if (formeActuelle.current) {
+      if (e.key === 'Escape') return (changerForme(formeActuelle.current.sommet === null ? null : { ...formeActuelle.current, sommet: null }), true)
+      if ((e.key === 'Delete' || e.key === 'Backspace') && formeActuelle.current.sommet !== null) return (retirerSommet(), true)
+      return false
+    }
     if (empriseActuelle.current) {
       if (e.key === 'Escape') return (changerEmprise(null), true)
       if (e.key === 'Enter') return (terminerEmprise(), true)
@@ -537,6 +566,7 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
 
   /** Échap dans un carrefour ouvert : annule le geste, puis ferme la popup ; false s'il n'y avait rien. */
   const echap = (): boolean => {
+    if (formeActuelle.current) return (changerForme(null), true)
     if (empriseActuelle.current) return (changerEmprise(null), true)
     if (traceActuel.current.length > 0) return (changerTrace([]), true)
     if (selection) return (setSelection(null), true)
@@ -567,6 +597,10 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     noeud,
     trace,
     emprise,
+    forme,
+    /** Tronçon en cours de modification avec l'outil Forme. */
+    tronconForme: forme ? donnees.data?.troncons.features.find((t) => t.id === forme.troncon) : undefined,
+    choisirSommet: (sommet: number | null) => forme && changerForme({ ...forme, sommet }),
     geste,
     toucheGeste,
     clic,
@@ -599,4 +633,5 @@ export const RACCOURCIS_RESEAU: Record<string, OutilReseau> = {
   l: 'voie',
   p: 'passage',
   e: 'emprise',
+  d: 'forme',
 }

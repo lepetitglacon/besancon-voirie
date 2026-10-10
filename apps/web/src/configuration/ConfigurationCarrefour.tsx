@@ -114,6 +114,10 @@ const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>>
     aides: ['Clic sur un nœud, une rue ou un point libre, puis les points de la rue', 'Entrée : finir', '⌫ : retirer le dernier point'],
   },
   couper: { titre: 'Couper une rue', aides: ['Clic sur une rue : un nœud y est posé, avec ce que disent les réglages'] },
+  forme: {
+    titre: 'Tracé d’une rue',
+    aides: ['Clic sur une rue : ses sommets', 'Glisser un sommet, ou un milieu pour en créer un', 'Clic sur un sommet puis Suppr : le retirer'],
+  },
   voie: { titre: 'Voies', aides: ['Clic sur une rue, du côté du sens voulu : ajouter ou retirer une voie (réglages)'] },
   passage: { titre: 'Passages piétons', aides: ['Clic sur une rue : poser un passage', 'Clic sur un nœud : poser ou retirer son passage'] },
   emprise: {

@@ -41,6 +41,12 @@ export function EnTeteReseau({ outil, visible, nbTroncons, tronque, bbox, genera
             Cliquez une rue pour y poser un nœud : ligne d’arrêt, passage piéton, début d’une voie de présélection, selon
             les réglages. Les voies et les liaisons sont gardées de part et d’autre.
           </>
+        ) : outil === 'forme' ? (
+          <>
+            Cliquez une rue pour voir ses sommets : glissez un sommet pour le déplacer, glissez un losange (milieu d’un
+            segment) pour en créer un, cliquez un sommet puis <Kbd>Suppr</Kbd> pour le retirer. Les bouts suivent leurs
+            nœuds (outil Sélection).
+          </>
         ) : outil === 'voie' ? (
           <>Cliquez une rue du côté du sens voulu : une voie s’y ajoute, ou s’en retire, selon les réglages.</>
         ) : outil === 'passage' ? (
