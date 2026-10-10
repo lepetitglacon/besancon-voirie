@@ -103,6 +103,18 @@ export class ProgrammeService {
   }
 
   /**
+   * Programme exporté vers SUMO : le premier plan à cycle (par code), calculé ; null s'il n'y en
+   * a pas ou s'il est en erreur (SUMO lui invente alors un programme).
+   */
+  async retenuPourSumo(carrefourId: string): Promise<({ code: string } & Pick<ResultatProgramme, 'cycle_s' | 'verts' | 'jaunes'>) | null> {
+    const { plans, alertes } = await this.lire(carrefourId);
+    const plan = plans.find((p) => p.mode === 'cycle' && p.etapes.length > 0);
+    if (!plan || plan.mode !== 'cycle' || alertes.some((a) => a.startsWith(`Plan ${plan.code} :`))) return null;
+    const { cycle_s, verts, jaunes } = this.calculer(await this.contexte(carrefourId), plan);
+    return { code: plan.code, cycle_s, verts, jaunes };
+  }
+
+  /**
    * Remplace les plans du carrefour. Les plans à cycle sont calculés : le cycle et le
    * diagramme de feux (intervalles de vert par ligne) sont enregistrés avec les étapes.
    * Un plan conservé garde sa référence de synchronisation et son relevé d'origine.

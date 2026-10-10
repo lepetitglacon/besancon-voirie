@@ -139,13 +139,26 @@ carrefour.
 
 ### Étape 6 — Exporter le programme des feux vers SUMO
 
-- `versTlLogic` (moteur) : programme d'un carrefour → `<tlLogic>` (une phase par période sans
-  changement), d'après la ligne de feux de chaque lien.
-- Export : fichier `reseau.tll.xml` avec les `<tlLogic>` des carrefours programmés et le
-  `linkIndex` de chaque connexion (reseau-d-abord étape 9 : nœuds joints, connexions saisies).
+- Le **cœur** de chaque carrefour (ses nœuds au-delà des lignes d'arrêt) devient une jonction
+  `c<carrefour>` ; les approches restent des arêtes, avec leurs présélections
+  ([sumoCarrefours.ts](../packages/engine/src/sumoCarrefours.ts)).
+- Ses connexions (saisies ou proposées) deviennent les liens de la jonction ; une branche
+  interne (R1…) se traverse, sous la ligne de la première ligne d'arrêt.
+- `versTlLogic` : le premier plan à cycle devient un `<tlLogic>`, une phase par période sans
+  changement (`G`, `y`, `r`, `o` pour un lien sans ligne), dans `reseau.tll.xml` avec le
+  `linkIndex` de chaque lien (décision S4 de poc-sumo.md révisée).
+- Une voie dont l'emprise est dessinée prend sa largeur moyenne (`<lane width>`).
+
+```bash
+pnpm reseau:sumo --bbox=6.0265,47.2443,6.0300,47.2463
+```
+
+**Résultat attendu** : `data/sumo/reseau.tll.xml` contient un `<tlLogic id="c<carrefour>">` par
+carrefour programmé et entièrement dans l'emprise.
 
 > ❓ **À confirmer** : `netconvert` n'est pas installé sur le poste ; l'export est vérifié par
-> les tests du moteur, pas encore par un `netconvert` réel.
+> les tests du moteur et à la main sur la base du worktree, pas encore par un `netconvert` réel
+> (`netconvert -c reseau.netccfg`, puis `sumo-gui` avec « show link tls index »).
 
 ### Étape 7 — Garder les brouillons au rechargement
 
@@ -211,3 +224,4 @@ Les brouillons (connexions, lignes, programme) sont gardés dans le navigateur
 - 2026-10-10 — création : niveaux N0 à N4, plan en 8 étapes, refonte de l'éditeur.
 - 2026-10-10 — réécrit sur `reseau-voies` (réseau d'abord) ; emprise de voie ; pas de table
   `suggestion` ; panneaux existants gardés.
+- 2026-10-10 — étapes 1 à 6 faites ; export SUMO par cœur de carrefour (sans `<join>`), S4 révisée.

@@ -217,5 +217,5 @@ export interface BilanSemis {
 }
 
 /** Fichiers de l'export SUMO « plain XML », à passer à netconvert. */
-export const FichierSumo = z.enum(['reseau.nod.xml', 'reseau.edg.xml', 'reseau.con.xml', 'reseau.netccfg']);
+export const FichierSumo = z.enum(['reseau.nod.xml', 'reseau.edg.xml', 'reseau.con.xml', 'reseau.tll.xml', 'reseau.netccfg']);
 export type FichierSumo = z.infer<typeof FichierSumo>;

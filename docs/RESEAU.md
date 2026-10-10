@@ -163,13 +163,13 @@ carrefour bâti sur le réseau, `PUT /branches` n'enregistre que les connexions 
 déduisent du réseau) ; une connexion vers une voie qu'il n'a pas est refusée (400). Un carrefour
 sans nœud (réseau non semé, tests) garde ses branches saisies à la main.
 
-> 💡 L'export SUMO écrit encore les liaisons de chaque nœud du carrefour (proposées) : les
-> connexions saisies n'y sont pas reprises (voir [reseau-d-abord.md](reseau-d-abord.md), étape 9).
+> 💡 L'export SUMO écrit le cœur de chaque carrefour en une seule jonction, avec ses connexions
+> (saisies ou proposées) et son programme : voir §5.
 
 ## 5. Export SUMO
 
 ```bash
-pnpm reseau:sumo [--bbox=ouest,sud,est,nord]   # écrit data/sumo/reseau.{nod,edg,con}.xml et reseau.netccfg
+pnpm reseau:sumo [--bbox=ouest,sud,est,nord]   # écrit data/sumo/reseau.{nod,edg,con,tll}.xml et reseau.netccfg
 cd data/sumo && netconvert -c reseau.netccfg     # → reseau.net.xml
 ```
 
@@ -180,9 +180,13 @@ longitude, latitude : netconvert les projette en UTM (`proj.plain-geo`, `proj.ut
 | Élément | SUMO |
 |---|---|
 | Nœud du réseau | uuid du nœud, `type="priority"` |
-| Nœud d'un carrefour | `type="traffic_light" tl="c<carrefour>"` : tous les nœuds du carrefour partagent un feu, comme un feu temporisé TM:PE sur plusieurs nœuds (programme par défaut de netconvert, en attendant `versTlLogic`) |
-| Tronçon, sens avant / arrière | `t<tronçon>` / `-t<tronçon>` ; voies bus, vélo, tram : `<lane allow="bus\|bicycle\|tram"/>`, une voie vélo avec `width="1.50"` |
-| Liaisons de chaque nœud | `<connection>` (saisies, ou à défaut proposées) : ce qu'on voit dans l'éditeur est ce que SUMO simule. SUMO numérote les voies de la droite vers la gauche : index = nombre de voies − 1 − rang. |
+| Cœur d'un carrefour | Nœuds au-delà des lignes d'arrêt : **une seule jonction** `c<carrefour>`, `type="traffic_light" tl="c<carrefour>"`, au barycentre de ces nœuds ; les tronçons du cœur disparaissent ([sumoCarrefours.ts](../packages/engine/src/sumoCarrefours.ts)) |
+| Approche d'un carrefour | Nœuds entre le bord du carrefour et une ligne d'arrêt (passage piéton, début de présélection) : nœuds ordinaires, les voies d'approche restent des arêtes |
+| Connexions d'un carrefour | Ses connexions (saisies ou proposées), de l'arête de la ligne d'arrêt à celle qui repart ; une branche interne (R1…) se traverse (O → R1 puis R1 → E donne O → E) |
+| Programme d'un carrefour | `reseau.tll.xml` : `<tlLogic id="c<carrefour>" programID="<plan>">`, d'après le premier plan à cycle (une phase par période sans changement : `G` vert, `y` jaune, `r` rouge, `o` lien sans ligne), et le `linkIndex` de chaque lien. Sans plan à cycle valide : programme par défaut de netconvert |
+| Carrefour coupé par l'emprise exportée | Ses nœuds restent séparés, `tl="c<carrefour>"` partagé (comme avant) |
+| Tronçon, sens avant / arrière | `t<tronçon>` / `-t<tronçon>` ; voies bus, vélo, tram : `<lane allow="bus\|bicycle\|tram"/>`, une voie vélo avec `width="1.50"` ; une voie dont l'emprise est dessinée prend sa largeur moyenne (`width`) |
+| Liaisons de chaque nœud hors carrefour | `<connection>` (saisies, ou à défaut proposées) : ce qu'on voit dans l'éditeur est ce que SUMO simule. SUMO numérote les voies de la droite vers la gauche : index = nombre de voies − 1 − rang. |
 
 ## 6. API
 
@@ -191,9 +195,9 @@ longitude, latitude : netconvert les projette en UTM (`proj.plain-geo`, `proj.ut
 | GET | `/api/reseau?bbox=` | Tronçons (6 000 au plus, `tronque` au-delà) et nœuds de l'emprise, avec leurs liaisons |
 | POST | `/api/reseau/semer` | `{ reinitialiser? }` : sème le réseau depuis OSM, une seule fois (409 ensuite) ; bilan (`EditionGuard`) |
 | POST | `/api/reseau/troncons` | `{ points, de, vers, nom, voies_avant, voies_arriere, vitesse_kmh }` ; chaque bout s'accroche à un nœud (`{type:'noeud', id}`), coupe un tronçon (`{type:'troncon', id}`, au point le plus proche, ou sur son bout à moins de 1,5 m) ou crée un nœud (`{type:'libre'}`) (`EditionGuard`) |
-| PATCH | `/api/reseau/troncons/:id` | Nom, voies par sens, types de voies, vitesse, tracé (`points`, bouts gardés sur leurs nœuds), `inverser` (`EditionGuard`) |
+| PATCH | `/api/reseau/troncons/:id` | Nom, voies par sens, types de voies, vitesse, tracé (`points`, bouts gardés sur leurs nœuds), `inverser` ; `voie` : ajouter ou retirer une voie à un rang (types, emprises et liaisons saisies aux deux bouts suivent) ; `emprise` : poser ou retirer l'emprise d'une voie (`EditionGuard`) |
 | DELETE | `/api/reseau/troncons/:id` | Supprime (tracé à la main) ou masque (OSM) (`EditionGuard`) |
-| POST | `/api/reseau/troncons/:id/couper` | `{ position }` : nouveau nœud au point le plus proche ; voies, types et liaisons gardés de part et d'autre ; entre deux nœuds d'un même carrefour, le nœud en fait partie (`EditionGuard`) |
+| POST | `/api/reseau/troncons/:id/couper` | `{ position, feux?, pieton? }` : nouveau nœud, qui peut porter d'emblée une ligne d'arrêt ou un passage piéton, au point le plus proche ; voies, types et liaisons gardés de part et d'autre ; entre deux nœuds d'un même carrefour, le nœud en fait partie (`EditionGuard`) |
 | PATCH | `/api/reseau/noeuds/:id` | `{ position?, feux?, pieton?, carrefour_id? }` : déplacer (les tronçons suivent), ligne d'arrêt à feux, passage piéton, carrefour (null : l'en retirer) (`EditionGuard`) |
 | DELETE | `/api/reseau/noeuds/:id` | Retire un nœud entre deux tronçons de mêmes voies : ils n'en font plus qu'un ; 400 sinon (`EditionGuard`) |
 | PUT | `/api/reseau/noeuds/:id/liaisons` | `{ liaisons: [...] \| null }` (null : proposées) ; 400 pour une voie qui n'arrive pas au nœud (`EditionGuard`) |

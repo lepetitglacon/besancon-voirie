@@ -8,7 +8,7 @@ import type { OutilReseau } from './CoucheReseau'
 import { COULEURS_RESEAU } from './couleurs'
 import { ZOOM_MIN_RESEAU } from './modeReseau'
 
-const FICHIERS_SUMO = ['reseau.nod.xml', 'reseau.edg.xml', 'reseau.con.xml', 'reseau.netccfg']
+const FICHIERS_SUMO = ['reseau.nod.xml', 'reseau.edg.xml', 'reseau.con.xml', 'reseau.tll.xml', 'reseau.netccfg']
 
 const LEGENDE = [
   { couleur: COULEURS_RESEAU.osm, libelle: 'OSM' },

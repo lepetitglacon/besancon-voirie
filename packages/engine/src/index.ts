@@ -16,5 +16,6 @@ export * from './reseau.js';
 export * from './editionVoies.js';
 export * from './controles.js';
 export * from './sumo.js';
+export * from './sumoCarrefours.js';
 export * from './synchro.js';
 export * from './vueCarrefour.js';

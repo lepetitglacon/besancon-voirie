@@ -12,6 +12,7 @@ import {
   liaisonsRetenues,
   partagerEmprises,
   retirerType,
+  type CarrefourSumo,
   type EmprisesTroncon,
   type LonLat,
   type ReseauSumo,
@@ -33,8 +34,12 @@ import type {
   TronconResume,
   TypesVoies,
 } from '@voirie/schema';
+import { typeLigne } from '@voirie/schema';
 import { sql, type SQL } from 'drizzle-orm';
+import { BranchesService } from '../branches/branches.service.js';
 import { DRIZZLE, type Db } from '../db/db.module.js';
+import { LignesService } from '../lignes/lignes.service.js';
+import { ProgrammeService } from '../programme/programme.service.js';
 import type { Executeur } from '../db/sql.js';
 import { materialiserCarrefour, rafraichirCarrefours, rattacherTousLesCarrefours } from './carrefours.js';
 import { semerReseau } from './generation.js';
@@ -114,7 +119,12 @@ async function voisins(db: Executeur, noeud: string): Promise<string[]> {
 
 @Injectable()
 export class ReseauService {
-  constructor(@Inject(DRIZZLE) private readonly db: Db) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Db,
+    private readonly branches: BranchesService,
+    private readonly lignes: LignesService,
+    private readonly programme: ProgrammeService,
+  ) {}
 
   /** Tronçons et nœuds de l'emprise. */
   async dansEmprise(bbox: Bbox): Promise<ReseauGeoJson> {
@@ -440,10 +450,35 @@ export class ReseauService {
   /** Fichiers SUMO plain XML du réseau (dans l'emprise, ou en entier). */
   async exporter(fichier: FichierSumo, bbox?: Bbox): Promise<string> {
     if (fichier === 'reseau.netccfg') return configurationNetconvert();
-    const sortie = exporterSumo(await donneesSumo(this.db, bbox));
+    const reseau = await donneesSumo(this.db, bbox);
+    const sortie = exporterSumo({ ...reseau, carrefours: await this.carrefoursSumo(reseau.noeuds) });
     const alertes = sortie.alertes.map((a) => `<!-- ${a.replace(/--/g, '—')} -->`).join('\n');
     const avecAlertes = (xml: string) => (alertes ? xml.replace(/\n/, `\n${alertes}\n`) : xml);
-    return fichier === 'reseau.nod.xml' ? avecAlertes(sortie.nod) : fichier === 'reseau.edg.xml' ? sortie.edg : sortie.con;
+    if (fichier === 'reseau.nod.xml') return avecAlertes(sortie.nod);
+    return fichier === 'reseau.edg.xml' ? sortie.edg : fichier === 'reseau.tll.xml' ? sortie.tll : sortie.con;
+  }
+
+  /**
+   * Carrefours de l'export, chacun en une jonction SUMO : leurs connexions (saisies ou proposées),
+   * la ligne de feux véhicules de chaque mouvement, et leur programme retenu.
+   */
+  private async carrefoursSumo(noeuds: ReseauSumo['noeuds']): Promise<CarrefourSumo[]> {
+    const presents = new Map<string, number>();
+    for (const n of noeuds) if (n.carrefour) presents.set(n.carrefour, (presents.get(n.carrefour) ?? 0) + 1);
+    // Un carrefour coupé par le bord de l'emprise exportée garde ses nœuds tels quels.
+    const { rows: complets } = await this.db.execute<{ id: string; noeuds: number }>(sql`
+      SELECT carrefour_id AS id, count(*)::int AS noeuds FROM noeud
+      WHERE carrefour_id = ANY (${`{${[...presents.keys()].join(',')}}`}::uuid[]) GROUP BY carrefour_id
+    `);
+    const ids = complets.filter((c) => presents.get(c.id) === c.noeuds).map((c) => c.id);
+    const carrefours: CarrefourSumo[] = [];
+    for (const id of ids) {
+      const { connexions } = await this.branches.lire(id);
+      const { lignes } = await this.lignes.lire(id);
+      const mouvements = lignes.filter((l) => typeLigne(l.signal) === 'vehicule').flatMap((l) => l.mouvements.map((m) => [m, l.code] as const));
+      carrefours.push({ id, connexions, lignes: Object.fromEntries(mouvements), programme: await this.programme.retenuPourSumo(id) });
+    }
+    return carrefours;
   }
 
   private async lire(db: Executeur, id: string) {
@@ -539,9 +574,13 @@ export async function donneesSumo(db: Executeur, bbox?: Bbox): Promise<ReseauSum
     vitesse_kmh: number | null;
     nom: string | null;
     highway: string | null;
+    branche_de: string | null;
+    branche_vers: string | null;
+    emprises: EmprisesTroncon | null;
   }>(sql`
     SELECT t.id, t.noeud_de AS de, t.noeud_vers AS vers, (ST_AsGeoJSON(t.geom)::json)->'coordinates' AS points,
-           t.voies_avant, t.voies_arriere, t.types_avant, t.types_arriere, t.vitesse_kmh, t.nom, t.highway
+           t.voies_avant, t.voies_arriere, t.types_avant, t.types_arriere, t.vitesse_kmh, t.nom, t.highway,
+           t.branche_de, t.branche_vers, t.emprises
     FROM troncon t
     WHERE NOT t.supprime ${bbox ? sql`AND t.geom && ${enveloppe(bbox)}` : sql``}
     ORDER BY t.id

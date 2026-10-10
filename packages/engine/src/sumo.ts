@@ -10,12 +10,18 @@
  *   SUMO numérote les voies de la droite (0) vers la gauche : l'index SUMO d'une voie de rang r
  *   parmi n (rang 0 = la plus à gauche) est n − 1 − r.
  *
+ * - Un carrefour décrit dans `carrefours` (sa jonction, ses connexions, son programme) devient
+ *   une seule jonction `c<carrefour>` avec ses liens et son `<tlLogic>` (voir sumoCarrefours.ts).
+ * - Une voie dont l'emprise a été dessinée prend sa largeur moyenne (`<lane width>`).
+ *
  * Les coordonnées sont écrites en longitude, latitude : netconvert les projette
  * (`proj.plain-geo` + `proj.utm`, voir `configurationNetconvert`).
  */
 import { HIERARCHIE_VOIES } from './nommage.js';
 import { boutsAuNoeud, liaisonsRetenues, type Liaison, type TypeVoieReseau } from './reseau.js';
 import { LARGEUR_VOIE_VELO_M, type LonLat } from './geometrie.js';
+import { cleEmprise, largeurEmprise, type EmprisesTroncon } from './editionVoies.js';
+import { preparerJonctions, versTlLogic, type CarrefourSumo } from './sumoCarrefours.js';
 
 export interface NoeudSumo {
   id: string;
@@ -39,17 +45,26 @@ export interface TronconSumo {
   vitesse_kmh: number | null;
   nom: string | null;
   highway: string | null;
+  /** Code de la branche que forme chaque bout dans un carrefour (N, S, R1…). */
+  branche_de?: string | null;
+  branche_vers?: string | null;
+  /** Emprises réelles de voies (`avant:0`…), dessinées sur la photo. */
+  emprises?: EmprisesTroncon | null;
 }
 
 export interface ReseauSumo {
   noeuds: NoeudSumo[];
   troncons: TronconSumo[];
+  /** Carrefours exportés en une jonction, avec leurs connexions et leur programme. */
+  carrefours?: CarrefourSumo[];
 }
 
 export interface ExportSumo {
   nod: string;
   edg: string;
   con: string;
+  /** Programmes des carrefours (`<tlLogic>`) et ordre de leurs liens (`linkIndex`). */
+  tll: string;
   alertes: string[];
 }
 
@@ -89,31 +104,59 @@ interface Arete {
   points: LonLat[];
   /** Type de chaque voie, rang 0 = la plus à gauche ; null : toutes générales. */
   types: readonly TypeVoieReseau[] | null;
+  /** Largeur réelle (m) de certaines voies, d'après leur emprise, par rang. */
+  largeurs: ReadonlyMap<number, number>;
+}
+
+/** Largeur de chaque voie d'un sens qui a une emprise, par rang. */
+function largeursEmprises(t: TronconSumo, sens: 'avant' | 'arriere', voies: number): Map<number, number> {
+  const largeurs = new Map<number, number>();
+  for (let rang = 0; rang < voies; rang++) {
+    const polygone = t.emprises?.[cleEmprise(sens, rang)];
+    const largeur = polygone ? largeurEmprise(polygone, t.points) : null;
+    if (largeur !== null && largeur > 0.5 && largeur < 10) largeurs.set(rang, largeur);
+  }
+  return largeurs;
 }
 
 export function exporterSumo(reseau: ReseauSumo): ExportSumo {
-  const alertes: string[] = [];
+  const jonctions = preparerJonctions(reseau);
+  const alertes: string[] = [...jonctions.alertes];
   const aretes: Arete[] = [];
   const connexions: string[] = [];
 
   for (const t of reseau.troncons) {
-    if (t.de === t.vers) {
+    // Au cœur d'un carrefour exporté en jonction : le tronçon disparaît, ses liens sont ceux du carrefour.
+    if (jonctions.interne(t)) continue;
+    const de = jonctions.noeudSumo(t.de);
+    const vers = jonctions.noeudSumo(t.vers);
+    if (de === vers) {
       alertes.push(`Tronçon ${t.nom ?? t.id} : boucle sur un seul nœud, ignoré`);
       continue;
     }
     const commun = { vitesse_kmh: t.vitesse_kmh ?? vitesseParDefaut(t.highway), priorite: priorite(t.highway), nom: t.nom };
     if (t.voies_avant > 0) {
-      aretes.push({ ...commun, id: `t${t.id}`, de: t.de, vers: t.vers, voies: t.voies_avant, points: t.points, types: t.types_avant ?? null });
+      aretes.push({
+        ...commun,
+        id: `t${t.id}`,
+        de,
+        vers,
+        voies: t.voies_avant,
+        points: t.points,
+        types: t.types_avant ?? null,
+        largeurs: largeursEmprises(t, 'avant', t.voies_avant),
+      });
     }
     if (t.voies_arriere > 0) {
       aretes.push({
         ...commun,
         id: `-t${t.id}`,
-        de: t.vers,
-        vers: t.de,
+        de: vers,
+        vers: de,
         voies: t.voies_arriere,
         points: [...t.points].reverse(),
         types: t.types_arriere ?? null,
+        largeurs: largeursEmprises(t, 'arriere', t.voies_arriere),
       });
     }
   }
@@ -126,7 +169,7 @@ export function exporterSumo(reseau: ReseauSumo): ExportSumo {
   }
   for (const n of reseau.noeuds) {
     const autour = parNoeud.get(n.id) ?? [];
-    if (autour.length < 2) continue;
+    if (autour.length < 2 || jonctions.dansUnCoeur(n.id)) continue;
     const bouts = boutsAuNoeud(
       n.id,
       autour.map((t) => ({
@@ -152,6 +195,22 @@ export function exporterSumo(reseau: ReseauSumo): ExportSumo {
     }
   }
 
+  // Liens des carrefours exportés en jonction, et leurs programmes.
+  const tll: string[] = [];
+  for (const coeur of jonctions.coeurs) {
+    const liens = coeur.liens.filter((l) => emises.has(l.depuis) && emises.has(l.vers));
+    for (const l of liens) {
+      connexions.push(`  <connection from="${l.depuis}" to="${l.vers}" fromLane="${l.voieDepuis}" toLane="${l.voieVers}"/>`);
+    }
+    if (!coeur.carrefour.programme || liens.length === 0) continue;
+    tll.push(versTlLogic(coeur.id, coeur.carrefour.programme, liens));
+    tll.push(
+      ...liens.map(
+        (l, index) => `  <connection from="${l.depuis}" to="${l.vers}" fromLane="${l.voieDepuis}" toLane="${l.voieVers}" tl="${coeur.id}" linkIndex="${index}"/>`,
+      ),
+    );
+  }
+
   // Nœuds utilisés seulement.
   const utilises = new Set(aretes.flatMap((a) => [a.de, a.vers]));
   const nod = [
@@ -162,10 +221,14 @@ export function exporterSumo(reseau: ReseauSumo): ExportSumo {
       .filter((n) => utilises.has(n.id))
       .map((n) => {
         const position = `x="${n.position[0].toFixed(7)}" y="${n.position[1].toFixed(7)}"`;
-        return n.carrefour
+        // Nœud d'approche d'un carrefour exporté en jonction : un nœud ordinaire.
+        return n.carrefour && !(reseau.carrefours ?? []).some((c) => c.id === n.carrefour)
           ? `  <node id="${n.id}" ${position} type="traffic_light" tl="c${n.carrefour}"/>`
           : `  <node id="${n.id}" ${position} type="priority"/>`;
       }),
+    ...jonctions.coeurs
+      .filter((c) => utilises.has(c.id))
+      .map((c) => `  <node id="${c.id}" x="${c.position[0].toFixed(7)}" y="${c.position[1].toFixed(7)}" type="traffic_light" tl="${c.id}"/>`),
     '</nodes>',
     '',
   ].join('\n');
@@ -185,15 +248,19 @@ export function exporterSumo(reseau: ReseauSumo): ExportSumo {
         ...(a.nom ? [`name="${echapper(a.nom)}"`] : []),
         `shape="${forme(a.points)}"`,
       ].join(' ');
-      const voiesTypees = (a.types ?? [])
-        .slice(0, a.voies)
-        .map((type, rang) => ({ index: indexSumo(a.voies, rang), allow: ALLOW[type], velo: type === 'velo' }))
-        .filter((v) => v.allow !== null)
+      const voiesDecrites = Array.from({ length: a.voies }, (_, rang) => {
+        const type = a.types?.[rang] ?? 'generale';
+        const largeur = a.largeurs.get(rang) ?? (type === 'velo' ? LARGEUR_VOIE_VELO_M : null);
+        return { index: indexSumo(a.voies, rang), allow: ALLOW[type], largeur };
+      })
+        .filter((v) => v.allow !== null || v.largeur !== null)
         .sort((p, q) => p.index - q.index);
-      if (voiesTypees.length === 0) return `  <edge ${attributs}/>`;
+      if (voiesDecrites.length === 0) return `  <edge ${attributs}/>`;
       return [
         `  <edge ${attributs}>`,
-        ...voiesTypees.map((v) => `    <lane index="${v.index}" allow="${v.allow}"${v.velo ? ` width="${LARGEUR_VOIE_VELO_M.toFixed(2)}"` : ''}/>`),
+        ...voiesDecrites.map(
+          (v) => `    <lane index="${v.index}"${v.allow ? ` allow="${v.allow}"` : ''}${v.largeur !== null ? ` width="${v.largeur.toFixed(2)}"` : ''}/>`,
+        ),
         '  </edge>',
       ].join('\n');
     }),
@@ -202,7 +269,15 @@ export function exporterSumo(reseau: ReseauSumo): ExportSumo {
   ].join('\n');
 
   const con = ['<?xml version="1.0" encoding="UTF-8"?>', '<connections>', ...connexions, '</connections>', ''].join('\n');
-  return { nod, edg, con, alertes };
+  const tllXml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!-- Besançon Voirie : programmes des carrefours (premier plan à cycle) et ordre de leurs liens -->',
+    '<tlLogics>',
+    ...tll,
+    '</tlLogics>',
+    '',
+  ].join('\n');
+  return { nod, edg, con, tll: tllXml, alertes };
 }
 
 /** Configuration netconvert : lit les trois fichiers en lon/lat, projette en UTM, écrit reseau.net.xml. */
@@ -215,6 +290,7 @@ export function configurationNetconvert(): string {
     '    <node-files value="reseau.nod.xml"/>',
     '    <edge-files value="reseau.edg.xml"/>',
     '    <connection-files value="reseau.con.xml"/>',
+    '    <tllogic-files value="reseau.tll.xml"/>',
     '  </input>',
     '  <output>',
     '    <output-file value="reseau.net.xml"/>',

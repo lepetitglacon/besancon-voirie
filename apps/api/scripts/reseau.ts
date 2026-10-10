@@ -4,7 +4,7 @@
  * Usage (depuis apps/api, Node 24+) :
  *   node scripts/reseau.ts semer [--reinitialiser]  sème le réseau depuis les données OSM importées (une seule
  *                                                   fois ; --reinitialiser efface tout le réseau avant)
- *   node scripts/reseau.ts sumo [--bbox=o,s,e,n]    écrit data/sumo/reseau.{nod,edg,con}.xml et reseau.netccfg
+ *   node scripts/reseau.ts sumo [--bbox=o,s,e,n]    écrit data/sumo/reseau.{nod,edg,con,tll}.xml et reseau.netccfg
  *        [--sortie=dossier]                         puis : cd data/sumo && netconvert -c reseau.netccfg
  *   --api=http://localhost:3000                     URL de l'API (par défaut : API_PORT du .env)
  */
@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 
-const FICHIERS = ['reseau.nod.xml', 'reseau.edg.xml', 'reseau.con.xml', 'reseau.netccfg'];
+const FICHIERS = ['reseau.nod.xml', 'reseau.edg.xml', 'reseau.con.xml', 'reseau.tll.xml', 'reseau.netccfg'];
 
 function option(options: string[], nom: string): string | undefined {
   return options.find((o) => o.startsWith(`--${nom}=`))?.slice(nom.length + 3);

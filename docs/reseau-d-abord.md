@@ -151,10 +151,15 @@ Fait (`4fb7b34`) : tous les nœuds d'un carrefour partagent `tl="c<carrefour>"`.
 pnpm reseau:sumo && cd data/sumo && netconvert -c reseau.netccfg
 ```
 
-### Étape 9 — Joindre les nœuds d'un carrefour dans l'export SUMO ⏳
+### Étape 9 — Joindre les nœuds d'un carrefour dans l'export SUMO ✅ (à vérifier avec netconvert)
 
-Depuis R7, les connexions saisies d'un carrefour ne sont pas dans l'export, qui écrit encore les
-liaisons (proposées) de chacun de ses nœuds. À faire :
+Fait sur `pipeline-donnees` autrement que prévu : pas de `<join>`, mais une jonction
+`c<carrefour>` écrite par l'export à la place des nœuds du **cœur** (au-delà des lignes
+d'arrêt) ; les approches restent des arêtes, ses connexions deviennent les liens de la jonction,
+son programme un `<tlLogic>` (`reseau.tll.xml`, [RESEAU.md §5](RESEAU.md#5-export-sumo)).
+L'identifiant du feu est connu d'avance, sans dépendre du `cluster_…` de netconvert.
+
+Plan d'origine, pour mémoire :
 
 - `nod.xml` : `<join nodes="…"/>` des nœuds de chaque carrefour (netconvert en fait une seule
   jonction et retire les tronçons du cœur) ;
