@@ -3,7 +3,7 @@ import type { INestApplication } from '@nestjs/common';
 import type { Server } from 'node:http';
 import pg from 'pg';
 import request from 'supertest';
-import type { BilanSemis, BranchesCarrefour, ReseauGeoJson } from '@voirie/schema';
+import type { BilanSemis, BranchesCarrefour, MaturiteCarrefour, ReseauGeoJson } from '@voirie/schema';
 import { AppModule } from '../src/app.module.js';
 import { chargerOsm, trierElements, type OverpassElement } from '../scripts/osm.js';
 import { COMMUNE } from './fixtures/osm.js';
@@ -237,13 +237,56 @@ describe('Réseau routier, carrefours bâtis sur ses nœuds et export SUMO (e2e)
     await http().patch(`/api/reseau/troncons/${manuel}`).send({ voies_avant: 0, voies_arriere: 0 }).expect(400);
   });
 
-  it('GET /reseau/sumo/* should export plain XML, the carrefour nodes sharing one traffic light', async () => {
+  it('PATCH /reseau/troncons/:id { voie, emprise } and POST couper { pieton } should edit lanes one by one', async () => {
+    const piste = (await reseau()).troncons.features.find((t) => t.properties.highway === 'cycleway')!;
+    const url = `/api/reseau/troncons/${piste.id}`;
+    const carre: Array<[number, number]> = [
+      [6.0409, 47.2605],
+      [6.041, 47.2605],
+      [6.041, 47.2606],
+    ];
+    // Une voie générale ajoutée contre l'axe : la voie vélo passe au rang 1, son emprise la suit.
+    await http().patch(url).send({ emprise: { sens: 'avant', rang: 0, polygone: carre } }).expect(200);
+    const ajout = (await http().patch(url).send({ voie: { action: 'inserer', sens: 'avant', rang: 0, type: 'generale' } }).expect(200)).body;
+    expect(ajout.properties).toMatchObject({ voies_avant: 2, types_avant: ['generale', 'velo'], emprises: { 'avant:1': carre } });
+    const retrait = (await http().patch(url).send({ voie: { action: 'retirer', sens: 'avant', rang: 0 } }).expect(200)).body;
+    expect(retrait.properties).toMatchObject({ voies_avant: 1, types_avant: ['velo'], emprises: { 'avant:0': carre } });
+    await http().patch(url).send({ voie: { action: 'retirer', sens: 'avant', rang: 1 } }).expect(400);
+
+    // Coupe avec un passage piéton à feux, puis retrait du nœud : le tronçon garde son identifiant.
+    const [lon, lat] = piste.geometry.coordinates[0]!;
+    const [lon2, lat2] = piste.geometry.coordinates.at(-1)!;
+    const noeud = (await http().post(`${url}/couper`).send({ position: [(lon + lon2) / 2, (lat + lat2) / 2], pieton: 'feux' }).expect(201)).body;
+    expect(noeud.properties).toMatchObject({ pieton: 'feux', feux: false, degre: 2 });
+    await http().delete(`/api/reseau/noeuds/${noeud.id}`).expect(204);
+    expect((await reseau()).troncons.features.some((t) => t.id === piste.id)).toBe(true);
+    await http().patch(url).send({ emprise: { sens: 'avant', rang: 0, polygone: null } }).expect(200);
+  });
+
+  it('GET /carrefours/maturite should check every carrefour, level by level', async () => {
+    const liste: MaturiteCarrefour[] = (await http().get('/api/carrefours/maturite').expect(200)).body;
+    const lui = liste.find((m) => m.carrefour.id === carrefour)!;
+    expect(lui.sur_le_reseau).toBe(true);
+    expect(Object.keys(lui.niveaux)).toEqual(['N2', 'N3', 'N4']);
+    // Pas encore de programme : le fonctionnement est à faire.
+    expect(lui.niveaux.N3).toBe('erreur');
+    expect(lui.constats.map((c) => c.code)).toContain('aucun-programme');
+    expect((await http().get(`/api/carrefours/${carrefour}/maturite`).expect(200)).body.niveaux).toEqual(lui.niveaux);
+  });
+
+  it('GET /reseau/sumo/* should export plain XML, the carrefour core as one traffic light junction', async () => {
     const nod = (await http().get('/api/reseau/sumo/reseau.nod.xml').expect(200).expect('Content-Type', /xml/)).text;
     const edg = (await http().get('/api/reseau/sumo/reseau.edg.xml').expect(200)).text;
     const con = (await http().get(`/api/reseau/sumo/reseau.con.xml?bbox=${BBOX}`).expect(200)).text;
+    const tll = (await http().get('/api/reseau/sumo/reseau.tll.xml').expect(200)).text;
     const cfg = (await http().get('/api/reseau/sumo/reseau.netccfg').expect(200)).text;
 
-    expect(nod.match(new RegExp(`type="traffic_light" tl="c${carrefour}"`, 'g'))).toHaveLength(6);
+    // Le cœur du carrefour devient une seule jonction (docs/pipeline-donnees.md, étape 6).
+    expect(nod.match(new RegExp(`type="traffic_light" tl="c${carrefour}"`, 'g'))).toHaveLength(1);
+    expect(nod).toContain(`<node id="c${carrefour}"`);
+    expect(edg).toContain(`"c${carrefour}"`);
+    expect(tll).toContain('<tlLogics>');
+    expect(cfg).toContain('<tllogic-files value="reseau.tll.xml"/>');
     expect(edg).toContain('allow="bicycle"');
     expect(edg).toMatch(new RegExp(`<edge id="-t${manuel}" [^>]*numLanes="2"`));
     expect(con.match(/<connection /g)!.length).toBeGreaterThan(10);

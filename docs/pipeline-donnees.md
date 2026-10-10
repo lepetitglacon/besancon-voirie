@@ -3,7 +3,7 @@
 > **Objectif** : dire qui fait quoi, quand, et comment savoir que c'est bon, de la donnée
 > brute (OSM, photo IGN, IA, Ginko, terrain) jusqu'aux sorties (feux, onde verte, SUMO) ; puis
 > rendre l'éditeur des voies capable de modéliser finement un carrefour.
-> **Statut** : en cours (worktree `pipeline-donnees`, bâti sur `reseau-voies` + `main`)
+> **Statut** : étapes 1 à 7 faites (worktree `pipeline-donnees`, bâti sur `reseau-voies` + `main`) ; étape 8 à planifier
 > **Dernière mise à jour** : 2026-10-10
 
 ## Contexte
@@ -187,7 +187,10 @@ carrefour modifié, avec « Reprendre ».
       sans popup ; `Suppr` et `Ctrl Z` marchent.
 - [ ] L'export SUMO d'un carrefour programmé contient son `tlLogic`.
 - [ ] Un rechargement de la page garde les brouillons.
-- [ ] Tests lancés une fois à la fin ; `pnpm db:verifier voirie` avant le merge dans `main`.
+- [x] Tests lancés une fois à la fin (2026-10-10 : 264 tests unitaires, 70 e2e ; le test e2e de
+      l'export SUMO mis à jour pour la jonction unique, deux tests e2e ajoutés).
+- [x] `pnpm db:verifier voirie` : journal cohérent, 4 migrations en attente (réseau et emprises),
+      toutes datées après `essais_ia`. À relancer après une nouvelle fusion de `main`.
 
 ## Pièges & précisions
 
