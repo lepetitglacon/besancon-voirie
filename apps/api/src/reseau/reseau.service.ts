@@ -391,9 +391,11 @@ export class ReseauService {
       }>(sql`
         SELECT id, noeud_de, noeud_vers, voies_avant, voies_arriere, types_avant, types_arriere, source, branche_de, branche_vers, emprises
         FROM troncon WHERE NOT supprime AND (noeud_de = ${id} OR noeud_vers = ${id})
+        -- Le plus ancien reste : retirer le nœud d'une coupe rend au tronçon coupé son identifiant.
+        ORDER BY cree_le, id
       `);
       if (rows.length !== 2) throw new BadRequestException('Seul un nœud entre deux tronçons se retire');
-      // Chaque tronçon, orienté pour que le nœud soit entre `a` (qui y arrive) et `b` (qui en part).
+      // Chaque tronçon, orienté pour que le nœud soit entre `a` (qui y arrive, gardé) et `b` (qui en part, retiré).
       const [a, b] = [rows[0]!, rows[1]!].map((t) => ({ ...t, versLeNoeud: t.noeud_vers === id }));
       const sens = (t: typeof a, versLeNoeud: boolean) =>
         t.versLeNoeud === versLeNoeud

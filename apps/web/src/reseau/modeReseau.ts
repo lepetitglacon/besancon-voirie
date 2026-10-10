@@ -383,7 +383,11 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     const { voie } = reglages
     if (voie.action === 'ajouter') {
       if (nombre >= 9) return notifications.create({ type: 'warning', title: 'Neuf voies au plus par sens' })
-      return modifierTroncon(t.id, { voie: { action: 'inserer', sens, rang: voie.position === 'bord' ? nombre : 0, type: voie.type } })
+      // Au bord, une voie de circulation reste à gauche des voies vélo qui longent la chaussée.
+      const types = typesVoies(nombre, sens === 'avant' ? p.types_avant : p.types_arriere)
+      let rang = voie.position === 'bord' ? nombre : 0
+      while (voie.position === 'bord' && voie.type !== 'velo' && rang > 0 && types[rang - 1] === 'velo') rang--
+      return modifierTroncon(t.id, { voie: { action: 'inserer', sens, rang, type: voie.type } })
     }
     if (nombre === 0) return notifications.create({ type: 'warning', title: 'Aucune voie dans ce sens' })
     const autre = sens === 'avant' ? p.voies_arriere : p.voies_avant

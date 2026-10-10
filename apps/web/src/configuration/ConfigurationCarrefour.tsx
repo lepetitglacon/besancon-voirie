@@ -42,6 +42,7 @@ import { Chrono } from './FileIa'
 import type { ClicCalque, ModeEdition } from './calque/CalqueCarrefour'
 import type { EtatFeu } from './calque/elements'
 import { basculerConnexion, basculerTraversee, deplacerPoignee, poserNoeud, type Brouillon, type Poignee, voiesDe } from './modele'
+import { NiveauxCarrefour } from '../maturite/NiveauxCarrefour'
 import { OngletGraphe, type Scenario } from './OngletGraphe'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
 import { OngletProgramme } from './OngletProgramme'
@@ -418,6 +419,13 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
     queryFn: () => api.programme(carrefour.id),
   })
   const programmeData = programmeEnregistre.data
+
+  // Contrôles de ce qui est enregistré, niveau par niveau : relus dès que branches, lignes ou programme changent.
+  const maturite = useQuery({
+    queryKey: ['maturite', carrefour.id, branchesEnregistrees.dataUpdatedAt, lignesEnregistrees.dataUpdatedAt, programmeEnregistre.dataUpdatedAt],
+    queryFn: () => api.maturiteCarrefour(carrefour.id),
+    placeholderData: (precedente) => precedente,
+  })
   const plans: PlanSaisi[] = useMemo(
     () => brouillonProgramme ?? plansSaisis(programmeData?.plans ?? AUCUNE_LIGNE),
     [brouillonProgramme, programmeData],
@@ -826,6 +834,11 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
           ×
         </IconButton>
         <ResumeCarrefour carrefour={carrefour} onModifierFeux={onModifierFeux} onSupprimer={onSupprimer} mt="1.5" />
+        {maturite.data && (
+          <Box mt="2" pt="2" borderTopWidth="1px" borderColor="border.muted">
+            <NiveauxCarrefour maturite={maturite.data} />
+          </Box>
+        )}
         {branches.length > 0 && (
           <HStack gap="2" mt="2">
             <Chiffre valeur={branches.length} libelle="branches" />

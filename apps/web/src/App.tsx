@@ -56,6 +56,7 @@ import { EnTeteReseau } from './reseau/EnTeteReseau'
 import { useModeReseau, ZOOM_VOIES } from './reseau/modeReseau'
 import { PopupNoeud } from './reseau/PopupNoeud'
 import { PopupTroncon } from './reseau/PopupTroncon'
+import { TableauMaturite } from './maturite/TableauMaturite'
 import { avecReglages } from './reseau/reglages'
 import { ReglagesOutil } from './reseau/ReglagesOutil'
 
@@ -141,6 +142,8 @@ function App() {
   }, [])
   /** Éditeur des voies ouvert sans carrefour (outil Voies) ; avec un carrefour ouvert, on y est aussi. */
   const [modeReseau, setModeReseau] = useState(false)
+  /** Tableau de bord de maturité des carrefours (docs/pipeline-donnees.md, étape 5). */
+  const [maturiteOuverte, setMaturiteOuverte] = useState(false)
   const [mode, setMode] = usePreference<Mode>('mode-carte', 'temps_reel')
   const tempsReel = mode === 'temps_reel'
   const sumo = mode === 'sumo'
@@ -434,6 +437,7 @@ function App() {
     }
     if (!edition) {
       if (lettre === 'r') return setModeReseau(true)
+      if (lettre === 'm') return setMaturiteOuverte((ouverte) => !ouverte)
       return lettre === 'n' && composer()
     }
     if (e.key === 'Escape') return setEdition(null)
@@ -883,10 +887,29 @@ function App() {
                 <BarreOutils.Outil glyphe="↖" libelle="Sélection" raccourci="V" actif />
                 <BarreOutils.Outil glyphe="⌖" libelle="Carrefour" raccourci="N" onClick={composer} />
                 <BarreOutils.Outil glyphe="≡" libelle="Voies" raccourci="R" onClick={() => setModeReseau(true)} />
+                <BarreOutils.Outil
+                  glyphe="✓"
+                  libelle="Maturité"
+                  raccourci="M"
+                  actif={maturiteOuverte}
+                  title="Où en est chaque carrefour : carrefour, feux, SUMO"
+                  onClick={() => setMaturiteOuverte((ouverte) => !ouverte)}
+                />
               </>
             )}
           </BarreOutils.Root>
         </>
+      )}
+
+      {maturiteOuverte && !configuration && !edition && !modeReseau && !tempsReel && !sumo && (
+        <TableauMaturite
+          position="fixed"
+          top="3"
+          right="16"
+          zIndex="2"
+          onOuvrir={(m) => configurer({ carrefour: m.carrefour, position: m.position })}
+          onFermer={() => setMaturiteOuverte(false)}
+        />
       )}
 
       {!tempsReel && !sumo && <CarteSuivi

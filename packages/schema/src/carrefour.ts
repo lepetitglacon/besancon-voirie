@@ -88,3 +88,23 @@ export interface CollectionPoints<P> {
 
 export type CarrefoursGeoJson = CollectionPoints<CarrefourResume>;
 export type FeuxGeoJson = CollectionPoints<FeuResume>;
+
+/** Niveau de la chaîne des données (docs/pipeline-donnees.md) : carrefour, fonctionnement, sorties. */
+export type NiveauChaine = 'N2' | 'N3' | 'N4';
+export type EtatNiveau = 'ok' | 'avertissement' | 'erreur';
+
+export interface ConstatCarrefour {
+  niveau: NiveauChaine;
+  gravite: 'erreur' | 'avertissement';
+  code: string;
+  message: string;
+}
+
+/** GET /api/carrefours/maturite : où en est chaque carrefour, niveau par niveau, et pourquoi. */
+export interface MaturiteCarrefour {
+  carrefour: CarrefourResume;
+  position: [number, number];
+  sur_le_reseau: boolean;
+  niveaux: Record<NiveauChaine, EtatNiveau>;
+  constats: ConstatCarrefour[];
+}

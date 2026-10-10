@@ -26,6 +26,7 @@ import type {
   FeuxTempsReel,
   HistoriqueTroncons,
   LignesCarrefour,
+  MaturiteCarrefour,
   CoupeTroncon,
   ModificationNoeud,
   ModificationTroncon,
@@ -81,6 +82,9 @@ export const api = {
   modifierCarrefour: (id: string, modification: ModifierCarrefour) =>
     requete<CarrefourResume>(`/api/carrefours/${id}`, { method: 'PATCH', body: JSON.stringify(modification) }),
   supprimerCarrefour: (id: string) => requete<void>(`/api/carrefours/${id}`, { method: 'DELETE' }),
+  /** Où en est chaque carrefour, niveau par niveau (docs/pipeline-donnees.md). */
+  maturite: () => requete<MaturiteCarrefour[]>('/api/carrefours/maturite'),
+  maturiteCarrefour: (id: string) => requete<MaturiteCarrefour>(`/api/carrefours/${id}/maturite`),
   branches: (carrefourId: string) => requete<BranchesCarrefour>(`/api/carrefours/${carrefourId}/branches`),
   detecterBranches: (carrefourId: string) =>
     requete<DetectionBranches>(`/api/carrefours/${carrefourId}/branches/detection`),
