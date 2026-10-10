@@ -36,6 +36,8 @@ import { CarteCarrefours } from './map/CarteCarrefours'
 import { CouchePertes } from './map/CouchePertes'
 import { PanneauMesure } from './map/PanneauMesure'
 import { useMesures } from './map/useMesures'
+import { CoucheMesuresEnregistrees } from './map/CoucheMesuresEnregistrees'
+import { ListeMesures } from './map/ListeMesures'
 import { CoucheFeuxTempsReel } from './map/CoucheFeuxTempsReel'
 import { CoucheTrams, type CouchesTram } from './map/CoucheTrams'
 import type { OptionsFond } from './map/FondDeCarte'
@@ -396,10 +398,14 @@ function App() {
     return () => window.removeEventListener('keydown', touche)
   }, [])
 
-  // Mesure de distance : Échap la ferme, Retour arrière retire le dernier point.
+  // Mesure de distance : Échap la ferme (ou la liste des mesures), Retour arrière retire le dernier point.
   const toucheMesure = useEffectEvent((e: KeyboardEvent) => {
-    if (!mesure) return
     if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+    if (mesures.liste && e.key === 'Escape') {
+      e.stopImmediatePropagation()
+      return mesures.fermerListe()
+    }
+    if (!mesure) return
     if (e.key === 'Escape') {
       e.stopImmediatePropagation()
       mesures.fermer()
@@ -425,19 +431,22 @@ function App() {
     { valeur: 'centrer', glyphe: '✥', libelle: 'Centrer la carte ici' },
     { valeur: 'copier', glyphe: '⎘', libelle: 'Copier les coordonnées' },
   ]
-  const centrerSur = (points: LonLat[]) => {
+  /** Cadre des points ; la marge réserve la place du panneau ouvert (liste à droite, frise en bas). */
+  const centrerSur = (points: LonLat[], panneau: 'liste' | 'edition' = 'edition') => {
     if (points.length === 1) return carte?.flyTo({ center: points[0]! })
     if (points.length < 2) return
     const lons = points.map((p) => p[0])
     const lats = points.map((p) => p[1])
-    carte?.fitBounds(
-      [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)],
-      // Le bas de l'écran est occupé par le panneau de mesure.
-      { padding: { top: 80, right: 80, bottom: 380, left: 80 }, maxZoom: 18 },
-    )
+    carte?.fitBounds([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)], {
+      padding:
+        panneau === 'liste'
+          ? { top: 80, right: 420, bottom: 80, left: 380 }
+          : { top: 80, right: 80, bottom: 380, left: 80 },
+      maxZoom: 18,
+    })
   }
   const choisirMenu = (valeur: string) => {
-    if (valeur === 'mesurer' && pointMenu) return mesures.commencer(pointMenu)
+    if (valeur === 'mesurer' && pointMenu) return mesures.commencer([pointMenu])
     if (valeur === 'retirer-point' && pointMesureMenu !== null) return mesures.retirer(pointMesureMenu)
     if (valeur === 'mesures') return mesures.ouvrirListe()
     if (valeur === 'centrer' && pointMenu) return carte?.flyTo({ center: pointMenu })
@@ -509,6 +518,7 @@ function App() {
           onDessinerZoneIa={dessinerZoneIa}
           onPlacerFeu={placerFeu}
         >
+          {mesures.liste && <CoucheMesuresEnregistrees mesures={mesures.enregistrees} survolee={mesures.survolee} />}
           {sumo && <CoucheSumo />}
           {sumo && <CoucheVehicules />}
           {sumo && <CoucheFlux />}
@@ -532,6 +542,7 @@ function App() {
         mesures={mesures}
         onCentrer={centrerSur}
       />
+      <ListeMesures position="fixed" top="3" right="60px" zIndex="3" mesures={mesures} onCentrer={centrerSur} />
 
       {configuration ? (
         <ConfigurationCarrefour
@@ -677,6 +688,26 @@ function App() {
         analyses={analysesIa.data ?? []}
         onOuvrirAnalyse={ouvrirAnalyseIa}
       />}
+
+      <IconButton
+        position="fixed"
+        top="148px"
+        right="4"
+        zIndex="2"
+        w="9"
+        h="9"
+        bg={mesures.liste ? 'brand.solid' : 'bg.panel'}
+        color={mesures.liste ? 'brand.contrast' : 'fg'}
+        borderWidth="0"
+        borderRadius="10px"
+        boxShadow="carte"
+        aria-label="Mesures de distance"
+        aria-pressed={mesures.liste}
+        title="Mesures de distance"
+        onClick={mesures.liste ? mesures.fermerListe : mesures.ouvrirListe}
+      >
+        ↔
+      </IconButton>
 
       <Popover.Root positioning={{ placement: 'left-start', gutter: 10 }}>
         <Popover.Trigger asChild>

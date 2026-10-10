@@ -1,7 +1,6 @@
-import { Badge, Box, Button, chakra, HStack, IconButton, Input, Kbd, Stack, Tabs, Text, type BoxProps } from '@chakra-ui/react'
+import { Badge, Box, Button, chakra, HStack, Input, Kbd, Stack, Text, type BoxProps } from '@chakra-ui/react'
 import { useQuery } from '@tanstack/react-query'
 import type { LonLat } from '@voirie/engine'
-import { useState } from 'react'
 import { Aide, CarteEnTete } from '../ds'
 import { altitudes } from './altitude'
 import {
@@ -12,7 +11,7 @@ import {
   echantillonner,
   formaterDistance,
 } from './mesure'
-import type { MesureEnregistree, Mesures, OngletMesure } from './useMesures'
+import type { Mesures } from './useMesures'
 
 /** Repère du profil (unités du viewBox, mis à l'échelle de la largeur du panneau). */
 const L = 600
@@ -23,54 +22,50 @@ const ECART_LIBELLES = 46
 
 interface Props extends BoxProps {
   mesures: Mesures
-  /** Centre la carte sur ces points (un point de la frise, une mesure ouverte). */
+  /** Centre la carte sur un point de la frise. */
   onCentrer: (points: LonLat[]) => void
 }
 
-/** Mesure de distance : la mesure en cours en frise, et les mesures enregistrées dans le navigateur. */
+/** Mesure de distance en édition : nom, enregistrement et frise des points. */
 export function PanneauMesure({ mesures, onCentrer, ...props }: Props) {
-  const { courante, onglet, enregistrees } = mesures
-  if (!courante) return null
+  if (!mesures.courante) return null
   return (
     <Box {...props}>
       <CarteEnTete
         w="620px"
         maxW="calc(100vw - 24px)"
-        surtitre="Mesure de distance"
-        titre={
-          <HStack gap="2">
-            <Tabs.Root size="sm" value={onglet} onValueChange={(e) => mesures.setOnglet(e.value as OngletMesure)}>
-              <Tabs.List>
-                <Tabs.Trigger value="mesure">Mesure</Tabs.Trigger>
-                <Tabs.Trigger value="enregistrees">
-                  Enregistrées
-                  {enregistrees.length > 0 && (
-                    <Badge size="sm" colorPalette="gray">
-                      {enregistrees.length}
-                    </Badge>
-                  )}
-                </Tabs.Trigger>
-              </Tabs.List>
-            </Tabs.Root>
-            <Button size="2xs" variant="ghost" ms="auto" onClick={mesures.fermer}>
-              Fermer
-            </Button>
-          </HStack>
-        }
+        surtitre={mesures.courante.id ? 'Édition de la mesure' : 'Nouvelle mesure'}
+        titre={<EnTete mesures={mesures} />}
       >
-        {onglet === 'mesure' ? (
-          <OngletEnCours mesures={mesures} onCentrer={onCentrer} />
-        ) : (
-          <OngletEnregistrees
-            mesures={mesures}
-            onOuvrir={(mesure) => {
-              mesures.ouvrir(mesure)
-              onCentrer(mesure.points)
-            }}
-          />
-        )}
+        <Frise mesures={mesures} onCentrer={onCentrer} />
       </CarteEnTete>
     </Box>
+  )
+}
+
+function EnTete({ mesures }: { mesures: Mesures }) {
+  const { courante, modifiee } = mesures
+  const assez = courante!.points.length > 1
+  return (
+    <HStack gap="1.5">
+      <Input
+        size="xs"
+        maxW="220px"
+        placeholder="Mesure sans nom"
+        value={courante!.nom}
+        onChange={(e) => mesures.renommer(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && modifiee && assez && mesures.enregistrer()}
+      />
+      <Button size="xs" variant="solid" disabled={!modifiee || !assez} onClick={mesures.enregistrer}>
+        {!modifiee ? 'Enregistrée ✓' : courante!.id ? 'Mettre à jour' : 'Enregistrer'}
+      </Button>
+      <Button size="xs" variant="ghost" ms="auto" onClick={mesures.ouvrirListe}>
+        ☰ Toutes les mesures
+      </Button>
+      <Button size="xs" variant="ghost" onClick={mesures.fermer}>
+        Fermer
+      </Button>
+    </HStack>
   )
 }
 
@@ -79,8 +74,8 @@ export function PanneauMesure({ mesures, onCentrer, ...props }: Props) {
  * totale (un nouveau point resserre les autres sans fausser leurs écarts). Dessous, le profil
  * d'altitude lu dans les tuiles Terrarium, quand elles sont joignables.
  */
-function OngletEnCours({ mesures, onCentrer }: Props) {
-  const { courante, visee, modifiee } = mesures
+function Frise({ mesures, onCentrer }: Pick<Props, 'mesures' | 'onCentrer'>) {
+  const { courante, visee } = mesures
   const points = courante!.points
   const { troncons, cumuls, total } = distancesMesure(points)
   const echantillons = echantillonner(points)
@@ -113,24 +108,7 @@ function OngletEnCours({ mesures, onCentrer }: Props) {
   const { montee, descente } = alt ? denivele(alt) : { montee: 0, descente: 0 }
 
   return (
-    <Stack gap="2" mt="1">
-      <HStack gap="1.5">
-        <Input
-          size="xs"
-          maxW="220px"
-          placeholder="Mesure sans nom"
-          value={courante!.nom}
-          onChange={(e) => mesures.renommerCourante(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && modifiee && points.length > 1 && mesures.enregistrer()}
-        />
-        <Button size="xs" variant="solid" disabled={!modifiee || points.length < 2} onClick={mesures.enregistrer}>
-          {!modifiee ? 'Enregistrée ✓' : courante!.id ? 'Mettre à jour' : 'Enregistrer'}
-        </Button>
-        <Button size="xs" variant="ghost" onClick={mesures.nouvelle}>
-          Nouvelle
-        </Button>
-      </HStack>
-
+    <Stack gap="2" mt="2">
       <HStack gap="1.5">
         <Text textStyle="md" fontWeight="semibold" fontVariantNumeric="tabular-nums">
           {formaterDistance(total)}
@@ -152,6 +130,11 @@ function OngletEnCours({ mesures, onCentrer }: Props) {
         {points.length > 1 && profil.isError && ' · altitudes indisponibles'}
       </Text>
 
+      {points.length === 0 ? (
+        <Aide py="4" textAlign="center">
+          Cliquez sur la carte pour poser le premier point.
+        </Aide>
+      ) : (
       <chakra.svg viewBox={`0 0 ${L} ${H}`} w="full" h="auto" fontFamily="body" overflow="visible">
         {alt && trace && (
           <>
@@ -233,90 +216,7 @@ function OngletEnCours({ mesures, onCentrer }: Props) {
           )
         })}
       </chakra.svg>
-    </Stack>
-  )
-}
-
-/** Liste des mesures enregistrées : ouvrir, renommer, supprimer. */
-function OngletEnregistrees({ mesures, onOuvrir }: { mesures: Mesures; onOuvrir: (mesure: MesureEnregistree) => void }) {
-  if (mesures.enregistrees.length === 0) {
-    return (
-      <Aide mt="2">
-        Aucune mesure enregistrée. Tracez-en une dans l'onglet « Mesure » puis enregistrez-la : elle est gardée dans ce
-        navigateur.
-      </Aide>
-    )
-  }
-  return (
-    <Stack gap="0" mt="2" maxH="260px" overflowY="auto">
-      {mesures.enregistrees.map((mesure) => (
-        <LigneMesure
-          key={`${mesure.id}:${mesure.nom}`}
-          mesure={mesure}
-          ouverte={mesures.courante?.id === mesure.id}
-          onOuvrir={() => onOuvrir(mesure)}
-          onRenommer={(nom) => mesures.renommer(mesure.id, nom)}
-          onSupprimer={() => mesures.supprimer(mesure)}
-        />
-      ))}
-    </Stack>
-  )
-}
-
-function LigneMesure({
-  mesure,
-  ouverte,
-  onOuvrir,
-  onRenommer,
-  onSupprimer,
-}: {
-  mesure: MesureEnregistree
-  ouverte: boolean
-  onOuvrir: () => void
-  onRenommer: (nom: string) => void
-  onSupprimer: () => void
-}) {
-  const [nom, setNom] = useState(mesure.nom)
-  const valider = () => {
-    const propre = nom.trim()
-    if (propre && propre !== mesure.nom) onRenommer(propre)
-    else setNom(mesure.nom)
-  }
-  return (
-    <HStack gap="2" py="1" borderBottomWidth="1px" borderColor="border.muted" _last={{ borderBottomWidth: 0 }}>
-      <Input
-        size="xs"
-        variant="flushed"
-        flex="1"
-        cursor="text"
-        title="Renommer"
-        value={nom}
-        onChange={(e) => setNom(e.target.value)}
-        onBlur={valider}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') e.currentTarget.blur()
-          if (e.key === 'Escape') {
-            e.stopPropagation()
-            setNom(mesure.nom)
-          }
-        }}
-      />
-      <Text textStyle="xs" color="fg.muted" fontVariantNumeric="tabular-nums" whiteSpace="nowrap">
-        {formaterDistance(distancesMesure(mesure.points).total)} · {mesure.points.length} pts ·{' '}
-        {new Date(mesure.modifieeLe).toLocaleDateString('fr-FR')}
-      </Text>
-      {ouverte ? (
-        <Badge size="sm" colorPalette="blue">
-          Ouverte
-        </Badge>
-      ) : (
-        <Button size="2xs" variant="outline" onClick={onOuvrir}>
-          Ouvrir
-        </Button>
       )}
-      <IconButton size="2xs" variant="ghost" aria-label="Supprimer" title="Supprimer" color="fg.error" onClick={onSupprimer}>
-        ✕
-      </IconButton>
-    </HStack>
+    </Stack>
   )
 }
