@@ -93,7 +93,11 @@ interface Props {
   onMenuContextuel: (position: LonLat, point: { x: number; y: number }) => void
   /** Points de la mesure de distance en cours (null hors mesure) : un clic ajoute un point. */
   mesure: LonLat[] | null
+  /** Point de la mesure visé (survol sur la carte ou dans la frise). */
+  mesureVisee: number | null
+  onViserMesure: (i: number | null) => void
   onPointMesure: (position: LonLat) => void
+  onDeplacerPointMesure: (i: number, position: LonLat) => void
   /** Glisser-déposer dans l'éditeur de configuration. */
   onDeplacerPoignee: (poignee: Poignee, position: LonLat) => void
   onConnecter: (de: string, vers: string) => void
@@ -232,6 +236,7 @@ export function CarteCarrefours(props: Props) {
 
   const [bulle, setBulle] = useState<Bulle>()
   const [survol, setSurvol] = useState(false)
+  const [glisseMesure, setGlisseMesure] = useState(false)
   const [rectangle, setRectangle] = useState<Rectangle | null>(null)
   const depart = useRef<{ x: number; y: number } | null>(null)
   const majEnfoncee = useMajEnfoncee()
@@ -288,7 +293,11 @@ export function CarteCarrefours(props: Props) {
   const cliquer = (evenement: MapLayerMouseEvent) => {
     const objet = evenement.features?.[0]
     const { lng: longitude, lat: latitude } = evenement.lngLat
-    if (props.mesure) return props.onPointMesure([longitude, latitude])
+    if (props.mesure) {
+      // Un clic sur un point existant ne pose pas de nouveau point.
+      if (evenement.target.queryRenderedFeatures(evenement.point, { layers: ['mesure-points'] }).length) return
+      return props.onPointMesure([longitude, latitude])
+    }
     const vise = carrefourVise(objet)
     if (props.tempsReel) {
       if (vise) props.onOuvrir(vise)
@@ -324,7 +333,17 @@ export function CarteCarrefours(props: Props) {
       hash
       attributionControl={false}
       interactiveLayerIds={['feux', 'carrefours', 'feux-temps-reel']}
-      cursor={traceActif || props.mesure ? 'crosshair' : survol ? 'pointer' : 'grab'}
+      cursor={
+        glisseMesure
+          ? 'grabbing'
+          : props.mesure && props.mesureVisee !== null
+            ? 'grab'
+            : traceActif || props.mesure
+              ? 'crosshair'
+              : survol
+                ? 'pointer'
+                : 'grab'
+      }
       dragPan={!traceActif}
       boxZoom={edition === null}
       onMouseDown={commencerTrace}
@@ -376,7 +395,15 @@ export function CarteCarrefours(props: Props) {
           />
         </Source>
       )}
-      {props.mesure && <CoucheMesure points={props.mesure} />}
+      {props.mesure && (
+        <CoucheMesure
+          points={props.mesure}
+          visee={props.mesureVisee}
+          onViser={props.onViserMesure}
+          onDeplacer={props.onDeplacerPointMesure}
+          onGlisse={setGlisseMesure}
+        />
+      )}
       {configuration && (
         <CalqueCarrefour
           branches={configuration.branches}

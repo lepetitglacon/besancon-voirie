@@ -35,6 +35,7 @@ import { PanneauEdition, type Edition } from './edition/PanneauEdition'
 import { CarteCarrefours } from './map/CarteCarrefours'
 import { CouchePertes } from './map/CouchePertes'
 import { PanneauMesure } from './map/PanneauMesure'
+import { useMesures } from './map/useMesures'
 import { CoucheFeuxTempsReel } from './map/CoucheFeuxTempsReel'
 import { CoucheTrams, type CouchesTram } from './map/CoucheTrams'
 import type { OptionsFond } from './map/FondDeCarte'
@@ -159,7 +160,10 @@ function App() {
   const [pointMenu, setPointMenu] = useState<LonLat | null>(null)
   // Point de l'écran où le menu est ouvert ; pointMenu reste lu après la fermeture.
   const [ecranMenu, setEcranMenu] = useState<{ x: number; y: number } | null>(null)
-  const [mesure, setMesure] = useState<LonLat[] | null>(null)
+  const mesures = useMesures()
+  const mesure = mesures.courante
+  // Point de la mesure sous le curseur au clic droit : le menu propose de le retirer.
+  const [pointMesureMenu, setPointMesureMenu] = useState<number | null>(null)
   const { carte } = useMap()
   const panneauConfiguration = useRef<ConfigurationCarrefourHandle>(null)
   // Relais stables des gestes de la carte vers la configuration.
@@ -398,8 +402,8 @@ function App() {
     if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
     if (e.key === 'Escape') {
       e.stopImmediatePropagation()
-      setMesure(null)
-    } else if (e.key === 'Backspace') setMesure(mesure.slice(0, -1))
+      mesures.fermer()
+    } else if (e.key === 'Backspace') mesures.retirerDernier()
   })
   useEffect(() => {
     // En capture : Échap ferme la mesure avant de quitter l'édition ou la configuration.
@@ -414,12 +418,28 @@ function App() {
         ? MENU_CONFIGURATION
         : [{ valeur: 'composer', glyphe: '⌖', libelle: 'Composer un carrefour', raccourci: 'N' }, { type: 'separateur' as const }]),
     { type: 'separateur' },
-    { valeur: 'mesurer', glyphe: '↔', libelle: 'Mesurer une distance' },
+    ...(mesure && pointMesureMenu !== null
+      ? [{ valeur: 'retirer-point', glyphe: '✕', libelle: `Retirer le point ${pointMesureMenu + 1}`, danger: true }]
+      : [{ valeur: 'mesurer', glyphe: '↔', libelle: mesure ? 'Nouvelle mesure ici' : 'Mesurer une distance' }]),
+    { valeur: 'mesures', glyphe: '☰', libelle: 'Mesures enregistrées' },
     { valeur: 'centrer', glyphe: '✥', libelle: 'Centrer la carte ici' },
     { valeur: 'copier', glyphe: '⎘', libelle: 'Copier les coordonnées' },
   ]
+  const centrerSur = (points: LonLat[]) => {
+    if (points.length === 1) return carte?.flyTo({ center: points[0]! })
+    if (points.length < 2) return
+    const lons = points.map((p) => p[0])
+    const lats = points.map((p) => p[1])
+    carte?.fitBounds(
+      [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)],
+      // Le bas de l'écran est occupé par le panneau de mesure.
+      { padding: { top: 80, right: 80, bottom: 380, left: 80 }, maxZoom: 18 },
+    )
+  }
   const choisirMenu = (valeur: string) => {
-    if (valeur === 'mesurer' && pointMenu) return setMesure([pointMenu])
+    if (valeur === 'mesurer' && pointMenu) return mesures.commencer(pointMenu)
+    if (valeur === 'retirer-point' && pointMesureMenu !== null) return mesures.retirer(pointMesureMenu)
+    if (valeur === 'mesures') return mesures.ouvrirListe()
     if (valeur === 'centrer' && pointMenu) return carte?.flyTo({ center: pointMenu })
     if (valeur === 'copier' && pointMenu) return void navigator.clipboard?.writeText(`${pointMenu[1].toFixed(6)}, ${pointMenu[0].toFixed(6)}`)
     if (valeur === 'composer') return composer()
@@ -477,9 +497,13 @@ function App() {
           onMenuContextuel={(position, point) => {
             setPointMenu(position)
             setEcranMenu(point)
+            setPointMesureMenu(mesures.visee)
           }}
-          mesure={mesure}
-          onPointMesure={(position) => setMesure((points) => points && [...points, position])}
+          mesure={mesure?.points ?? null}
+          mesureVisee={mesures.visee}
+          onViserMesure={mesures.setVisee}
+          onPointMesure={mesures.ajouter}
+          onDeplacerPointMesure={mesures.deplacer}
           onDeplacerPoignee={deplacerPoignee}
           onConnecter={connecter}
           onDessinerZoneIa={dessinerZoneIa}
@@ -498,19 +522,16 @@ function App() {
         </CarteCarrefours>
       </Box>
 
-      {mesure && (
-        <PanneauMesure
-          position="fixed"
-          left="50%"
-          transform="translateX(-50%)"
-          // Au-dessus de la barre d'outils centrale, quand elle est affichée.
-          bottom={configuration || sumo || tempsReel ? '22px' : '96px'}
-          zIndex="3"
-          points={mesure}
-          onRetirerDernier={() => setMesure(mesure.slice(0, -1))}
-          onFermer={() => setMesure(null)}
-        />
-      )}
+      <PanneauMesure
+        position="fixed"
+        left="50%"
+        transform="translateX(-50%)"
+        // Au-dessus de la barre d'outils centrale, quand elle est affichée.
+        bottom={configuration || sumo || tempsReel ? '22px' : '96px'}
+        zIndex="3"
+        mesures={mesures}
+        onCentrer={centrerSur}
+      />
 
       {configuration ? (
         <ConfigurationCarrefour

@@ -1,5 +1,9 @@
 import { distanceMetres, pointADistance, preparerPolyligne, type LonLat } from '@voirie/engine'
 
+export const COULEUR_MESURE = '#f59e0b'
+/** Point visé : survolé sur la carte ou dans la frise, ou en cours de déplacement. */
+export const COULEUR_MESURE_VISEE = '#2f6fd6'
+
 /** Distance de chaque point au précédent (0 pour le premier), cumul depuis le départ et total. */
 export function distancesMesure(points: LonLat[]): { troncons: number[]; cumuls: number[]; total: number } {
   const troncons = points.map((p, i) => (i === 0 ? 0 : distanceMetres(points[i - 1]!, p)))
