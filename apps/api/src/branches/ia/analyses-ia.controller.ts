@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Put, UseGuards } from '@nestjs/common';
+import { Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Put, Query, UseGuards } from '@nestjs/common';
 import { EditionGuard } from '../../common/edition.guard.js';
 import { FileIaService } from './file-ia.service.js';
 
@@ -10,6 +10,18 @@ export class AnalysesIaController {
   @Get()
   lister() {
     return this.file.lister();
+  }
+
+  /** Essais (un par modèle et par analyse) d'un carrefour, pour comparer temps, coût et qualité. */
+  @Get('essais')
+  essais(@Query('carrefour', ParseUUIDPipe) carrefourId: string) {
+    return this.file.essais(carrefourId);
+  }
+
+  /** Un essai avec sa proposition (DetectionBranchesIa). */
+  @Get('essais/:id')
+  lireEssai(@Param('id', ParseUUIDPipe) id: string) {
+    return this.file.lireEssai(id);
   }
 
   /** L'analyse avec sa proposition (DetectionBranchesIa) une fois terminée. */

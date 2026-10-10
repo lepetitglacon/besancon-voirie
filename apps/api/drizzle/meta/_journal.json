@@ -127,6 +127,13 @@
       "when": 1790506128694,
       "tag": "20260927104848_top_synchro",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791576360106,
+      "tag": "20261009200600_essais_ia",
+      "breakpoints": true
     }
   ]
 }

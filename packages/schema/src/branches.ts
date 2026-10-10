@@ -190,5 +190,8 @@ export interface DetectionBranchesIa extends DetectionBranches {
     modele: string;
     duree_s: number;
     cout_usd: number | null;
+    /** Analyse et essai d'où vient la proposition (absents des analyses plus anciennes). */
+    analyse_id?: string;
+    essai_id?: string;
   };
 }

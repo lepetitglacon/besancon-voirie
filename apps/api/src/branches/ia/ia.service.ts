@@ -1,23 +1,16 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import {
-  BadGatewayException,
-  Inject,
-  Injectable,
-  Logger,
-  ServiceUnavailableException,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { join, resolve } from 'node:path';
+import { BadGatewayException, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { LonLat } from '@voirie/engine';
-import type { CadrePhotoIa, DetectionBranches, DetectionBranchesIa, EmpriseIa, SourceBranche, TypeFeu } from '@voirie/schema';
+import type { CadrePhotoIa, DetectionBranches, DetectionBranchesIa, EmpriseIa, SourceBranche, StatutEssaiIa, TypeFeu } from '@voirie/schema';
 import { sql } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../../db/db.module.js';
 import { tableExiste } from '../../db/sql.js';
 import { BranchesService, deduire } from '../branches.service.js';
-import { ErreurClaude, lancerClaude } from './claude.js';
-import { configurationDepuisLecture, consigne, LectureIa, schemaJsonLecture, SYSTEME, type ContexteIa } from './lecture.js';
+import { DelaiClaude, ErreurClaude, lancerClaude, type ReponseClaude } from './claude.js';
+import { configurationDepuisLecture, consigne, LectureIa, schemaJsonLecture, SYSTEME, type ContexteIa, type ResultatLecture } from './lecture.js';
 import { cadreEmprise, cadrePhoto, cadrePourClient, urlOrthophoto, type CadrePhoto } from './photo.js';
 
 /** Plus grand côté de l'image envoyée (px) : ~10 à 18 cm/pixel pour un cadre automatique. */
@@ -34,11 +27,48 @@ function cadreDe(detection: DetectionBranches, emprise?: EmpriseIa | null): Cadr
   return cadrePhoto(detection.centre as LonLat, cote, TAILLE_PHOTO_PX);
 }
 const FICHIER_PHOTO = 'orthophoto.jpg';
+/** Modèles lancés en même temps sur la même photo (IA_MODELES), pour comparer. */
+const MODELES_DEFAUT = 'opus,sonnet';
+/** Au-delà, un modèle est anormalement long : il est arrêté et l'essai noté `delai` (IA_DELAI_S). */
+export const DELAI_DEFAUT_S = 180;
+
+/** Dossier des fichiers gardés (IA_DOSSIER), relatif au dossier de l'API : `data/ia` à la racine du projet. */
+const DOSSIER_DEFAUT = '../../data/ia';
+
+/** `<racine>/2026-10-09T22-40-12_<slug>` : un dossier par analyse, triable par date. */
+async function dossierGarde(racine: string, slug: string): Promise<string> {
+  const horodatage = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+  const dossier = resolve(racine, `${horodatage}_${slug.replace(/[^\w-]/g, '_')}`);
+  await mkdir(dossier, { recursive: true });
+  return dossier;
+}
+
+/** Un modèle lancé sur la photo : ce qu'il a coûté, et sa proposition s'il en a fait une. */
+export interface EssaiCalcule {
+  modele: string;
+  modele_reel: string | null;
+  effort: string;
+  statut: StatutEssaiIa;
+  duree_s: number;
+  cout_usd: number | null;
+  tokens_entree: number | null;
+  tokens_sortie: number | null;
+  erreur: string | null;
+  resultat: DetectionBranchesIa | null;
+}
+
+export interface AnalyseCalculee {
+  essais: EssaiCalcule[];
+  /** Dossier gardé (IA_GARDER_FICHIERS=true) : photo, consigne, sortie brute de chaque modèle. */
+  dossier: string | null;
+}
 
 /**
  * Proposition « OSM + IA » : la détection OSM, corrigée par Claude d'après l'orthophoto IGN.
- * Rien n'est enregistré dans les branches : la proposition arrive dans l'éditeur comme celle
- * d'OSM. Lancée par la file d'attente (`FileIaService`), jamais directement par une requête.
+ * Chaque modèle d'IA_MODELES lit la même photo, en même temps, jusqu'au bout : chacun donne sa
+ * proposition, avec son temps et son coût. Rien n'est enregistré dans les branches : la
+ * proposition arrive dans l'éditeur comme celle d'OSM. Lancée par la file d'attente
+ * (`FileIaService`), jamais directement par une requête.
  */
 @Injectable()
 export class IaService {
@@ -55,80 +85,109 @@ export class IaService {
     return cadrePourClient(cadreDe(await this.branches.detecter(carrefourId)));
   }
 
-  /** `emprise` : zone de la photo dessinée sur la carte, sinon calculée d'après les feux. */
-  async analyser(carrefourId: string, emprise?: EmpriseIa | null): Promise<DetectionBranchesIa> {
+  /**
+   * `emprise` : zone de la photo dessinée sur la carte, sinon calculée d'après les feux.
+   * Échoue seulement avant l'IA (carrefour inconnu, orthophoto indisponible) : l'échec d'un
+   * modèle est noté dans son essai.
+   */
+  async analyser(carrefourId: string, emprise?: EmpriseIa | null): Promise<AnalyseCalculee> {
     const detection = await this.branches.detecter(carrefourId); // 404 si le carrefour n'existe pas
     const cadre = cadreDe(detection, emprise);
-    const { rows } = await this.db.execute<{ nature: string }>(sql`SELECT nature FROM carrefour WHERE id = ${carrefourId}`);
-    const giratoire = rows[0]?.nature === 'giratoire';
+    const { rows } = await this.db.execute<{ nature: string; slug: string }>(sql`SELECT nature, slug FROM carrefour WHERE id = ${carrefourId}`);
     const contexte: ContexteIa = {
       cadre,
-      giratoire,
+      giratoire: rows[0]?.nature === 'giratoire',
       detection,
       feux: await this.feux(carrefourId),
       voiesOsm: await this.voiesOsm(cadre),
     };
+    const garder = this.config.get<string>('IA_GARDER_FICHIERS') === 'true';
+    const modeles = (this.config.get<string>('IA_MODELES') || MODELES_DEFAUT)
+      .split(',')
+      .map((m) => m.trim())
+      .filter(Boolean);
 
-    const dossier = await mkdtemp(join(tmpdir(), 'voirie-ia-'));
+    // Gardés : dans le projet (data/ia, hors git), pour survivre à un redémarrage ; sinon /tmp.
+    const dossier = garder
+      ? await dossierGarde(this.config.get<string>('IA_DOSSIER') || DOSSIER_DEFAUT, rows[0]?.slug ?? carrefourId)
+      : await mkdtemp(join(tmpdir(), 'voirie-ia-'));
     try {
-      await writeFile(join(dossier, FICHIER_PHOTO), await this.orthophoto(urlOrthophoto(cadre)));
-      const reponse = await lancerClaude({
-        commande: this.config.get<string>('IA_CLAUDE_CMD') || 'claude',
-        modele: this.config.get<string>('IA_MODELE') || 'opus',
-        dossier,
-        systeme: SYSTEME,
-        consigne: consigne(contexte, join(dossier, FICHIER_PHOTO)),
-        schemaJson: schemaJsonLecture(),
-        delaiMs: Number(this.config.get<string>('IA_DELAI_S') || 300) * 1000,
-      }).catch((erreur: unknown) => {
-        throw erreur instanceof ErreurClaude ? new ServiceUnavailableException(erreur.message) : erreur;
-      });
-
-      const lecture = LectureIa.safeParse(reponse.sortie);
-      if (!lecture.success) throw new UnprocessableEntityException('Réponse de Claude hors schéma');
-      let resultat;
-      try {
-        resultat = configurationDepuisLecture(lecture.data, cadre, detection, giratoire, contexte.feux);
-      } catch (erreur) {
-        throw new UnprocessableEntityException((erreur as Error).message);
+      const photo = await this.orthophoto(urlOrthophoto(cadre));
+      const texte = consigne(contexte);
+      if (garder) {
+        await writeFile(join(dossier, FICHIER_PHOTO), photo);
+        await writeFile(join(dossier, 'consigne.md'), `# Système\n\n${SYSTEME}\n\n# Consigne\n\n${texte}\n`);
       }
-      const { branches, connexions, anneau } = resultat.configuration;
-      const remarques = [
-        lecture.data.remarques,
-        resultat.noeuds === 'ia'
-          ? `Nœuds de l'anneau lus sur la photo (${anneau!.noeuds.length}).`
-          : resultat.noeuds === 'osm'
-            ? "Nœuds de l'anneau d'après OSM : l'IA n'en a pas proposé trois distincts."
-            : giratoire
-              ? "Aucun nœud d'anneau : posez-les avec l'outil Nœud."
-              : '',
-        resultat.ecartees.length ? `Connexions écartées (voie inconnue ou en double) : ${resultat.ecartees.join(', ')}.` : '',
-        resultat.lignes.length ? `${resultat.lignes.length} ligne(s) de feux proposée(s) d'après les feux vus sur la photo.` : '',
-        resultat.feuxIgnores.length ? `Feux sans ligne proposée : ${resultat.feuxIgnores.join(' ; ')}.` : '',
-      ]
-        .filter(Boolean)
-        .join(' ');
-      this.logger.log(
-        `Carrefour ${carrefourId} : ${branches.length} branches, ${connexions.length} connexions, ` +
-          `${reponse.modele}, ${reponse.duree_s} s, ${reponse.cout_usd?.toFixed(3) ?? '?'} $`,
-      );
-      return {
-        ...deduire(detection.centre, branches, connexions, anneau),
-        rayon_m: detection.rayon_m,
-        lignes: resultat.lignes,
-        sources: Object.fromEntries(branches.map((b) => [b.code, 'ia' satisfies SourceBranche])),
-        ia: {
-          remarques,
-          branches: resultat.branches,
-          modele: reponse.modele,
-          duree_s: reponse.duree_s,
-          cout_usd: reponse.cout_usd,
-        },
-      };
+      const essais = await Promise.all(modeles.map((modele) => this.essai(modele, dossier, contexte, texte, photo, garder)));
+      for (const e of essais) {
+        this.logger.log(
+          `Carrefour ${carrefourId}, ${e.modele} (${e.modele_reel ?? '?'}, effort ${e.effort}) : ${e.statut}, ` +
+            `${e.duree_s} s, ${e.cout_usd?.toFixed(3) ?? '?'} $${e.erreur ? `, ${e.erreur}` : ''}`,
+        );
+      }
+      return { essais, dossier: garder ? dossier : null };
     } finally {
-      if (this.config.get<string>('IA_GARDER_FICHIERS') === 'true') this.logger.log(`Fichiers gardés : ${dossier}`);
+      if (garder) this.logger.log(`Fichiers gardés : ${dossier}`);
       else await rm(dossier, { recursive: true, force: true });
     }
+  }
+
+  /** Un modèle sur la photo, jusqu'à sa réponse ou au délai ; ne lève jamais d'erreur. */
+  private async essai(
+    modele: string,
+    dossier: string,
+    contexte: ContexteIa,
+    texte: string,
+    photo: Buffer,
+    garder: boolean,
+  ): Promise<EssaiCalcule> {
+    const effort = this.config.get<string>('IA_EFFORT') || 'medium';
+    const debut = performance.now();
+    const essai = (statut: StatutEssaiIa, reponse: ReponseClaude | null, erreur: string | null, resultat: DetectionBranchesIa | null): EssaiCalcule => ({
+      modele,
+      modele_reel: reponse?.modele ?? null,
+      effort,
+      statut,
+      duree_s: Math.round((performance.now() - debut) / 100) / 10,
+      cout_usd: reponse?.cout_usd ?? null,
+      tokens_entree: reponse?.tokens_entree ?? null,
+      tokens_sortie: reponse?.tokens_sortie ?? null,
+      erreur,
+      resultat,
+    });
+    const garderSortie = (brut: string) =>
+      garder ? writeFile(join(dossier, `${modele.replace(/[^\w.-]/g, '_')}.jsonl`), brut).catch(() => {}) : Promise.resolve();
+
+    let reponse: ReponseClaude;
+    try {
+      const { brut, ...lue } = await lancerClaude({
+        commande: this.config.get<string>('IA_CLAUDE_CMD') || 'claude',
+        modele,
+        effort,
+        dossier,
+        systeme: SYSTEME,
+        consigne: texte,
+        image: { donnees: photo, type: 'image/jpeg' },
+        schemaJson: schemaJsonLecture(),
+        delaiMs: Number(this.config.get<string>('IA_DELAI_S') || DELAI_DEFAUT_S) * 1000,
+      });
+      await garderSortie(brut);
+      reponse = lue;
+    } catch (erreur) {
+      if (erreur instanceof ErreurClaude) await garderSortie(erreur.brut);
+      return essai(erreur instanceof DelaiClaude ? 'delai' : 'echec', null, (erreur as Error).message, null);
+    }
+
+    const lecture = LectureIa.safeParse(reponse.sortie);
+    if (!lecture.success) return essai('echec', reponse, 'Réponse hors schéma', null);
+    let resultat: ResultatLecture;
+    try {
+      resultat = configurationDepuisLecture(lecture.data, contexte.cadre, contexte.detection, contexte.giratoire, contexte.feux);
+    } catch (erreur) {
+      return essai('echec', reponse, (erreur as Error).message, null);
+    }
+    const fini = essai('terminee', reponse, null, null);
+    return { ...fini, resultat: proposition(contexte, lecture.data, resultat, fini) };
   }
 
   private async orthophoto(url: string): Promise<Buffer> {
@@ -166,4 +225,38 @@ export class IaService {
     `);
     return rows.map((r) => ({ osm_id: Number(r.osm_id), tags: r.tags, coordonnees: r.coordonnees }));
   }
+}
+
+/** Proposition au format de l'éditeur, avec les remarques de l'IA et ce qu'a coûté l'essai. */
+function proposition(contexte: ContexteIa, lecture: LectureIa, resultat: ResultatLecture, essai: EssaiCalcule): DetectionBranchesIa {
+  const { detection, giratoire } = contexte;
+  const { branches, connexions, anneau } = resultat.configuration;
+  const remarques = [
+    lecture.remarques,
+    resultat.noeuds === 'ia'
+      ? `Nœuds de l'anneau lus sur la photo (${anneau!.noeuds.length}).`
+      : resultat.noeuds === 'osm'
+        ? "Nœuds de l'anneau d'après OSM : l'IA n'en a pas proposé trois distincts."
+        : giratoire
+          ? "Aucun nœud d'anneau : posez-les avec l'outil Nœud."
+          : '',
+    resultat.ecartees.length ? `Connexions écartées (voie inconnue ou en double) : ${resultat.ecartees.join(', ')}.` : '',
+    resultat.lignes.length ? `${resultat.lignes.length} ligne(s) de feux proposée(s) d'après les feux vus sur la photo.` : '',
+    resultat.feuxIgnores.length ? `Feux sans ligne proposée : ${resultat.feuxIgnores.join(' ; ')}.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  return {
+    ...deduire(detection.centre, branches, connexions, anneau),
+    rayon_m: detection.rayon_m,
+    lignes: resultat.lignes,
+    sources: Object.fromEntries(branches.map((b) => [b.code, 'ia' satisfies SourceBranche])),
+    ia: {
+      remarques,
+      branches: resultat.branches,
+      modele: essai.modele_reel ?? essai.modele,
+      duree_s: Math.round(essai.duree_s),
+      cout_usd: essai.cout_usd,
+    },
+  };
 }

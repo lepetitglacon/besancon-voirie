@@ -171,8 +171,25 @@ carrefour ne les perd pas. La carte de suivi, en bas à droite, liste les carref
 mémoire : le navigateur demande confirmation avant de fermer ou recharger la page.
 
 Variables (`.env`) : `IA_CLAUDE_CMD` (commande, `claude` par défaut ; Claude Code doit être
-installé et connecté sur le serveur), `IA_MODELE` (`opus` par défaut), `IA_PARALLELE` (2),
-`IA_DELAI_S` (300), `IA_GARDER_FICHIERS=true` pour garder la photo dans `/tmp/voirie-ia-*`.
+installé et connecté sur le serveur), `IA_MODELES` (`opus,sonnet` par défaut), `IA_EFFORT`
+(`medium`), `IA_PARALLELE` (2), `IA_DELAI_S` (180), `IA_GARDER_FICHIERS=true` pour garder la
+photo dans `data/ia/` (hors git ; `IA_DOSSIER` pour un autre dossier).
+
+Chaque analyse lance les modèles d'`IA_MODELES` en même temps sur la même photo, jointe dès le
+premier message (entrée stream-json, sans outil ni session enregistrée), et les laisse aller
+jusqu'au bout : chacun est un **essai** (table `essai_ia`), avec son modèle réel, son effort, son
+temps, son coût, ses tokens et sa proposition. L'analyse retient la proposition du premier modèle
+de la liste qui a réussi ; « Comparer les essais IA », sous la proposition, charge celle de
+n'importe quel essai. Les essais restent quand l'analyse est retirée
+(`GET /api/analyses-ia/essais?carrefour=<id>`, `GET /api/analyses-ia/essais/<id>`). Avec
+`IA_GARDER_FICHIERS=true`, le dossier gardé (`data/ia/<date>_<carrefour>/`, noté dans l'essai) contient `orthophoto.jpg`,
+`consigne.md` et `<modèle>.jsonl`, la sortie brute de chaque modèle.
+
+Un modèle sans réponse au bout d'`IA_DELAI_S` est arrêté (essai `delai`) ; si aucun n'a répondu,
+l'analyse échoue avec un message explicite : une seule photo ne doit pas prendre plusieurs
+minutes. L'effort n'est pas pris dans les réglages de l'utilisateur (`--setting-sources ''`) :
+sans `IA_EFFORT`, Opus réfléchissait plus de 5 minutes sur Denfert Rochereau × Cassotte
+(12 feux), et relisait la photo par l'outil Read.
 
 Premier essai, Edgar Faure × Maréchal Foch (chaussées séparées, 8 feux) : 52 s, 0,18 $ avec
 Opus 5.5. 4 branches et 9 connexions, voies posées sur le marquage (3 entrantes sur Edgar Faure
