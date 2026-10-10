@@ -223,6 +223,16 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     },
     onError: echec('Nœud non retiré'),
   })
+  /** Fusion de nœuds (docs/pipeline-donnees.md, étape 10) : ne s'annule pas, les modifications d'avant non plus. */
+  const fusionNoeuds = useMutation({
+    mutationFn: api.fusionnerNoeuds,
+    onSuccess: async () => {
+      setSelection(null)
+      historique.vider()
+      await rafraichir()
+    },
+    onError: echec('Nœuds non fusionnés'),
+  })
   const liaisons = useMutation({
     mutationFn: ({ noeud, liaisons }: { noeud: string; liaisons: Liaison[] | null }) => api.enregistrerLiaisons(noeud, { liaisons }),
     // Affichée tout de suite ; la réponse de l'API la confirme.
@@ -634,6 +644,7 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     modifierNoeud,
     modificationNoeud,
     fusionner,
+    fusionNoeuds,
     generation,
   }
 }

@@ -72,14 +72,9 @@ const lireCle = (cle: string) => {
 };
 const borner = (x: number, max: number) => Math.min(Math.max(x, 0), Math.max(max, 0));
 
-export function preparerJonctions(reseau: { noeuds: readonly NoeudJonction[]; troncons: readonly TronconJonction[]; carrefours?: readonly CarrefourSumo[] }): JonctionsSumo {
-  const alertes: string[] = [];
-  const exportes = new Map((reseau.carrefours ?? []).map((c) => [c.id, c]));
-  const carrefourDe = new Map(reseau.noeuds.filter((n) => n.carrefour && exportes.has(n.carrefour)).map((n) => [n.id, n.carrefour!]));
-  const autour = new Map<string, TronconJonction[]>();
-  for (const t of reseau.troncons) for (const n of [t.de, t.vers]) autour.set(n, [...(autour.get(n) ?? []), t]);
-  const autre = (t: TronconJonction, n: string) => (t.de === n ? t.vers : t.de);
-  const bouts = reseau.troncons.flatMap((t) =>
+/** Bouts de tronçons qui portent le code d'une branche, dans un carrefour. */
+function boutsCodes(troncons: readonly TronconJonction[], carrefourDe: ReadonlyMap<string, string>) {
+  return troncons.flatMap((t) =>
     (['de', 'vers'] as const).flatMap((extremite) => {
       const code = extremite === 'de' ? t.branche_de : t.branche_vers;
       const noeud = extremite === 'de' ? t.de : t.vers;
@@ -87,10 +82,19 @@ export function preparerJonctions(reseau: { noeuds: readonly NoeudJonction[]; tr
       return code && carrefour ? [{ t, extremite, code, noeud, carrefour }] : [];
     }),
   );
+}
 
-  // Nœuds d'approche : du carrefour, mais en amont d'une ligne d'arrêt (passage piéton, présélection).
+/**
+ * Nœuds d'approche des carrefours : ils en font partie, mais en amont d'une ligne d'arrêt
+ * (passage piéton, début de présélection). Les autres nœuds du carrefour forment son cœur.
+ */
+export function noeudsApproche(noeuds: readonly Pick<NoeudJonction, 'id' | 'carrefour'>[], troncons: readonly TronconJonction[], carrefours?: ReadonlySet<string>): Set<string> {
+  const carrefourDe = new Map(noeuds.filter((n) => n.carrefour && (!carrefours || carrefours.has(n.carrefour))).map((n) => [n.id, n.carrefour!]));
+  const autour = new Map<string, TronconJonction[]>();
+  for (const t of troncons) for (const n of [t.de, t.vers]) autour.set(n, [...(autour.get(n) ?? []), t]);
+  const autre = (t: TronconJonction, n: string) => (t.de === n ? t.vers : t.de);
   const approches = new Set<string>();
-  for (const b of bouts) {
+  for (const b of boutsCodes(troncons, carrefourDe)) {
     if (interne(b.code)) continue;
     let troncon = b.t;
     let noeud = autre(troncon, b.noeud);
@@ -104,6 +108,15 @@ export function preparerJonctions(reseau: { noeuds: readonly NoeudJonction[]; tr
       noeud = autre(troncon, noeud);
     }
   }
+  return approches;
+}
+
+export function preparerJonctions(reseau: { noeuds: readonly NoeudJonction[]; troncons: readonly TronconJonction[]; carrefours?: readonly CarrefourSumo[] }): JonctionsSumo {
+  const alertes: string[] = [];
+  const exportes = new Map((reseau.carrefours ?? []).map((c) => [c.id, c]));
+  const carrefourDe = new Map(reseau.noeuds.filter((n) => n.carrefour && exportes.has(n.carrefour)).map((n) => [n.id, n.carrefour!]));
+  const bouts = boutsCodes(reseau.troncons, carrefourDe);
+  const approches = noeudsApproche(reseau.noeuds, reseau.troncons, new Set(exportes.keys()));
   const coeurDe = (n: string) => (approches.has(n) ? undefined : carrefourDe.get(n));
   const noeudSumo = (n: string) => {
     const c = coeurDe(n);

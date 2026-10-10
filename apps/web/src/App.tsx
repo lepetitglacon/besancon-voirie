@@ -720,6 +720,15 @@ function App() {
           onSupprimer={() => confirmerSuppression(configuration.carrefour)}
           onFermer={() => setConfiguration(null)}
           onEchapVoies={reseau.echap}
+          fusion={
+            carrefourGraphe
+              ? {
+                  noeuds: reseau.donnees.data?.noeuds.features.filter((n) => n.properties.carrefour_id === carrefourGraphe.id).length ?? 0,
+                  enCours: reseau.fusionNoeuds.isPending,
+                  onFusionner: (coeur) => reseau.fusionNoeuds.mutate({ carrefour: carrefourGraphe.id, coeur }),
+                }
+              : undefined
+          }
           reglagesVoies={
             carrefourGraphe && outilEditeur !== 'autre' && avecReglages(outilEditeur) ? (
               <ReglagesOutil outil={outilEditeur!} reglages={reseau.reglages} onChanger={reseau.changerReglages} />

@@ -199,6 +199,18 @@ export const CoupeTroncon = z.object({
 });
 export type CoupeTroncon = z.infer<typeof CoupeTroncon>;
 
+/**
+ * POST /api/reseau/noeuds/fusion : réunit des nœuds en un seul (docs/pipeline-donnees.md,
+ * étape 10). Ou bien une liste de nœuds, ou bien ceux d'un carrefour (tous, ou seulement son cœur :
+ * les nœuds d'approche, lignes d'arrêt et passages, restent). `position` : où poser le nœud
+ * restant ; à défaut, au barycentre.
+ */
+export const FusionNoeuds = z.union([
+  z.object({ noeuds: z.array(z.uuid()).min(2).max(200), position: LonLat.optional() }),
+  z.object({ carrefour: z.uuid(), coeur: z.boolean().default(false), position: LonLat.optional() }),
+]);
+export type FusionNoeuds = z.infer<typeof FusionNoeuds>;
+
 /** POST /api/reseau/semer : semis du réseau depuis OSM, une seule fois ; `reinitialiser` efface tout avant. */
 export const SemisReseau = z.object({ reinitialiser: z.boolean().default(false) });
 export type SemisReseau = z.infer<typeof SemisReseau>;

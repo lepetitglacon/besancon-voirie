@@ -24,6 +24,7 @@ import type {
   LancerEssaiSumo,
   FeuxGeoJson,
   FeuxTempsReel,
+  FusionNoeuds,
   HistoriqueTroncons,
   LignesCarrefour,
   MaturiteCarrefour,
@@ -153,6 +154,9 @@ export const api = {
   modifierNoeud: (id: string, modification: ModificationNoeud) =>
     requete<Noeud>(`/api/reseau/noeuds/${id}`, { method: 'PATCH', body: JSON.stringify(modification) }),
   fusionnerNoeud: (id: string) => requete<void>(`/api/reseau/noeuds/${id}`, { method: 'DELETE' }),
+  /** Réunit des nœuds (ou ceux d'un carrefour) en un seul. */
+  fusionnerNoeuds: (fusion: FusionNoeuds) =>
+    requete<Noeud>('/api/reseau/noeuds/fusion', { method: 'POST', body: JSON.stringify(fusion) }),
   enregistrerLiaisons: (noeudId: string, saisie: SaisieLiaisons) =>
     requete<SaisieLiaisons>(`/api/reseau/noeuds/${noeudId}/liaisons`, { method: 'PUT', body: JSON.stringify(saisie) }),
   /** Lien de téléchargement d'un fichier de l'export SUMO (de l'emprise, ou de toute la ville). */

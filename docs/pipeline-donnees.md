@@ -201,7 +201,7 @@ trois clics.
 > branches internes (R1, R2…), « Depuis SO » ne mène souvent qu'à R3 : c'est le cas où fusionner
 > les nœuds (étape 10) simplifie le réglage.
 
-### Étape 10 — Fusionner les nœuds d'un carrefour en un seul
+### Étape 10 — Fusionner les nœuds d'un carrefour en un seul ✅
 
 OSM découpe un carrefour complexe en beaucoup de nœuds (chaussées séparées, îlots, passages).
 Dans un carrefour ouvert, **Fusionner les nœuds** (carte d'en-tête) les réunit en un seul :
@@ -219,6 +219,11 @@ Dans un carrefour ouvert, **Fusionner les nœuds** (carte d'en-tête) les réuni
 
 **Résultat attendu** : un carrefour de 15 nœuds devient un nœud unique, dont on règle les
 connexions et les lignes à la main.
+
+> 💡 Le nœud gardé est un nœud OSM s'il y en a un (provenance). Les autres sortent du carrefour
+> sans être effacés : ils portent encore les tronçons OSM masqués, gardés pour la réconciliation.
+> Les tronçons raccordés passent en « OSM corrigé ». Le passage piéton d'un nœud fusionné
+> disparaît : le redessiner en passage libre (étape 11).
 
 ### Étape 11 — Créer des passages piétons libres, reliés à des feux et des tronçons
 

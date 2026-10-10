@@ -17,6 +17,7 @@ import {
   BboxQuery,
   CoupeTroncon,
   FichierSumo,
+  FusionNoeuds,
   ModificationNoeud,
   ModificationTroncon,
   NouveauTroncon,
@@ -73,6 +74,13 @@ export class ReseauController {
   @UseGuards(EditionGuard)
   couper(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(CoupeTroncon)) coupe: CoupeTroncon) {
     return this.reseau.couper(id, coupe);
+  }
+
+  /** POST /api/reseau/noeuds/fusion { noeuds | carrefour, coeur?, position? } : réunit des nœuds en un seul. */
+  @Post('noeuds/fusion')
+  @UseGuards(EditionGuard)
+  fusionnerNoeuds(@Body(new ZodValidationPipe(FusionNoeuds)) fusion: FusionNoeuds) {
+    return this.reseau.fusionnerNoeuds(fusion);
   }
 
   /** PATCH /api/reseau/noeuds/:id : position, ligne d'arrêt à feux, passage piéton, carrefour. */

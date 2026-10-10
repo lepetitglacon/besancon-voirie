@@ -35,7 +35,7 @@ import { useMap } from 'react-map-gl/maplibre'
 import { api } from '../api'
 import { NATURES } from '../carrefour/libelles'
 import { ResumeCarrefour } from '../carrefour/ResumeCarrefour'
-import { Aide, BandeauMode, BarreOutils, CarteEnTete, Chiffre, Indice, Message, notifications, PanneauBas, Valeur, type EtatLampe } from '../ds'
+import { Aide, BandeauMode, BarreOutils, CarteEnTete, Chiffre, Indice, Message, notifications, PanneauBas, Segments, Valeur, type EtatLampe } from '../ds'
 import { demanderNotificationsSysteme, enFile, useAnalysesIa } from './analysesIa'
 import { lireBrouillons, modifierBrouillons, useBrouillonsCarrefour, type ModificationsBrouillons } from './brouillons'
 import { Chrono } from './FileIa'
@@ -202,6 +202,8 @@ interface Props {
   onEchapVoies?: () => boolean
   /** Réglages de l'outil actif de l'éditeur des voies (carrefour bâti sur le réseau). */
   reglagesVoies?: ReactNode
+  /** Carrefour bâti sur le réseau : réunir ses nœuds en un seul (docs/pipeline-donnees.md, étape 10). */
+  fusion?: { noeuds: number; enCours: boolean; onFusionner: (coeur: boolean) => void }
 }
 
 /** Tab n'ouvre le panneau que si le focus n'est sur aucun contrôle (sinon il garde son rôle de navigation). */
@@ -210,7 +212,7 @@ const focusLibre = () => {
   return !actif || actif === document.body || actif.classList.contains('maplibregl-canvas')
 }
 
-export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneauBas, onModifierFeux, onSupprimer, onFermer, onEchapVoies, reglagesVoies }: Props) {
+export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneauBas, onModifierFeux, onSupprimer, onFermer, onEchapVoies, reglagesVoies, fusion }: Props) {
   const queryClient = useQueryClient()
   const [outil, setOutil] = useState<OutilCarte>('selection')
   const [popup, setPopup] = useState<Popup | null>(null)
@@ -872,6 +874,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
             )}
           </Indice>
         )}
+        {graphe && fusion && fusion.noeuds > 1 && <FusionNoeuds {...fusion} />}
         {graphe && reglagesVoies && (
           <Box mt="2" pt="2" borderTopWidth="1px" borderColor="border.muted">
             {reglagesVoies}
@@ -1141,6 +1144,41 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
 
       {ciblePopup && contenuPopup && createPortal(contenuPopup, ciblePopup)}
     </>
+  )
+}
+
+/** Réunir les nœuds du carrefour en un seul : tous, ou seulement le cœur (les approches restent). */
+function FusionNoeuds({ noeuds, enCours, onFusionner }: NonNullable<Props['fusion']>) {
+  const [coeur, setCoeur] = useState(false)
+  const fusionner = () => {
+    const quoi = coeur ? 'les nœuds du cœur' : `les ${noeuds} nœuds`
+    if (window.confirm(`Réunir ${quoi} du carrefour en un seul ? Les tronçons entre eux disparaissent ; ses connexions et ses lignes se règlent ensuite à la main. Ne s’annule pas.`)) {
+      onFusionner(coeur)
+    }
+  }
+  return (
+    <Stack gap="1.5" mt="2" pt="2" borderTopWidth="1px" borderColor="border.muted">
+      <HStack justify="space-between">
+        <Aide>
+          {noeuds} nœuds sur le réseau. Les réunir en un seul simplifie un carrefour qu’OSM découpe trop.
+        </Aide>
+      </HStack>
+      <HStack gap="2">
+        <Segments
+          size="xs"
+          aria-label="Nœuds à réunir"
+          valeur={coeur ? 'coeur' : 'tous'}
+          onChange={(v) => setCoeur(v === 'coeur')}
+          options={[
+            { valeur: 'tous', libelle: 'Tous' },
+            { valeur: 'coeur', libelle: 'Le cœur' },
+          ]}
+        />
+        <Button size="xs" variant="outline" loading={enCours} onClick={fusionner} title="Les lignes d’arrêt et passages d’approche restent avec « Le cœur »">
+          Réunir en un nœud
+        </Button>
+      </HStack>
+    </Stack>
   )
 }
 

@@ -10,6 +10,7 @@ import {
   insererType,
   inverserEmprises,
   liaisonsRetenues,
+  noeudsApproche,
   partagerEmprises,
   retirerType,
   type CarrefourSumo,
@@ -24,6 +25,7 @@ import type {
   BilanSemis,
   CoupeTroncon,
   FichierSumo,
+  FusionNoeuds,
   Liaison,
   ModificationNoeud,
   ModificationTroncon,
@@ -445,6 +447,76 @@ export class ReseauService {
       await tx.execute(sql`DELETE FROM noeud WHERE id = ${id} AND NOT EXISTS (SELECT 1 FROM troncon WHERE noeud_de = ${id} OR noeud_vers = ${id})`);
       await rafraichirCarrefours(tx, [bouts[0]!.noeud_de, bouts[0]!.noeud_vers]);
     });
+  }
+
+  /**
+   * Réunit des nœuds en un seul (docs/pipeline-donnees.md, étape 10) : les tronçons entre deux
+   * d'entre eux disparaissent (masqués s'ils viennent d'OSM), les autres sont raccordés au nœud
+   * gardé, posé au barycentre. Il porte une ligne d'arrêt si l'un d'eux en portait une ; ses
+   * liaisons repartent des propositions. Les autres nœuds sortent du carrefour, gardés pour la
+   * provenance des tronçons masqués.
+   */
+  async fusionnerNoeuds(fusion: FusionNoeuds) {
+    const garde = await this.db.transaction(async (tx) => {
+      const ids = 'noeuds' in fusion ? [...new Set(fusion.noeuds)] : await this.noeudsAFusionner(tx, fusion.carrefour, fusion.coeur);
+      if (ids.length < 2) throw new BadRequestException('Au moins deux nœuds à fusionner');
+      const { rows } = await tx.execute<{ id: string; lon: number; lat: number; carrefour_id: string | null; feux: boolean; osm_node_id: number | null }>(sql`
+        SELECT id, ST_X(geom) AS lon, ST_Y(geom) AS lat, carrefour_id, feux, osm_node_id::float8 AS osm_node_id
+        FROM noeud WHERE id = ANY (${`{${ids.join(',')}}`}::uuid[]) ORDER BY osm_node_id NULLS LAST, id FOR UPDATE
+      `);
+      if (rows.length !== ids.length) throw new NotFoundException('Nœud inconnu');
+      const carrefours = [...new Set(rows.flatMap((r) => (r.carrefour_id ? [r.carrefour_id] : [])))];
+      if (carrefours.length > 1) throw new BadRequestException('Nœuds de carrefours différents : impossible de les fusionner');
+      const position: LonLat = fusion.position ?? [rows.reduce((s, r) => s + r.lon, 0) / rows.length, rows.reduce((s, r) => s + r.lat, 0) / rows.length];
+      const garde = rows[0]!.id;
+      const liste = sql`${`{${ids.join(',')}}`}::uuid[]`;
+
+      const { rows: touches } = await tx.execute<{ id: string; source: string; noeud_de: string; noeud_vers: string }>(sql`
+        SELECT id, source, noeud_de, noeud_vers FROM troncon
+        WHERE NOT supprime AND (noeud_de = ANY (${liste}) OR noeud_vers = ANY (${liste}))
+      `);
+      const dedans = new Set(ids);
+      const voisinsExterieurs = new Set<string>();
+      for (const t of touches) {
+        if (t.source === 'osm') await marquerModifie(tx, t.id);
+        if (dedans.has(t.noeud_de) && dedans.has(t.noeud_vers)) {
+          if (t.source === 'osm') await tx.execute(sql`UPDATE troncon SET supprime = true WHERE id = ${t.id}`);
+          else await tx.execute(sql`DELETE FROM troncon WHERE id = ${t.id}`);
+          continue;
+        }
+        voisinsExterieurs.add(dedans.has(t.noeud_de) ? t.noeud_vers : t.noeud_de);
+        if (dedans.has(t.noeud_de)) {
+          await tx.execute(sql`UPDATE troncon SET noeud_de = ${garde}, geom = ST_SetPoint(geom, 0, ${pointSql(position)}), modifie_le = now() WHERE id = ${t.id}`);
+        } else {
+          await tx.execute(sql`UPDATE troncon SET noeud_vers = ${garde}, geom = ST_SetPoint(geom, -1, ${pointSql(position)}), modifie_le = now() WHERE id = ${t.id}`);
+        }
+      }
+      await tx.execute(sql`
+        UPDATE noeud SET geom = ${pointSql(position)}, feux = ${rows.some((r) => r.feux)}, pieton = NULL, liaisons = NULL,
+          carrefour_id = ${carrefours[0] ?? null}
+        WHERE id = ${garde}
+      `);
+      await tx.execute(sql`
+        UPDATE noeud SET carrefour_id = NULL, liaisons = NULL WHERE id = ANY (${liste}) AND id <> ${garde}
+      `);
+      await rafraichirCarrefours(tx, [garde, ...voisinsExterieurs]);
+      return garde;
+    });
+    return this.lireNoeud(this.db, garde);
+  }
+
+  /** Nœuds d'un carrefour à fusionner : tous, ou seulement son cœur (sans les nœuds d'approche). */
+  private async noeudsAFusionner(tx: Executeur, carrefourId: string, coeur: boolean): Promise<string[]> {
+    const { rows: noeuds } = await tx.execute<{ id: string }>(sql`SELECT id FROM noeud WHERE carrefour_id = ${carrefourId}`);
+    if (noeuds.length === 0) throw new NotFoundException('Carrefour sans nœud sur le réseau');
+    if (!coeur) return noeuds.map((n) => n.id);
+    const liste = sql`${`{${noeuds.map((n) => n.id).join(',')}}`}::uuid[]`;
+    const { rows: troncons } = await tx.execute<{ id: string; de: string; vers: string; voies_avant: number; voies_arriere: number; branche_de: string | null; branche_vers: string | null }>(sql`
+      SELECT id, noeud_de AS de, noeud_vers AS vers, voies_avant, voies_arriere, branche_de, branche_vers FROM troncon
+      WHERE NOT supprime AND (noeud_de = ANY (${liste}) OR noeud_vers = ANY (${liste}))
+    `);
+    const approches = noeudsApproche(noeuds.map((n) => ({ id: n.id, carrefour: carrefourId })), troncons);
+    return noeuds.map((n) => n.id).filter((id) => !approches.has(id));
   }
 
   /** Fichiers SUMO plain XML du réseau (dans l'emprise, ou en entier). */
