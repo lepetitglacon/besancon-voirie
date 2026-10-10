@@ -13,6 +13,9 @@
  * - Un carrefour décrit dans `carrefours` (sa jonction, ses connexions, son programme) devient
  *   une seule jonction `c<carrefour>` avec ses liens et son `<tlLogic>` (voir sumoCarrefours.ts).
  * - Une voie dont l'emprise a été dessinée prend sa largeur moyenne (`<lane width>`).
+ * - Variante `theorique` : un tronçon qui suit un profil Streetmix prend les voies de ce profil
+ *   (nombre, types, largeurs) ; ses trottoirs et son stationnement partent en `<param>` de l'arête,
+ *   les piétons n'étant pas encore simulés (docs/integration-streetmix.md).
  *
  * Les coordonnées sont écrites en longitude, latitude : netconvert les projette
  * (`proj.plain-geo` + `proj.utm`, voir `configurationNetconvert`).
@@ -22,6 +25,7 @@ import { boutsAuNoeud, liaisonsRetenues, type Liaison, type TypeVoieReseau } fro
 import { LARGEUR_VOIE_VELO_M, type LonLat } from './geometrie.js';
 import { cleEmprise, largeurEmprise, type EmprisesTroncon } from './editionVoies.js';
 import { preparerJonctions, versTlLogic, type CarrefourSumo } from './sumoCarrefours.js';
+import { rueVersVoies, type Rue } from './streetmix.js';
 
 export interface NoeudSumo {
   id: string;
@@ -50,6 +54,14 @@ export interface TronconSumo {
   branche_vers?: string | null;
   /** Emprises réelles de voies (`avant:0`…), dessinées sur la photo. */
   emprises?: EmprisesTroncon | null;
+  /** Largeur de chaque voie d'un sens par rang (m), prioritaire sur les emprises. */
+  largeurs_avant?: number[] | null;
+  largeurs_arriere?: number[] | null;
+  /** `<param>` ajoutés à l'arête de chaque sens. */
+  params_avant?: Record<string, string> | null;
+  params_arriere?: Record<string, string> | null;
+  /** Profil en travers théorique suivi (`inverse` : lu depuis `vers`), pris par la variante `theorique`. */
+  profil?: { id: string; rue: Rue; inverse: boolean } | null;
 }
 
 export interface ReseauSumo {
@@ -58,6 +70,8 @@ export interface ReseauSumo {
   /** Carrefours exportés en une jonction, avec leurs connexions et leur programme. */
   carrefours?: CarrefourSumo[];
 }
+
+export type VarianteExportSumo = 'reel' | 'theorique';
 
 export interface ExportSumo {
   nod: string;
@@ -104,13 +118,19 @@ interface Arete {
   points: LonLat[];
   /** Type de chaque voie, rang 0 = la plus à gauche ; null : toutes générales. */
   types: readonly TypeVoieReseau[] | null;
-  /** Largeur réelle (m) de certaines voies, d'après leur emprise, par rang. */
+  /** Largeur réelle (m) de certaines voies, d'après leur emprise ou le profil, par rang. */
   largeurs: ReadonlyMap<number, number>;
+  params: Record<string, string> | null;
 }
 
-/** Largeur de chaque voie d'un sens qui a une emprise, par rang. */
+/** Largeur de chaque voie d'un sens donnée par le profil, ou par une emprise dessinée, par rang. */
 function largeursEmprises(t: TronconSumo, sens: 'avant' | 'arriere', voies: number): Map<number, number> {
   const largeurs = new Map<number, number>();
+  const imposees = sens === 'avant' ? t.largeurs_avant : t.largeurs_arriere;
+  if (imposees) {
+    imposees.slice(0, voies).forEach((largeur, rang) => largeurs.set(rang, largeur));
+    return largeurs;
+  }
   for (let rang = 0; rang < voies; rang++) {
     const polygone = t.emprises?.[cleEmprise(sens, rang)];
     const largeur = polygone ? largeurEmprise(polygone, t.points) : null;
@@ -119,9 +139,58 @@ function largeursEmprises(t: TronconSumo, sens: 'avant' | 'arriere', voies: numb
   return largeurs;
 }
 
-export function exporterSumo(reseau: ReseauSumo): ExportSumo {
+/**
+ * Réseau théorique : chaque tronçon qui suit un profil prend ses voies (nombre, types, largeurs)
+ * et note ses trottoirs et son stationnement. Aux nœuds dont un tronçon change de voies, les
+ * liaisons saisies (rangs de l'ancien découpage) laissent place à celles proposées par défaut.
+ */
+export function appliquerProfils(reseau: ReseauSumo): { reseau: ReseauSumo; alertes: string[] } {
+  const alertes: string[] = [];
+  const noeudsAReprendre = new Set<string>();
+  const troncons = reseau.troncons.map((t): TronconSumo => {
+    if (!t.profil) return t;
+    const voies = rueVersVoies(t.profil.rue, t.profil.inverse);
+    alertes.push(...voies.alertes.map((a) => `Tronçon ${t.nom ?? t.id}, profil ${t.profil!.id} : ${a}`));
+    if (voies.avant.length + voies.arriere.length === 0) {
+      alertes.push(`Tronçon ${t.nom ?? t.id} : profil ${t.profil.id} sans voie de circulation, voies réelles gardées`);
+      return t;
+    }
+    const typesAvant = voies.avant.map((v) => v.type);
+    const typesArriere = voies.arriere.map((v) => v.type);
+    const memes = (a: readonly string[], b: readonly string[] | null | undefined, n: number) =>
+      a.length === n && a.every((type, i) => type === (b?.[i] ?? 'generale'));
+    if (!memes(typesAvant, t.types_avant, t.voies_avant) || !memes(typesArriere, t.types_arriere, t.voies_arriere)) {
+      noeudsAReprendre.add(t.de);
+      noeudsAReprendre.add(t.vers);
+    }
+    const params = (cote: 'gauche' | 'droite') => ({
+      'voirie.profil': t.profil!.id,
+      'voirie.trottoir': voies.trottoirs[cote].toFixed(2),
+      'voirie.stationnement': String(voies.stationnement[cote]),
+    });
+    return {
+      ...t,
+      voies_avant: voies.avant.length,
+      voies_arriere: voies.arriere.length,
+      types_avant: typesAvant,
+      types_arriere: typesArriere,
+      emprises: null,
+      largeurs_avant: voies.avant.map((v) => v.largeur),
+      largeurs_arriere: voies.arriere.map((v) => v.largeur),
+      // Le côté droit de chaque sens : à droite du profil pour l'avant, à gauche pour l'arrière.
+      params_avant: params('droite'),
+      params_arriere: params('gauche'),
+    };
+  });
+  const noeuds = reseau.noeuds.map((n) => (noeudsAReprendre.has(n.id) && n.liaisons ? { ...n, liaisons: null } : n));
+  return { reseau: { ...reseau, noeuds, troncons }, alertes };
+}
+
+export function exporterSumo(reseauDonne: ReseauSumo, options: { variante?: VarianteExportSumo } = {}): ExportSumo {
+  const theorique = options.variante === 'theorique' ? appliquerProfils(reseauDonne) : null;
+  const reseau = theorique?.reseau ?? reseauDonne;
   const jonctions = preparerJonctions(reseau);
-  const alertes: string[] = [...jonctions.alertes];
+  const alertes: string[] = [...(theorique?.alertes ?? []), ...jonctions.alertes];
   const aretes: Arete[] = [];
   const connexions: string[] = [];
 
@@ -145,6 +214,7 @@ export function exporterSumo(reseau: ReseauSumo): ExportSumo {
         points: t.points,
         types: t.types_avant ?? null,
         largeurs: largeursEmprises(t, 'avant', t.voies_avant),
+        params: t.params_avant ?? null,
       });
     }
     if (t.voies_arriere > 0) {
@@ -157,6 +227,7 @@ export function exporterSumo(reseau: ReseauSumo): ExportSumo {
         points: [...t.points].reverse(),
         types: t.types_arriere ?? null,
         largeurs: largeursEmprises(t, 'arriere', t.voies_arriere),
+        params: t.params_arriere ?? null,
       });
     }
   }
@@ -255,12 +326,14 @@ export function exporterSumo(reseau: ReseauSumo): ExportSumo {
       })
         .filter((v) => v.allow !== null || v.largeur !== null)
         .sort((p, q) => p.index - q.index);
-      if (voiesDecrites.length === 0) return `  <edge ${attributs}/>`;
+      const params = Object.entries(a.params ?? {});
+      if (voiesDecrites.length === 0 && params.length === 0) return `  <edge ${attributs}/>`;
       return [
         `  <edge ${attributs}>`,
         ...voiesDecrites.map(
           (v) => `    <lane index="${v.index}"${v.allow ? ` allow="${v.allow}"` : ''}${v.largeur !== null ? ` width="${v.largeur.toFixed(2)}"` : ''}/>`,
         ),
+        ...params.map(([cle, valeur]) => `    <param key="${echapper(cle)}" value="${echapper(valeur)}"/>`),
         '  </edge>',
       ].join('\n');
     }),

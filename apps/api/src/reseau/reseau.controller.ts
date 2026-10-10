@@ -25,6 +25,7 @@ import {
   NouveauTroncon,
   SaisieLiaisons,
   SemisReseau,
+  VarianteSumo,
   type Bbox,
 } from '@voirie/schema';
 import { EditionGuard } from '../common/edition.guard.js';
@@ -127,13 +128,17 @@ export class ReseauController {
     return this.reseau.supprimerPassage(id);
   }
 
-  /** GET /api/reseau/sumo/reseau.nod.xml (edg, con, netccfg) [?bbox=…] : export SUMO plain XML. */
+  /**
+   * GET /api/reseau/sumo/reseau.nod.xml (edg, con, netccfg) [?bbox=…][&variante=theorique] : export
+   * SUMO plain XML ; `theorique` prend les voies des profils Streetmix (docs/integration-streetmix.md).
+   */
   @Get('sumo/:fichier')
   @Header('Content-Type', 'application/xml; charset=utf-8')
   exporter(
     @Param('fichier', new ZodValidationPipe(FichierSumo)) fichier: FichierSumo,
     @Query('bbox', new ZodValidationPipe(BboxQuery.optional())) bbox: Bbox | undefined,
+    @Query('variante', new ZodValidationPipe(VarianteSumo.default('reel'))) variante: VarianteSumo,
   ) {
-    return this.reseau.exporter(fichier, bbox);
+    return this.reseau.exporter(fichier, bbox, variante);
   }
 }

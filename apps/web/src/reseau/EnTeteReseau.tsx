@@ -1,9 +1,9 @@
 /** Contenu de la carte d'en-tête de l'éditeur des voies : aide, légende, semis OSM, export SUMO. */
 import { Box, Button, HStack, Kbd, Link, Stack, Text } from '@chakra-ui/react'
 import type { Bbox } from '@voirie/schema'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { api } from '../api'
-import { Aide, Message, Pastille } from '../ds'
+import { Aide, Case, Message, Pastille } from '../ds'
 import type { OutilReseau } from './CoucheReseau'
 import { COULEURS_RESEAU } from './couleurs'
 import { ZOOM_MIN_RESEAU } from './modeReseau'
@@ -28,6 +28,8 @@ interface Props {
 }
 
 export function EnTeteReseau({ outil, visible, nbTroncons, tronque, bbox, generation, reglages }: Props) {
+  /** Export théorique : les tronçons qui suivent un profil Streetmix prennent ses voies. */
+  const [theorique, setTheorique] = useState(false)
   return (
     <Stack gap="2.5" mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
       <Aide>
@@ -142,12 +144,15 @@ export function EnTeteReseau({ outil, visible, nbTroncons, tronque, bbox, genera
               {portee.libelle}
             </Text>
             {FICHIERS_SUMO.map((fichier) => (
-              <Link key={fichier} href={api.urlSumo(fichier, portee.bbox)} download={fichier}>
+              <Link key={fichier} href={api.urlSumo(fichier, portee.bbox, theorique ? 'theorique' : 'reel')} download={fichier}>
                 {fichier.replace('reseau.', '')}
               </Link>
             ))}
           </HStack>
         ))}
+        <Case size="xs" mt="1" coche={theorique} onChange={setTheorique}>
+          <Text textStyle="xs">Voies théoriques (profils Streetmix)</Text>
+        </Case>
       </Box>
     </Stack>
   )

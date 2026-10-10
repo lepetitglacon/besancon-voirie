@@ -14,6 +14,7 @@ const troncon = (id: string, de: string, vers: string, points: LonLat[], avant: 
   properties: {
     id, nom: null, highway: null, voies_avant: avant, voies_arriere: arriere, types_avant: null, types_arriere: null, vitesse_kmh: null, emprises: null,
     source: 'osm', modifie: false, noeud_de: de, noeud_vers: vers, carrefour_de: null, carrefour_vers: null, branche_de: null, branche_vers: null,
+    profil_theorique_id: null, profil_inverse: false,
   } satisfies TronconResume,
 })
 const noeud = (id: string, degre: number, carrefour: string | null = null): ReseauGeoJson['noeuds']['features'][number] => ({

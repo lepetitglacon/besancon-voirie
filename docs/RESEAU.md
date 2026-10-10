@@ -73,7 +73,15 @@ CREATE TABLE troncon (
   modifie        boolean NOT NULL DEFAULT false,  -- tronçon OSM corrigé à la main
   supprime       boolean NOT NULL DEFAULT false,  -- tronçon OSM supprimé : masqué, gardé
   branche_de text, branche_vers text,             -- code de la branche que forme ce bout (N, S…)
+  profil_theorique_id uuid REFERENCES profil ON DELETE SET NULL,  -- profil Streetmix suivi
+  profil_inverse boolean NOT NULL DEFAULT false,  -- le profil se lit depuis noeud_vers
   CHECK (voies_avant + voies_arriere > 0), CHECK (noeud_de <> noeud_vers)
+);
+
+CREATE TABLE profil (                -- profil en travers théorique (docs/integration-streetmix.md)
+  id uuid PRIMARY KEY, nom text,
+  rue jsonb NOT NULL,                -- data.street Streetmix (schéma 35), vu depuis le tronçon de référence
+  largeur_m real NOT NULL, image_le timestamptz  -- PNG : PROFILS_DOSSIER/<id>.png
 );
 
 ALTER TABLE connexion ADD COLUMN trace geometry(LineString, 4326);  -- chemin à travers le carrefour
@@ -87,6 +95,7 @@ ALTER TABLE connexion ADD COLUMN trace geometry(LineString, 4326);  -- chemin à
 | Voies d'une rue | `voiesTroncon` : tout du long de l'axe, `avant` à droite de l'axe et `arriere` à gauche (rang 0 contre l'axe), un sens unique centré. Reculées aux intersections (`retraitAuNoeud` : 3 m entre deux tronçons, 4 m + 0,6 voie par voie au-delà) pour laisser la place aux liaisons. |
 | Liaisons d'un nœud | D'une voie qui arrive (`de`, `voie_de`) vers une voie qui repart (`vers`, `voie_vers`). Proposées par `liaisonsParDefaut` : tout droit voie à voie, tourne-à-gauche de gauche à gauche, tourne-à-droite de droite à droite, pas de demi-tour (braquage ≥ 150°, même vers l'autre chaussée d'un boulevard) ; deux tronçons seuls se prolongent voie à voie (`liensParDefaut` : 1 → 3 élargit, 3 → 1 rejoint). Les voies vélo se relient entre elles ; sans voie vélo en face, un vélo rejoint la voie de droite (de gauche pour tourner à gauche) ; une piste cyclable part de la voie de droite d'une rue sans voie vélo ; une voiture n'est jamais envoyée sur une voie vélo. Des liaisons saisies devenues impossibles sont ignorées. |
 | Ligne d'arrêt | Un nœud `feux` : feu véhicule OSM (`highway=traffic_signals`) posé sur la voie, ou saisi. Un feu piéton (`crossing=traffic_signals`) est un passage piéton `pieton = feux`. |
+| Profil théorique | Profil en travers dessiné dans Streetmix, que plusieurs tronçons peuvent suivre ([integration-streetmix.md](integration-streetmix.md)). Il se lit depuis le début du tronçon (`profil_inverse` : depuis sa fin). « Couper » le garde sur les deux moitiés, « Inverser » bascule `profil_inverse`, une fusion garde celui du tronçon conservé. |
 
 ## 3. Semis depuis OSM
 
@@ -172,9 +181,16 @@ sans nœud (réseau non semé, tests) garde ses branches saisies à la main.
 ## 5. Export SUMO
 
 ```bash
-pnpm reseau:sumo [--bbox=ouest,sud,est,nord]   # écrit data/sumo/reseau.{nod,edg,con,tll}.xml et reseau.netccfg
-cd data/sumo && netconvert -c reseau.netccfg     # → reseau.net.xml
+pnpm reseau:sumo [--bbox=ouest,sud,est,nord] [--theorique]   # écrit data/sumo/reseau.{nod,edg,con,tll}.xml et reseau.netccfg
+cd data/sumo && netconvert -c reseau.netccfg                   # → reseau.net.xml
 ```
+
+`--theorique` (`?variante=theorique`) exporte le réseau **théorique** : un tronçon qui suit un
+profil Streetmix prend ses voies (nombre, types, largeurs), le reste garde ses voies réelles
+(`appliquerProfils`, [sumo.ts](../packages/engine/src/sumo.ts)). Ses trottoirs et son
+stationnement partent en `<param key="voirie.trottoir|voirie.stationnement|voirie.profil">` de
+l'arête (côté droit de chaque sens) : les piétons ne sont pas encore simulés. Aux nœuds dont un
+tronçon change de voies, les liaisons saisies laissent place aux proposées.
 
 Format « plain XML » de SUMO (`exporterSumo`, [sumo.ts](../packages/engine/src/sumo.ts)), en
 longitude, latitude : netconvert les projette en UTM (`proj.plain-geo`, `proj.utm`), et
@@ -207,7 +223,10 @@ longitude, latitude : netconvert les projette en UTM (`proj.plain-geo`, `proj.ut
 | POST | `/api/reseau/passages` | `{ points: [a, b], type, troncons?, feux }` : passage piéton tracé librement ; sans `troncons`, ceux qu'il coupe (`EditionGuard`) |
 | PATCH / DELETE | `/api/reseau/passages/:id` | Tracé, type, tronçons traversés, feux reliés ; suppression. Les carrefours des tronçons touchés sont recalculés (`EditionGuard`) |
 | PUT | `/api/reseau/noeuds/:id/liaisons` | `{ liaisons: [...] \| null }` (null : proposées) ; 400 pour une voie qui n'arrive pas au nœud (`EditionGuard`) |
-| GET | `/api/reseau/sumo/:fichier[?bbox=]` | `reseau.nod.xml`, `reseau.edg.xml`, `reseau.con.xml`, `reseau.netccfg` |
+| GET | `/api/reseau/sumo/:fichier[?bbox=][&variante=theorique]` | `reseau.nod.xml`, `reseau.edg.xml`, `reseau.con.xml`, `reseau.netccfg` ; `theorique` : voies des profils Streetmix |
+| GET | `/api/profils/troncon/:id` | Profil théorique du tronçon, profil estimé d'après ses voies et ses tags OSM, voisins de la même rue, emprise par mode ([integration-streetmix.md](integration-streetmix.md)) |
+| POST / PUT | `/api/profils[/:id]` | Multipart : `profil` (JSON : nom, rue, tronçons rattachés) et `image` (PNG) (`EditionGuard`) |
+| DELETE | `/api/profils/:id/troncons/:troncon` | Le tronçon ne suit plus le profil ; un profil que plus aucun tronçon ne suit est supprimé (`EditionGuard`) |
 | GET | `/api/carrefours/:id/branches` | Vue du carrefour : `graphe: true` pour un carrefour bâti sur le réseau, et `connexions_saisies` |
 | PUT | `/api/carrefours/:id/branches` | Carrefour bâti sur le réseau : n'enregistre que ses connexions, gardées ensuite quand le réseau change ; 400 pour une voie qu'il n'a pas (`EditionGuard`) |
 | DELETE | `/api/carrefours/:id/branches/connexions` | Oublie les connexions saisies, reprend celles proposées d'après les liaisons des nœuds (`EditionGuard`) |

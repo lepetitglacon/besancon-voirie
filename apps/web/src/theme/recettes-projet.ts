@@ -74,7 +74,8 @@ export const popupCarte = defineSlotRecipe({
       _hover: { bg: 'bg.emphasized' },
       focusVisibleRing: 'outside',
     },
-    corps: { display: 'flex', flexDirection: 'column', gap: '14px', p: '4px 14px 14px' },
+    // Une popup longue (tronçon et son profil…) défile : son pied d'actions reste visible.
+    corps: { display: 'flex', flexDirection: 'column', gap: '14px', p: '4px 14px 14px', maxH: 'min(62vh, 640px)', overflowY: 'auto', '& > *': { flexShrink: 0 } },
     pied: {
       display: 'flex',
       alignItems: 'center',

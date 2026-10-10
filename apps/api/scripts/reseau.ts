@@ -6,6 +6,7 @@
  *                                                   fois ; --reinitialiser efface tout le réseau avant)
  *   node scripts/reseau.ts sumo [--bbox=o,s,e,n]    écrit data/sumo/reseau.{nod,edg,con,tll}.xml et reseau.netccfg
  *        [--sortie=dossier]                         puis : cd data/sumo && netconvert -c reseau.netccfg
+ *        [--theorique]                              voies des profils Streetmix (docs/integration-streetmix.md)
  *   --api=http://localhost:3000                     URL de l'API (par défaut : API_PORT du .env)
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -45,16 +46,17 @@ async function principal(commande: string | undefined, options: string[]) {
     console.log(bilan);
   } else if (commande === 'sumo') {
     const bbox = option(options, 'bbox');
+    const parametres = new URLSearchParams({ ...(bbox && { bbox }), ...(options.includes('--theorique') && { variante: 'theorique' }) }).toString();
     const sortie = option(options, 'sortie') ?? join(racine, 'data/sumo');
     mkdirSync(sortie, { recursive: true });
     for (const fichier of FICHIERS) {
-      const texte = await (await appeler(`${api}/api/reseau/sumo/${fichier}${bbox ? `?bbox=${bbox}` : ''}`)).text();
+      const texte = await (await appeler(`${api}/api/reseau/sumo/${fichier}${parametres ? `?${parametres}` : ''}`)).text();
       writeFileSync(join(sortie, fichier), texte);
       console.log(`${join(sortie, fichier)} (${Math.round(texte.length / 1024)} Ko)`);
     }
     console.log(`Puis : cd ${sortie} && netconvert -c reseau.netccfg`);
   } else {
-    console.error('Usage : node scripts/reseau.ts semer [--reinitialiser] | sumo [--bbox=o,s,e,n] [--sortie=dossier] [--api=url]');
+    console.error('Usage : node scripts/reseau.ts semer [--reinitialiser] | sumo [--bbox=o,s,e,n] [--sortie=dossier] [--theorique] [--api=url]');
     process.exitCode = 1;
   }
 }

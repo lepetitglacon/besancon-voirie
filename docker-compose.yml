@@ -22,5 +22,26 @@ services:
       timeout: 5s
       retries: 20
 
+  # Éditeur de profils en travers (docs/integration-streetmix.md) : fork de Streetmix avec le pont
+  # d'intégration, construit depuis GitHub (ou depuis un clone local : STREETMIX_SRC, chemin
+  # absolu). Sa base `streetmix`, dans le conteneur db, est créée et migrée au démarrage ; ce n'est
+  # qu'un brouillon : les profils vivent dans la base du projet. `pnpm streetmix:up`.
+  streetmix:
+    build:
+      context: ${STREETMIX_SRC:-https://github.com/lepetitglacon/streetmix.git#integration-voirie}
+      args:
+        OFFLINE_MODE: "true"
+        EMBED_ALLOWED_ORIGINS: '^http://localhost:\d+$$'
+    image: besancon-voirie-streetmix
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-voirie}:${POSTGRES_PASSWORD:-voirie}@db:5432/streetmix
+      FRAME_ANCESTORS: http://localhost:*
+    ports:
+      - "${STREETMIX_PORT:-8000}:8000"
+
 volumes:
   db-data:

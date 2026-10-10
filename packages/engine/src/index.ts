@@ -20,3 +20,4 @@ export * from './sumo.js';
 export * from './sumoCarrefours.js';
 export * from './synchro.js';
 export * from './vueCarrefour.js';
+export * from './streetmix.js';

@@ -22,7 +22,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import type { Anneau, ArcGraphe, Controleur, Etape, IntervalleVert, Liaison, Plage, TypeVoie } from '@voirie/schema';
+import type { Anneau, ArcGraphe, Controleur, Etape, IntervalleVert, Liaison, Plage, RueStreetmix, TypeVoie } from '@voirie/schema';
 
 // Tables du projet — voir docs/ARCHITECTURE.md §4.
 // Les tables issues d'OpenStreetMap (osm_*) sont gérées par l'import, pas par Drizzle.
@@ -378,6 +378,27 @@ export const noeud = pgTable(
 );
 
 /**
+ * Profil en travers théorique, dessiné dans Streetmix (docs/integration-streetmix.md). Plusieurs
+ * tronçons peuvent le suivre : une avenue coupée à chaque carrefour garde un seul profil. La rue
+ * est vue depuis le début du tronçon de référence ; son PNG est dans PROFILS_DOSSIER/<id>.png.
+ */
+export const profil = pgTable('profil', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  nom: text('nom'),
+  /** `data.street` Streetmix complet (schemaVersion 35), relu tel quel par l'éditeur. */
+  rue: jsonb('rue').$type<RueStreetmix>().notNull(),
+  /** Somme des largeurs des segments (m). */
+  largeurM: real('largeur_m').notNull(),
+  /** Date du PNG courant ; null : pas d'image. Sert aussi à invalider le cache du navigateur. */
+  imageLe: timestamp('image_le', { withTimezone: true }),
+  creeLe: creeLe(),
+  modifieLe: timestamp('modifie_le', { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+/**
  * Tronçon entre deux nœuds, tracé de `noeud_de` vers `noeud_vers`. `voies_avant` circulent dans
  * ce sens, `voies_arriere` dans l'autre (0 : sens interdit). Au bout qui entre dans un carrefour,
  * `branche_de` / `branche_vers` garde le code de la branche qu'il forme (N, S…).
@@ -419,6 +440,10 @@ export const troncon = pgTable(
     supprime: boolean('supprime').notNull().default(false),
     brancheDe: text('branche_de'),
     brancheVers: text('branche_vers'),
+    /** Profil en travers théorique suivi ; null : aucun. */
+    profilTheoriqueId: uuid('profil_theorique_id').references(() => profil.id, { onDelete: 'set null' }),
+    /** Vrai si le profil se lit depuis `noeud_vers` (tronçon tracé dans l'autre sens que la référence). */
+    profilInverse: boolean('profil_inverse').notNull().default(false),
     creeLe: creeLe(),
     modifieLe: timestamp('modifie_le', { withTimezone: true })
       .notNull()
@@ -427,6 +452,7 @@ export const troncon = pgTable(
   },
   (t) => [
     index('troncon_geom_idx').using('gist', t.geom),
+    index('troncon_profil_idx').on(t.profilTheoriqueId),
     index('troncon_noeud_de_idx').on(t.noeudDe),
     index('troncon_noeud_vers_idx').on(t.noeudVers),
     index('troncon_osm_way_idx').on(t.osmWayId),

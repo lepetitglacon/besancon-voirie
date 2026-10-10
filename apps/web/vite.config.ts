@@ -10,6 +10,8 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    // Variables VITE_* (URL de Streetmix…) lues dans le même .env que les ports.
+    envDir: '../..',
     // Optimisées dès le démarrage : évite les ré-optimisations en cours de route, qui laissent
     // le navigateur avec des morceaux périmés (react-map-gl importe maplibre-gl dynamiquement).
     optimizeDeps: { include: ['maplibre-gl', 'react-map-gl/maplibre'] },

@@ -70,6 +70,10 @@ export interface TronconResume {
   /** Code de la branche que forme ce bout, s'il entre dans un carrefour (N, S…). */
   branche_de: string | null;
   branche_vers: string | null;
+  /** Profil en travers théorique suivi (docs/integration-streetmix.md) ; null : aucun. */
+  profil_theorique_id: string | null;
+  /** Vrai si le profil se lit depuis `noeud_vers` plutôt que depuis `noeud_de`. */
+  profil_inverse: boolean;
 }
 
 /** Liaison, à un nœud, d'une voie qui y arrive vers une voie qui en repart (rangs dans chaque sens). */
@@ -270,3 +274,10 @@ export interface BilanSemis {
 /** Fichiers de l'export SUMO « plain XML », à passer à netconvert. */
 export const FichierSumo = z.enum(['reseau.nod.xml', 'reseau.edg.xml', 'reseau.con.xml', 'reseau.tll.xml', 'reseau.netccfg']);
 export type FichierSumo = z.infer<typeof FichierSumo>;
+
+/**
+ * Réseau exporté vers SUMO : `reel` prend les voies des tronçons ; `theorique` prend celles de leur
+ * profil Streetmix quand ils en suivent un (docs/integration-streetmix.md).
+ */
+export const VarianteSumo = z.enum(['reel', 'theorique']);
+export type VarianteSumo = z.infer<typeof VarianteSumo>;

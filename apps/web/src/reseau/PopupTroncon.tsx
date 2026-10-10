@@ -1,6 +1,7 @@
 /**
  * Popup d'un tronçon du réseau : nom, voies par sens et leur type (générale, bus, vélo, tram),
- * vitesse, sens du tracé, coupe. Chaque changement est enregistré aussitôt.
+ * vitesse, sens du tracé, coupe, profil en travers théorique (Streetmix). Chaque changement est
+ * enregistré aussitôt.
  */
 import { Badge, Button, HStack, Input, Stack, Text } from '@chakra-ui/react'
 import { largeurEmprise, typesVoies, vitesseParDefaut } from '@voirie/engine'
@@ -8,6 +9,7 @@ import type { ModificationTroncon, SensTroncon, TypeVoie } from '@voirie/schema'
 import { useState } from 'react'
 import type { Troncon } from '../api'
 import { Aide, BarreOutils, Compteur, Message, PopupCarte, Section, Selecteur } from '../ds'
+import { SectionProfil } from './streetmix/SectionProfil'
 
 interface Props {
   troncon: Troncon
@@ -188,6 +190,7 @@ export function PopupTroncon({ troncon, enregistrement, onModifier, onSupprimer,
           <Aide>Surface réelle de la voie, posée sur la photo (outil Emprise, E) : sa largeur part dans l’export SUMO.</Aide>
         </Section>
       )}
+      <SectionProfil troncon={troncon} />
       {enregistrement.erreur && <Message ton="erreur">{enregistrement.erreur}</Message>}
     </PopupCarte>
   )

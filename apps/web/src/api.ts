@@ -28,6 +28,10 @@ import type {
   HistoriqueTroncons,
   LignesCarrefour,
   MaturiteCarrefour,
+  ModificationProfil,
+  NouveauProfil,
+  Profil,
+  ProfilTroncon,
   CoupeTroncon,
   ModificationNoeud,
   ModificationPassage,
@@ -45,6 +49,7 @@ import type {
   TramsTempsReel,
   TronconsSumoGeoJson,
   TypeJour,
+  VarianteSumo,
 } from '@voirie/schema'
 
 export interface Sante {
@@ -55,7 +60,8 @@ export interface Sante {
 async function requete<T>(url: string, init?: RequestInit): Promise<T> {
   const reponse = await fetch(url, {
     ...init,
-    headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
+    // Un envoi multipart (FormData) laisse le navigateur poser son Content-Type et sa frontière.
+    headers: init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined,
   })
   if (!reponse.ok) {
     const corps = (await reponse.json().catch(() => null)) as { message?: unknown; erreurs?: unknown } | null
@@ -67,6 +73,14 @@ async function requete<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 const parametreBbox = (bbox: Bbox) => bbox.map((v) => v.toFixed(5)).join(',')
+
+/** Profil Streetmix et son PNG, en multipart : champ `profil` (JSON) et champ `image`. */
+function formulaireProfil(profil: NouveauProfil | ModificationProfil, image: Blob) {
+  const formulaire = new FormData()
+  formulaire.append('profil', JSON.stringify(profil))
+  formulaire.append('image', image, 'profil.png')
+  return formulaire
+}
 
 export const api = {
   sante: () => requete<Sante>('/api/health'),
@@ -166,8 +180,18 @@ export const api = {
     requete<Noeud>('/api/reseau/noeuds/fusion', { method: 'POST', body: JSON.stringify(fusion) }),
   enregistrerLiaisons: (noeudId: string, saisie: SaisieLiaisons) =>
     requete<SaisieLiaisons>(`/api/reseau/noeuds/${noeudId}/liaisons`, { method: 'PUT', body: JSON.stringify(saisie) }),
-  /** Lien de téléchargement d'un fichier de l'export SUMO (de l'emprise, ou de toute la ville). */
-  urlSumo: (fichier: string, bbox?: Bbox) => `/api/reseau/sumo/${fichier}${bbox ? `?bbox=${parametreBbox(bbox)}` : ''}`,
+  /** Lien de téléchargement d'un fichier de l'export SUMO (de l'emprise, ou de toute la ville), réel ou théorique. */
+  urlSumo: (fichier: string, bbox?: Bbox, variante: VarianteSumo = 'reel') => {
+    const parametres = new URLSearchParams({ ...(bbox && { bbox: parametreBbox(bbox) }), ...(variante === 'theorique' && { variante }) }).toString()
+    return `/api/reseau/sumo/${fichier}${parametres ? `?${parametres}` : ''}`
+  },
+  // ── Profils en travers Streetmix (docs/integration-streetmix.md) ──
+  profilTroncon: (tronconId: string) => requete<ProfilTroncon>(`/api/profils/troncon/${tronconId}`),
+  creerProfil: (profil: NouveauProfil, image: Blob) =>
+    requete<Profil>('/api/profils', { method: 'POST', body: formulaireProfil(profil, image) }),
+  modifierProfil: (id: string, profil: ModificationProfil, image: Blob) =>
+    requete<Profil>(`/api/profils/${id}`, { method: 'PUT', body: formulaireProfil(profil, image) }),
+  detacherProfil: (id: string, tronconId: string) => requete<void>(`/api/profils/${id}/troncons/${tronconId}`, { method: 'DELETE' }),
   /** Essais SUMO de la ville, du plus récent au plus ancien. */
   essaisSumo: () => requete<EssaiSumoResume[]>('/api/sumo/essais'),
   essaiSumo: (id: string) => requete<EssaiSumo>(`/api/sumo/essais/${encodeURIComponent(id)}`),

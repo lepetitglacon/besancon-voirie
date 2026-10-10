@@ -18,6 +18,7 @@ import {
   type LonLat,
   type ReseauSumo,
   type TypeVoieReseau,
+  type Rue,
 } from '@voirie/engine';
 import type {
   Accroche,
@@ -38,6 +39,7 @@ import type {
   SaisieLiaisons,
   TronconResume,
   TypesVoies,
+  VarianteSumo,
 } from '@voirie/schema';
 import { typeLigne } from '@voirie/schema';
 import { sql, type SQL } from 'drizzle-orm';
@@ -60,7 +62,7 @@ type LigneNoeud = { [K in keyof NoeudResume]: NoeudResume[K] } & { geometry: { t
 const COLONNES = sql`
   t.id, ST_AsGeoJSON(t.geom)::json AS geometry, t.nom, t.highway, t.voies_avant, t.voies_arriere, t.types_avant, t.types_arriere,
   t.emprises, t.vitesse_kmh, t.source, t.modifie, t.noeud_de, t.noeud_vers, nd.carrefour_id AS carrefour_de, nv.carrefour_id AS carrefour_vers,
-  t.branche_de, t.branche_vers`;
+  t.branche_de, t.branche_vers, t.profil_theorique_id, t.profil_inverse`;
 
 const FROM_TRONCONS = sql`troncon t JOIN noeud nd ON nd.id = t.noeud_de JOIN noeud nv ON nv.id = t.noeud_vers`;
 
@@ -240,7 +242,7 @@ export class ReseauService {
         await tx.execute(sql`
           UPDATE troncon SET geom = ST_Reverse(geom), noeud_de = noeud_vers, noeud_vers = noeud_de,
             voies_avant = voies_arriere, voies_arriere = voies_avant, types_avant = types_arriere, types_arriere = types_avant,
-            branche_de = branche_vers, branche_vers = branche_de
+            branche_de = branche_vers, branche_vers = branche_de, profil_inverse = NOT profil_inverse
           WHERE id = ${id}
         `);
       }
@@ -411,8 +413,11 @@ export class ReseauService {
         branche_de: string | null;
         branche_vers: string | null;
         emprises: EmprisesTroncon | null;
+        profil_theorique_id: string | null;
+        profil_inverse: boolean;
       }>(sql`
-        SELECT id, noeud_de, noeud_vers, voies_avant, voies_arriere, types_avant, types_arriere, source, branche_de, branche_vers, emprises
+        SELECT id, noeud_de, noeud_vers, voies_avant, voies_arriere, types_avant, types_arriere, source, branche_de, branche_vers, emprises,
+               profil_theorique_id, profil_inverse
         FROM troncon WHERE NOT supprime AND (noeud_de = ${id} OR noeud_vers = ${id})
         -- Le plus ancien reste : retirer le nœud d'une coupe rend au tronçon coupé son identifiant.
         ORDER BY cree_le, id
@@ -435,6 +440,12 @@ export class ReseauService {
       // Emprises des deux moitiés, dans le sens du tronçon fusionné (un tronçon retourné échange avant et arrière).
       const orienter = (t: typeof a, versLeNoeud: boolean) => (t!.versLeNoeud === versLeNoeud ? t!.emprises : inverserEmprises(t!.emprises));
       const emprises = { ...orienter(b, false), ...orienter(a, true) };
+      // Profil du tronçon gardé, sinon celui de l'autre moitié, lu dans le sens du tronçon fusionné.
+      const profil = a!.profil_theorique_id
+        ? { id: a!.profil_theorique_id, inverse: a!.versLeNoeud ? a!.profil_inverse : !a!.profil_inverse }
+        : b!.profil_theorique_id
+          ? { id: b!.profil_theorique_id, inverse: b!.versLeNoeud ? !b!.profil_inverse : b!.profil_inverse }
+          : null;
       await tx.execute(sql`
         UPDATE troncon SET
           geom = ST_RemoveRepeatedPoints(ST_MakeLine(
@@ -445,6 +456,7 @@ export class ReseauService {
           types_avant = ${typesSql(va.types_avant)}::jsonb, types_arriere = ${typesSql(va.types_arriere)}::jsonb,
           branche_de = ${loinA.code}, branche_vers = ${loinB.code},
           emprises = ${emprisesSql(emprises)}::jsonb,
+          profil_theorique_id = ${profil?.id ?? null}, profil_inverse = ${profil?.inverse ?? false},
           modifie_le = now()
         WHERE id = ${a!.id}
       `);
@@ -591,11 +603,11 @@ export class ReseauService {
     return enFeaturePassage(rows[0]);
   }
 
-  /** Fichiers SUMO plain XML du réseau (dans l'emprise, ou en entier). */
-  async exporter(fichier: FichierSumo, bbox?: Bbox): Promise<string> {
+  /** Fichiers SUMO plain XML du réseau (dans l'emprise, ou en entier), réel ou théorique. */
+  async exporter(fichier: FichierSumo, bbox?: Bbox, variante: VarianteSumo = 'reel'): Promise<string> {
     if (fichier === 'reseau.netccfg') return configurationNetconvert();
     const reseau = await donneesSumo(this.db, bbox);
-    const sortie = exporterSumo({ ...reseau, carrefours: await this.carrefoursSumo(reseau.noeuds) });
+    const sortie = exporterSumo({ ...reseau, carrefours: await this.carrefoursSumo(reseau.noeuds) }, { variante });
     const alertes = sortie.alertes.map((a) => `<!-- ${a.replace(/--/g, '—')} -->`).join('\n');
     const avecAlertes = (xml: string) => (alertes ? xml.replace(/\n/, `\n${alertes}\n`) : xml);
     if (fichier === 'reseau.nod.xml') return avecAlertes(sortie.nod);
@@ -685,10 +697,11 @@ export class ReseauService {
     const [emprisesDebut, emprisesSuite] = partagerEmprises(coupe.emprises, coupe.points, coupe.f);
     const { rows: suite } = await tx.execute<{ id: string }>(sql`
       INSERT INTO troncon (noeud_de, noeud_vers, geom, osm_way_id, osm_de, osm_vers, osm_tags, nom, highway, voies_avant, voies_arriere,
-                           types_avant, types_arriere, emprises, vitesse_kmh, source, modifie, branche_vers)
+                           types_avant, types_arriere, emprises, vitesse_kmh, source, modifie, branche_vers,
+                           profil_theorique_id, profil_inverse)
       SELECT ${milieu}, noeud_vers, ST_LineSubstring(geom, ${coupe.f}, 1), osm_way_id, osm_de, osm_vers, osm_tags, nom, highway,
              voies_avant, voies_arriere, types_avant, types_arriere, ${emprisesSql(emprisesSuite)}::jsonb, vitesse_kmh, source, modifie,
-             branche_vers
+             branche_vers, profil_theorique_id, profil_inverse
       FROM troncon WHERE id = ${accroche.id}
       RETURNING id
     `);
@@ -721,11 +734,14 @@ export async function donneesSumo(db: Executeur, bbox?: Bbox): Promise<ReseauSum
     branche_de: string | null;
     branche_vers: string | null;
     emprises: EmprisesTroncon | null;
+    profil_id: string | null;
+    profil_rue: Rue | null;
+    profil_inverse: boolean;
   }>(sql`
     SELECT t.id, t.noeud_de AS de, t.noeud_vers AS vers, (ST_AsGeoJSON(t.geom)::json)->'coordinates' AS points,
            t.voies_avant, t.voies_arriere, t.types_avant, t.types_arriere, t.vitesse_kmh, t.nom, t.highway,
-           t.branche_de, t.branche_vers, t.emprises
-    FROM troncon t
+           t.branche_de, t.branche_vers, t.emprises, p.id AS profil_id, p.rue AS profil_rue, t.profil_inverse
+    FROM troncon t LEFT JOIN profil p ON p.id = t.profil_theorique_id
     WHERE NOT t.supprime ${bbox ? sql`AND t.geom && ${enveloppe(bbox)}` : sql``}
     ORDER BY t.id
   `);
@@ -737,6 +753,9 @@ export async function donneesSumo(db: Executeur, bbox?: Bbox): Promise<ReseauSum
   `);
   return {
     noeuds: noeuds.map((n) => ({ id: n.id, position: [n.lon, n.lat], carrefour: n.carrefour_id, liaisons: n.liaisons })),
-    troncons,
+    troncons: troncons.map(({ profil_id, profil_rue, profil_inverse, ...t }) => ({
+      ...t,
+      profil: profil_id && profil_rue ? { id: profil_id, rue: profil_rue, inverse: profil_inverse } : null,
+    })),
   };
 }
