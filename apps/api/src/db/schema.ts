@@ -11,6 +11,7 @@ import {
   pgTable,
   pgView,
   primaryKey,
+  integer,
   real,
   smallint,
   text,
@@ -338,4 +339,38 @@ export const analyseIa = pgTable(
     consulteeLe: timestamp('consultee_le', { withTimezone: true }),
   },
   (t) => [index('analyse_ia_statut_idx').on(t.statut, t.demandeeLe), index('analyse_ia_carrefour_idx').on(t.carrefourId)],
+);
+
+export const statutEssaiIa = pgEnum('statut_essai_ia', ['terminee', 'echec', 'delai']);
+
+/**
+ * Un modèle lancé sur la photo d'une analyse : chaque analyse lance tous les modèles
+ * d'IA_MODELES, pour comparer qualité, temps et coût. Gardé quand l'analyse est retirée.
+ */
+export const essaiIa = pgTable(
+  'essai_ia',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    analyseId: uuid('analyse_id').references(() => analyseIa.id, { onDelete: 'set null' }),
+    carrefourId: uuid('carrefour_id')
+      .notNull()
+      .references(() => carrefour.id, { onDelete: 'cascade' }),
+    /** Modèle demandé (alias d'IA_MODELES) et modèle qui a répondu. */
+    modele: text('modele').notNull(),
+    modeleReel: text('modele_reel'),
+    effort: text('effort').notNull(),
+    statut: statutEssaiIa('statut').notNull(),
+    /** Temps mesuré par l'API, du lancement à la réponse (ou à l'abandon). */
+    dureeS: real('duree_s').notNull(),
+    coutUsd: real('cout_usd'),
+    tokensEntree: integer('tokens_entree'),
+    tokensSortie: integer('tokens_sortie'),
+    /** Proposition (DetectionBranchesIa) tirée de la réponse. */
+    resultat: jsonb('resultat'),
+    erreur: text('erreur'),
+    /** Photo, consigne et sortie brute, si IA_GARDER_FICHIERS=true. */
+    dossier: text('dossier'),
+    creeLe: timestamp('cree_le', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('essai_ia_analyse_idx').on(t.analyseId), index('essai_ia_carrefour_idx').on(t.carrefourId, t.creeLe)],
 );

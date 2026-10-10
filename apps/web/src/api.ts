@@ -3,6 +3,8 @@ import type {
   AjoutTops,
   AnalyseIa,
   AnalyseIaDetail,
+  EssaiIa,
+  EssaiIaDetail,
   Bbox,
   BranchesCarrefour,
   CadrePhotoIa,
@@ -80,6 +82,9 @@ export const api = {
   analysesIa: () => requete<AnalyseIa[]>('/api/analyses-ia'),
   analyseIa: (id: string) => requete<AnalyseIaDetail>(`/api/analyses-ia/${id}`),
   consulterAnalyseIa: (id: string) => requete<AnalyseIa>(`/api/analyses-ia/${id}/consultee`, { method: 'PUT' }),
+  /** Essais IA d'un carrefour (un par modèle et par analyse), du plus récent au plus ancien. */
+  essaisIa: (carrefourId: string) => requete<EssaiIa[]>(`/api/analyses-ia/essais?carrefour=${carrefourId}`),
+  essaiIa: (id: string) => requete<EssaiIaDetail>(`/api/analyses-ia/essais/${id}`),
   retirerAnalyseIa: (id: string) => requete<void>(`/api/analyses-ia/${id}`, { method: 'DELETE' }),
   enregistrerBranches: (carrefourId: string, configuration: ConfigurationBranches) =>
     requete<BranchesCarrefour>(`/api/carrefours/${carrefourId}/branches`, {

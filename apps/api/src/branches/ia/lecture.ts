@@ -170,7 +170,7 @@ export function propositionEnPixels(cadre: CadrePhoto, detection: DetectionBranc
 }
 
 /** Consigne envoyée à Claude, avec les données OSM exprimées en pixels de la photo. */
-export function consigne(contexte: ContexteIa, fichier: string): string {
+export function consigne(contexte: ContexteIa): string {
   const { cadre } = contexte;
   const feux = contexte.feux.map((f) => ({ numero: `F${f.numero}`, type: f.type, ...px(cadre, f.position), tags: tagsUtiles(f.tags) }));
   const voiesOsm = contexte.voiesOsm.map((v) => ({
@@ -201,8 +201,8 @@ Pour chaque rue, \`noeud\` : le numéro du nœud où elle touche l'anneau. Si so
     : '';
   return `Configure les voies du carrefour à feux photographié.
 
-## Image (outil Read)
-${fichier} : orthophoto IGN, ${cadre.largeur_px}×${cadre.hauteur_px} px, nord en haut, ${cadre.metres_par_px.toFixed(3)} m/pixel (${Math.round(cadre.largeur_m)}×${Math.round(cadre.hauteur_m)} m). Origine des pixels en haut à gauche, x vers la droite, y vers le bas. Le cadre couvre le carrefour et les rues qui y mènent ; des données OSM peuvent tomber hors de l'image (coordonnées négatives ou au-delà de sa taille).
+## Image (jointe)
+Orthophoto IGN, ${cadre.largeur_px}×${cadre.hauteur_px} px, nord en haut, ${cadre.metres_par_px.toFixed(3)} m/pixel (${Math.round(cadre.largeur_m)}×${Math.round(cadre.hauteur_m)} m). Origine des pixels en haut à gauche, x vers la droite, y vers le bas. Le cadre couvre le carrefour et les rues qui y mènent ; des données OSM peuvent tomber hors de l'image (coordonnées négatives ou au-delà de sa taille).
 
 Lis le marquage au sol avec attention : lignes d'arrêt, lignes de voie, flèches, passages piétons, îlots, marquages bus ou vélo.
 
@@ -231,7 +231,7 @@ La proposition corrigée d'après la photo, au même format :
 - remarques : courtes, en français. Dis ce que tu as vu, ce que tu as supposé et ce que tu n'as pas pu voir. N'invente pas un marquage caché.`;
 }
 
-export const SYSTEME = `Tu es un ingénieur trafic qui relève la configuration de carrefours à feux sur des photos aériennes, pour un inventaire citoyen des feux de Besançon. Tu lis le marquage au sol avec précision et tu signales honnêtement ce que tu ne vois pas. Tu réponds uniquement par l'objet JSON demandé.`;
+export const SYSTEME = `Tu es un ingénieur trafic qui relève la configuration de carrefours à feux sur des photos aériennes, pour un inventaire citoyen des feux de Besançon. Tu lis le marquage au sol avec précision et tu signales honnêtement ce que tu ne vois pas. Tu as 10 secondes pour réfléchir : un seul regard sur la photo, pas de vérification au pixel près ni de retour en arrière, puis tu réponds. Tu réponds uniquement par l'objet JSON demandé.`;
 
 export interface ResultatLecture {
   configuration: ConfigurationBranches;
