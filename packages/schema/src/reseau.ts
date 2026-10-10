@@ -99,6 +99,40 @@ export interface NoeudResume {
   liaisons: Liaison[] | null;
 }
 
+/** Passage piéton tracé librement (docs/pipeline-donnees.md, étape 11). */
+export interface PassageResume {
+  id: string;
+  type: TraverseePieton;
+  /** Tronçons qu'il traverse. */
+  troncons: string[];
+  /** Feux piétons qui le commandent. */
+  feux: string[];
+}
+
+/** Segment d'un trottoir à l'autre. */
+const PointsPassage = z.tuple([LonLat, LonLat]);
+
+/**
+ * POST /api/reseau/passages : passage tracé librement. Sans `troncons`, ceux qu'il coupe sont
+ * retenus.
+ */
+export const NouveauPassage = z.object({
+  points: PointsPassage,
+  type: TraverseePieton.default('marquee'),
+  troncons: z.array(z.uuid()).max(10).optional(),
+  feux: z.array(z.uuid()).max(20).default([]),
+});
+export type NouveauPassage = z.infer<typeof NouveauPassage>;
+
+/** PATCH /api/reseau/passages/:id : champs modifiés. */
+export const ModificationPassage = z.object({
+  points: PointsPassage.optional(),
+  type: TraverseePieton.optional(),
+  troncons: z.array(z.uuid()).max(10).optional(),
+  feux: z.array(z.uuid()).max(20).optional(),
+});
+export type ModificationPassage = z.infer<typeof ModificationPassage>;
+
 export interface ReseauGeoJson {
   troncons: {
     type: 'FeatureCollection';
@@ -107,6 +141,11 @@ export interface ReseauGeoJson {
   noeuds: {
     type: 'FeatureCollection';
     features: Array<{ type: 'Feature'; id: string; geometry: { type: 'Point'; coordinates: Position }; properties: NoeudResume }>;
+  };
+  /** Passages piétons tracés librement. */
+  passages: {
+    type: 'FeatureCollection';
+    features: Array<{ type: 'Feature'; id: string; geometry: { type: 'LineString'; coordinates: Position[] }; properties: PassageResume }>;
   };
   /** Vrai si l'emprise contenait plus de tronçons que la limite : la carte n'en montre qu'une partie. */
   tronque: boolean;

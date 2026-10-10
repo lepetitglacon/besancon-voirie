@@ -13,6 +13,8 @@ export const ZONES = {
   noeuds: 'reseau-voies-noeuds-zone',
   arrivees: 'reseau-poignees-arrivees-zone',
   liaisons: 'reseau-liaisons-zone',
+  /** Passages piétons tracés librement. */
+  passages: 'reseau-passages-zone',
 } as const
 
 /** Zones de prise de l'outil Forme (CoucheForme) : sommets et milieux des segments. */
@@ -26,7 +28,8 @@ export const COUCHE_COEUR = 'reseau-voies-coeur'
 
 /** Couches de CoucheVoies qui répondent au pointeur selon l'outil (curseur de la carte, survols). */
 export function couchesInteractivesVoies(outil: OutilVoies | null): string[] {
-  if (outil === 'selection' || outil === 'couper' || outil === 'passage') return [ZONES.noeuds, 'reseau-voies']
+  if (outil === 'selection' || outil === 'passage') return [ZONES.passages, ZONES.noeuds, 'reseau-voies']
+  if (outil === 'couper') return [ZONES.noeuds, 'reseau-voies']
   if (outil === 'voie' || outil === 'emprise') return ['reseau-voies']
   if (outil === 'forme') return ['reseau-voies', ZONES_FORME.sommets, ZONES_FORME.milieux]
   if (outil === 'noeuds' || outil === 'embranchements') return [ZONES.noeuds]

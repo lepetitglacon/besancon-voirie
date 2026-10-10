@@ -19,7 +19,9 @@ import {
   FichierSumo,
   FusionNoeuds,
   ModificationNoeud,
+  ModificationPassage,
   ModificationTroncon,
+  NouveauPassage,
   NouveauTroncon,
   SaisieLiaisons,
   SemisReseau,
@@ -103,6 +105,26 @@ export class ReseauController {
   @UseGuards(EditionGuard)
   enregistrerLiaisons(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(SaisieLiaisons)) saisie: SaisieLiaisons) {
     return this.reseau.enregistrerLiaisons(id, saisie);
+  }
+
+  /** POST /api/reseau/passages { points, type, troncons?, feux } : passage piéton tracé librement. */
+  @Post('passages')
+  @UseGuards(EditionGuard)
+  creerPassage(@Body(new ZodValidationPipe(NouveauPassage)) passage: NouveauPassage) {
+    return this.reseau.creerPassage(passage);
+  }
+
+  @Patch('passages/:id')
+  @UseGuards(EditionGuard)
+  modifierPassage(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(ModificationPassage)) modification: ModificationPassage) {
+    return this.reseau.modifierPassage(id, modification);
+  }
+
+  @Delete('passages/:id')
+  @UseGuards(EditionGuard)
+  @HttpCode(204)
+  supprimerPassage(@Param('id', ParseUUIDPipe) id: string) {
+    return this.reseau.supprimerPassage(id);
   }
 
   /** GET /api/reseau/sumo/reseau.nod.xml (edg, con, netccfg) [?bbox=…] : export SUMO plain XML. */

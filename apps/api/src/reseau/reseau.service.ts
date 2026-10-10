@@ -28,7 +28,10 @@ import type {
   FusionNoeuds,
   Liaison,
   ModificationNoeud,
+  ModificationPassage,
   ModificationTroncon,
+  NouveauPassage,
+  PassageResume,
   NoeudResume,
   NouveauTroncon,
   ReseauGeoJson,
@@ -64,6 +67,10 @@ const FROM_TRONCONS = sql`troncon t JOIN noeud nd ON nd.id = t.noeud_de JOIN noe
 const COLONNES_NOEUD = sql`
   n.id, ST_AsGeoJSON(n.geom)::json AS geometry, n.carrefour_id, n.osm_node_id::float8 AS osm_node_id, n.liaisons, n.feux, n.pieton,
   (SELECT count(*)::int FROM troncon t WHERE NOT t.supprime AND (t.noeud_de = n.id OR t.noeud_vers = n.id)) AS degre`;
+
+type LignePassage = { [K in keyof PassageResume]: PassageResume[K] } & { geometry: { type: 'LineString'; coordinates: LonLat[] } };
+const COLONNES_PASSAGE = sql`p.id, ST_AsGeoJSON(p.geom)::json AS geometry, p.type, p.troncons::text[] AS troncons, p.feux::text[] AS feux`;
+const enFeaturePassage = ({ geometry, ...properties }: LignePassage) => ({ type: 'Feature' as const, id: properties.id, geometry, properties });
 
 const enveloppe = ([minLon, minLat, maxLon, maxLat]: Bbox) => sql`ST_MakeEnvelope(${minLon}, ${minLat}, ${maxLon}, ${maxLat}, 4326)`;
 const pointSql = ([lon, lat]: LonLat) => sql`ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)`;
@@ -139,8 +146,12 @@ export class ReseauService {
       SELECT ${COLONNES_NOEUD} FROM noeud n WHERE n.geom && ${enveloppe(bbox)}
       LIMIT ${LIMITE_TRONCONS * 2}
     `);
+    const { rows: passages } = await this.db.execute<LignePassage>(sql`
+      SELECT ${COLONNES_PASSAGE} FROM passage_pieton p WHERE p.geom && ${enveloppe(bbox)} LIMIT ${LIMITE_TRONCONS}
+    `);
     return {
       troncons: { type: 'FeatureCollection', features: troncons.slice(0, LIMITE_TRONCONS).map(enFeature) },
+      passages: { type: 'FeatureCollection', features: passages.map(enFeaturePassage) },
       noeuds: {
         type: 'FeatureCollection',
         features: noeuds.filter((n) => n.degre > 0 || n.carrefour_id !== null).map(enFeatureNoeud),
@@ -517,6 +528,67 @@ export class ReseauService {
     `);
     const approches = noeudsApproche(noeuds.map((n) => ({ id: n.id, carrefour: carrefourId })), troncons);
     return noeuds.map((n) => n.id).filter((id) => !approches.has(id));
+  }
+
+  // ── Passages piétons libres (docs/pipeline-donnees.md, étape 11) ──
+
+  /** Nœuds des tronçons traversés : leurs carrefours ont un passage de plus ou de moins. */
+  private async noeudsDesTroncons(db: Executeur, troncons: readonly string[]): Promise<string[]> {
+    if (troncons.length === 0) return [];
+    const { rows } = await db.execute<{ id: string }>(sql`
+      SELECT DISTINCT unnest(ARRAY[noeud_de, noeud_vers]) AS id FROM troncon WHERE id = ANY (${`{${troncons.join(',')}}`}::uuid[])
+    `);
+    return rows.map((r) => r.id);
+  }
+
+  /** Passage tracé d'un trottoir à l'autre ; sans tronçons donnés, ceux qu'il coupe. */
+  async creerPassage({ points, type, troncons, feux }: NouveauPassage) {
+    const id = await this.db.transaction(async (tx) => {
+      const traverses =
+        troncons ??
+        (
+          await tx.execute<{ id: string }>(sql`
+            SELECT id FROM troncon WHERE NOT supprime AND ST_Intersects(geom, ${ligneSql(points)}) LIMIT 10
+          `)
+        ).rows.map((r) => r.id);
+      const { rows } = await tx.execute<{ id: string }>(sql`
+        INSERT INTO passage_pieton (geom, type, troncons, feux)
+        VALUES (${ligneSql(points)}, ${type}::traversee_pieton, ${`{${traverses.join(',')}}`}::uuid[], ${`{${feux.join(',')}}`}::uuid[])
+        RETURNING id
+      `);
+      await rafraichirCarrefours(tx, await this.noeudsDesTroncons(tx, traverses));
+      return rows[0]!.id;
+    });
+    return this.lirePassage(this.db, id);
+  }
+
+  async modifierPassage(id: string, m: ModificationPassage) {
+    await this.db.transaction(async (tx) => {
+      const { rows } = await tx.execute<{ troncons: string[] }>(sql`SELECT troncons::text[] AS troncons FROM passage_pieton WHERE id = ${id} FOR UPDATE`);
+      if (!rows[0]) throw new NotFoundException('Passage inconnu');
+      const champs: SQL[] = [];
+      if (m.points) champs.push(sql`geom = ${ligneSql(m.points)}`);
+      if (m.type) champs.push(sql`type = ${m.type}::traversee_pieton`);
+      if (m.troncons) champs.push(sql`troncons = ${`{${m.troncons.join(',')}}`}::uuid[]`);
+      if (m.feux) champs.push(sql`feux = ${`{${m.feux.join(',')}}`}::uuid[]`);
+      if (champs.length > 0) await tx.execute(sql`UPDATE passage_pieton SET ${sql.join(champs, sql`, `)} WHERE id = ${id}`);
+      await rafraichirCarrefours(tx, await this.noeudsDesTroncons(tx, [...new Set([...rows[0].troncons, ...(m.troncons ?? [])])]));
+    });
+    return this.lirePassage(this.db, id);
+  }
+
+  async supprimerPassage(id: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const { rows } = await tx.execute<{ troncons: string[] }>(sql`DELETE FROM passage_pieton WHERE id = ${id} RETURNING troncons::text[] AS troncons`);
+      if (!rows[0]) throw new NotFoundException('Passage inconnu');
+      await rafraichirCarrefours(tx, await this.noeudsDesTroncons(tx, rows[0].troncons));
+    });
+  }
+
+  private async lirePassage(db: Executeur, id: string) {
+    const { rows } = await db.execute<LignePassage>(sql`SELECT ${COLONNES_PASSAGE} FROM passage_pieton p WHERE p.id = ${id}`);
+    if (!rows[0]) throw new NotFoundException('Passage inconnu');
+    return enFeaturePassage(rows[0]);
   }
 
   /** Fichiers SUMO plain XML du réseau (dans l'emprise, ou en entier). */

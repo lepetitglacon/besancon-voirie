@@ -115,6 +115,8 @@ export async function ecrireBranches(
   tx: Executeur,
   carrefourId: string,
   { branches, connexions, anneau }: { branches: Branche[]; connexions: Connexion[]; anneau: Anneau | null },
+  /** Carrefour bâti sur le réseau : passage piéton libre de chaque branche (code → passage). */
+  passages: ReadonlyMap<string, string> = new Map(),
 ): Promise<void> {
   const ligne = (coords: unknown) => (coords ? JSON.stringify({ type: 'LineString', coordinates: coords }) : null);
   await tx.execute(sql`UPDATE carrefour SET anneau = ${anneau ? JSON.stringify(anneau) : null}::jsonb WHERE id = ${carrefourId}`);
@@ -122,11 +124,11 @@ export async function ecrireBranches(
   const idsVoies = new Map<string, string>();
   for (const b of branches) {
     const { rows } = await tx.execute<{ id: string }>(sql`
-      INSERT INTO branche (carrefour_id, code, nom, azimut_deg, sens, osm_way_id, geom, traversee, priorite_entree, noeud, troncon)
+      INSERT INTO branche (carrefour_id, code, nom, azimut_deg, sens, osm_way_id, geom, traversee, priorite_entree, noeud, troncon, passage_id)
       VALUES (${carrefourId}, ${b.code}, ${b.nom}, ${b.azimut}, ${sensDe(b)}, ${b.osm_way_id},
               ST_SetSRID(ST_GeomFromGeoJSON(${ligne(b.geom)}), 4326),
               ST_SetSRID(ST_GeomFromGeoJSON(${ligne(b.traversee)}), 4326),
-              ${b.priorite_entree}::priorite_entree, ${b.noeud}, ${b.troncon})
+              ${b.priorite_entree}::priorite_entree, ${b.noeud}, ${b.troncon}, ${passages.get(b.code) ?? null})
       RETURNING id
     `);
     for (const v of b.voies) {
@@ -182,8 +184,8 @@ export class BranchesService {
   /** Branches, voies, passages piétons et connexions enregistrés, avec ce qui s'en déduit. */
   async lire(carrefourId: string): Promise<BranchesCarrefour> {
     const { centre, anneau, connexions_saisies } = await this.carrefour(this.db, carrefourId);
-    const { rows: branches } = await this.db.execute<Branche>(sql`
-      SELECT b.code, b.nom, b.azimut_deg AS azimut, b.osm_way_id::float8 AS osm_way_id,
+    const { rows: lues } = await this.db.execute<Branche & { passage_id: string | null }>(sql`
+      SELECT b.code, b.nom, b.azimut_deg AS azimut, b.osm_way_id::float8 AS osm_way_id, b.passage_id,
              (ST_AsGeoJSON(b.geom)::json)->'coordinates' AS geom,
              (ST_AsGeoJSON(b.traversee)::json)->'coordinates' AS traversee,
              b.priorite_entree, b.noeud, b.troncon,
@@ -201,7 +203,16 @@ export class BranchesService {
     `);
     const connexions = await connexionsEnregistrees(this.db, carrefourId);
     const reseau = (await surLeReseau(this.db, carrefourId)) ? { connexions_saisies } : null;
-    return deduire(centre, branches, connexions, anneau, reseau);
+    const branches = lues.map(({ passage_id: _passage, ...b }) => b);
+    const lue = deduire(centre, branches, connexions, anneau, reseau);
+    // Passages piétons libres des branches, avec leurs feux (docs/pipeline-donnees.md, étape 11).
+    const avecPassage = lues.filter((b) => b.passage_id);
+    if (avecPassage.length === 0) return lue;
+    const { rows: passages } = await this.db.execute<{ id: string; type: string; feux: string[] }>(sql`
+      SELECT id, type, feux::text[] AS feux FROM passage_pieton WHERE id = ANY (${`{${avecPassage.map((b) => b.passage_id).join(',')}}`}::uuid[])
+    `);
+    const parId = new Map(passages.map((p) => [p.id, p]));
+    return { ...lue, passages: Object.fromEntries(avecPassage.flatMap((b) => (parId.has(b.passage_id!) ? [[b.code, parId.get(b.passage_id!)!]] : []))) };
   }
 
   /**

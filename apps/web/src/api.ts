@@ -30,9 +30,11 @@ import type {
   MaturiteCarrefour,
   CoupeTroncon,
   ModificationNoeud,
+  ModificationPassage,
   ModificationTroncon,
   ModifierCarrefour,
   NatureCarrefour,
+  NouveauPassage,
   NouveauTroncon,
   OptionsSumo,
   ProgrammeCarrefour,
@@ -154,6 +156,11 @@ export const api = {
   modifierNoeud: (id: string, modification: ModificationNoeud) =>
     requete<Noeud>(`/api/reseau/noeuds/${id}`, { method: 'PATCH', body: JSON.stringify(modification) }),
   fusionnerNoeud: (id: string) => requete<void>(`/api/reseau/noeuds/${id}`, { method: 'DELETE' }),
+  /** Passages piétons tracés librement (docs/pipeline-donnees.md, étape 11). */
+  creerPassage: (passage: NouveauPassage) => requete<Passage>('/api/reseau/passages', { method: 'POST', body: JSON.stringify(passage) }),
+  modifierPassage: (id: string, modification: ModificationPassage) =>
+    requete<Passage>(`/api/reseau/passages/${id}`, { method: 'PATCH', body: JSON.stringify(modification) }),
+  supprimerPassage: (id: string) => requete<void>(`/api/reseau/passages/${id}`, { method: 'DELETE' }),
   /** Réunit des nœuds (ou ceux d'un carrefour) en un seul. */
   fusionnerNoeuds: (fusion: FusionNoeuds) =>
     requete<Noeud>('/api/reseau/noeuds/fusion', { method: 'POST', body: JSON.stringify(fusion) }),
@@ -190,3 +197,4 @@ export const api = {
 
 export type Troncon = ReseauGeoJson['troncons']['features'][number]
 export type Noeud = ReseauGeoJson['noeuds']['features'][number]
+export type Passage = ReseauGeoJson['passages']['features'][number]

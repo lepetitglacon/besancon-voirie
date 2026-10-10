@@ -51,19 +51,27 @@ export function OngletLignes({ configuration, brouillon, onChanger, ligneActive,
   const noeudDuMouvement = (m: { destination: string }) => (configuration.anneau ? noeudDe.get(m.destination) : null)
 
   const changerLignes = (suivantes: LigneFeux[]) => onChanger({ ...brouillon, lignes: suivantes })
+  /**
+   * Une ligne piétonne sans feux qui traverse une branche dont le passage piéton (tracé librement)
+   * a des feux les reçoit d'office (docs/pipeline-donnees.md, étape 11).
+   */
+  const avecFeuxDuPassage = (ligne: LigneFeux): LigneFeux => {
+    const feuxPassage = ligne.signal === 'R12' && ligne.traverse ? (configuration.passages?.[ligne.traverse]?.feux ?? []) : []
+    return ligne.feux.length === 0 && feuxPassage.length > 0 ? { ...ligne, feux: feuxPassage } : ligne
+  }
   const changerLigne = (index: number, ligne: LigneFeux) =>
-    changerLignes(lignes.map((l, i) => (i === index ? ligne : l)))
+    changerLignes(lignes.map((l, i) => (i === index ? avecFeuxDuPassage(ligne) : l)))
 
   const ajouter = (signal: Signal) =>
     changerLignes([
       ...lignes,
-      {
+      avecFeuxDuPassage({
         code: codeLibre(SIGNAUX[signal].prefixe, lignes),
         signal,
         mouvements: [],
         traverse: signal === 'R12' ? (avecTraversee[0]?.code ?? null) : null,
         feux: [],
-      },
+      }),
     ])
 
   const basculerAdmis = (a: string, b: string) => {
@@ -182,6 +190,12 @@ export function OngletLignes({ configuration, brouillon, onChanger, ligneActive,
                         </option>
                       ))}
                     </Selecteur>
+                    {ligne.traverse && configuration.passages?.[ligne.traverse] && (
+                      <Text textStyle="xs" color="fg.muted" title="Passage tracé librement : ses feux reliés vont à la ligne qui n’en a pas">
+                        passage tracé · {configuration.passages[ligne.traverse]!.feux.length} feu
+                        {configuration.passages[ligne.traverse]!.feux.length > 1 ? 'x' : ''}
+                      </Text>
+                    )}
                   </HStack>
                 ) : (
                   <Grid templateColumns="1fr 1fr" rowGap="1" columnGap="2">

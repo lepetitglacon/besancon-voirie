@@ -3,7 +3,7 @@
 > **Objectif** : dire qui fait quoi, quand, et comment savoir que c'est bon, de la donnée
 > brute (OSM, photo IGN, IA, Ginko, terrain) jusqu'aux sorties (feux, onde verte, SUMO) ; puis
 > rendre l'éditeur des voies capable de modéliser finement un carrefour.
-> **Statut** : étapes 1 à 7 faites, 8 à 11 en cours (worktree `pipeline-donnees`, bâti sur `reseau-voies` + `main`)
+> **Statut** : étapes 1 à 11 faites (worktree `pipeline-donnees`, bâti sur `reseau-voies` + `main`) ; étape 12 à planifier
 > **Dernière mise à jour** : 2026-10-10
 
 ## Contexte
@@ -225,7 +225,7 @@ connexions et les lignes à la main.
 > Les tronçons raccordés passent en « OSM corrigé ». Le passage piéton d'un nœud fusionné
 > disparaît : le redessiner en passage libre (étape 11).
 
-### Étape 11 — Créer des passages piétons libres, reliés à des feux et des tronçons
+### Étape 11 — Créer des passages piétons libres, reliés à des feux et des tronçons ✅
 
 Jusqu'ici, un passage piéton est une propriété d'un nœud, posé en travers de sa rue. Il devient
 aussi un objet à part (`passage_pieton`) :
@@ -242,6 +242,10 @@ Le passage sur nœud reste (semis OSM, outil Couper) ; les deux se dessinent par
 
 **Résultat attendu** : un passage décalé de l'intersection, en biais, se dessine tel qu'il est
 sur la photo, et ses feux piétons sont ceux de sa ligne de feux.
+
+> 💡 La popup du passage propose les tronçons à moins de 25 m et les feux à moins de 40 m (feux
+> piétons d'abord). Les zébras d'un passage à feux sont rouges. `Suppr` supprime le passage
+> sélectionné, `Ctrl Z` le recrée tel quel (sous un autre identifiant).
 
 ### Étape 12 — Suites (hors de ce chantier)
 
@@ -281,6 +285,13 @@ sur la photo, et ses feux piétons sont ceux de sa ligne de feux.
   → les liaisons renvoient au rang de la voie → l'outil Voie décale les liaisons saisies des
   deux nœuds du tronçon.
 
+- Si un nouveau réglage d'outil reste vide (aucun choix sélectionné) → les réglages gardés dans
+  le navigateur datent d'avant ce réglage → `completerReglages` complète chaque outil avec les
+  valeurs par défaut.
+- Si une annulation remet une valeur plus ancienne que la dernière → l'instantané venait d'une
+  autre emprise de carte en cache → les données de la vue courante passent en premier
+  (`enCache`).
+
 ## Décisions
 
 - **Partir de `reseau-voies`**, pas de `main` : le réseau de référence est le N1 qui manquait ;
@@ -308,3 +319,5 @@ sur la photo, et ses feux piétons sont ceux de sa ligne de feux.
 - 2026-10-10 — étapes 1 à 7 faites ; export SUMO par cœur de carrefour (sans `<join>`), S4 révisée.
 - 2026-10-10 — ajout des étapes 8 à 11 : tracé des tronçons, embranchements à la TM:PE, fusion
   des nœuds d'un carrefour, passages piétons libres.
+- 2026-10-10 — étapes 8 à 11 faites et vérifiées dans le navigateur ; deux pièges ajoutés
+  (réglages gardés d'une version précédente, instantanés d'annulation).

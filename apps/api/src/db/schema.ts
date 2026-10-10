@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   bigint,
   check,
   customType,
@@ -135,6 +136,8 @@ export const branche = pgTable(
     noeud: text('noeud'),
     /** Tronçon d'anneau généré (R1, R2…), et non une rue. */
     troncon: boolean('troncon').notNull().default(false),
+    /** Carrefour bâti sur le réseau : passage piéton libre qui fait la traversée de la branche. */
+    passageId: uuid('passage_id').references((): AnyPgColumn => passagePieton.id, { onDelete: 'set null' }),
   },
   (t) => [unique().on(t.carrefourId, t.code)],
 );
@@ -464,4 +467,28 @@ export const essaiIa = pgTable(
     creeLe: timestamp('cree_le', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('essai_ia_analyse_idx').on(t.analyseId), index('essai_ia_carrefour_idx').on(t.carrefourId, t.creeLe)],
+);
+
+/**
+ * Passage piéton tracé librement (docs/pipeline-donnees.md, étape 11), d'un trottoir à l'autre,
+ * relié aux tronçons qu'il traverse et aux feux piétons qui le commandent. Dans un carrefour, il
+ * fait la traversée de la branche dont il coupe un tronçon (à la place du passage sur nœud).
+ */
+export const passagePieton = pgTable(
+  'passage_pieton',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    geom: ligne('geom').notNull(),
+    type: traverseePieton('type').notNull().default('marquee'),
+    troncons: uuid('troncons')
+      .array()
+      .notNull()
+      .default(sql`'{}'`),
+    feux: uuid('feux')
+      .array()
+      .notNull()
+      .default(sql`'{}'`),
+    creeLe: creeLe(),
+  },
+  (t) => [index('passage_pieton_geom_idx').using('gist', t.geom)],
 );

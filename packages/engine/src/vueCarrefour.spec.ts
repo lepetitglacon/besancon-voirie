@@ -69,6 +69,17 @@ describe('vue d’un carrefour tirée du réseau', () => {
   ];
   const vue = vueCarrefour(entree([j, ...Object.values(arrets), passageSud], troncons));
 
+  it('prend pour traversée d’une branche le passage libre qui coupe son approche, à défaut celui d’un nœud', () => {
+    const libre = { id: 'pl', points: [m(-6, 10), m(6, 9)] as [LonLat, LonLat], troncons: ['in'] };
+    const avecPassage = vueCarrefour({ ...entree([j, ...Object.values(arrets), passageSud], troncons), passages: [libre] });
+    const nord = avecPassage.branches.find((b) => b.code === 'N')!;
+    expect(nord.traversee).toEqual(libre.points);
+    expect(nord.passage).toBe('pl');
+    const sud = avecPassage.branches.find((b) => b.code === 'S')!;
+    expect(sud.traversee).not.toBeNull();
+    expect(sud.passage).toBeNull();
+  });
+
   it('fait une branche de chaque rue qui entre, nommée par son point cardinal, à sa ligne d’arrêt', () => {
     expect(vue.branches.map((b) => [b.code, b.interne]).sort()).toEqual([
       ['E', false],

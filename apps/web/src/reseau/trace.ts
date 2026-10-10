@@ -18,7 +18,12 @@ export type Trace = PointTrace[]
  * Ce qu'on a cliqué : un nœud ou un tronçon existant, ou rien (point libre). Au zoom des voies,
  * un clic sur une voie dit aussi laquelle (sens et rang).
  */
-export type Cible = { type: 'noeud'; id: string } | { type: 'troncon'; id: string; voie?: { sens: SensTroncon; rang: number } } | null
+export type Cible =
+  | { type: 'noeud'; id: string }
+  | { type: 'troncon'; id: string; voie?: { sens: SensTroncon; rang: number } }
+  /** Passage piéton tracé librement. */
+  | { type: 'passage'; id: string }
+  | null
 
 export type ResultatClic = { trace: Trace; termine: boolean }
 
@@ -28,7 +33,8 @@ export type ResultatClic = { trace: Trace; termine: boolean }
  * clic sur le point précédent (à `memePoint`) termine aussi, sur ce point.
  */
 export function cliquer(trace: Trace, position: LonLat, cible: Cible, memePoint: (a: LonLat, b: LonLat) => boolean): ResultatClic {
-  const accroche: Accroche = cible ? { type: cible.type, id: cible.id } : { type: 'libre' }
+  // Un passage piéton n'accroche rien : le point est libre.
+  const accroche: Accroche = cible && cible.type !== 'passage' ? { type: cible.type, id: cible.id } : { type: 'libre' }
   const dernier = trace.at(-1)
   if (!dernier) return { trace: [{ position, accroche }], termine: false }
   if (cible?.type === 'noeud' && dernier.accroche.type === 'noeud' && dernier.accroche.id === cible.id) {
@@ -36,7 +42,7 @@ export function cliquer(trace: Trace, position: LonLat, cible: Cible, memePoint:
   }
   if (trace.length >= 2 && memePoint(dernier.position, position)) return { trace, termine: true }
   const suivant = [...trace, { position, accroche }]
-  return { trace: suivant, termine: cible !== null }
+  return { trace: suivant, termine: accroche.type !== 'libre' }
 }
 
 /** Retire le dernier point (Retour arrière). */

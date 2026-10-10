@@ -274,6 +274,24 @@ describe('Réseau routier, carrefours bâtis sur ses nœuds et export SUMO (e2e)
     expect((await http().get(`/api/carrefours/${carrefour}/maturite`).expect(200)).body.niveaux).toEqual(lui.niveaux);
   });
 
+  it('POST /reseau/passages should draw a free crossing, linked to lights, that becomes the branch crossing', async () => {
+    const { rows } = await client.query<{ id: string }>('SELECT id FROM feu WHERE osm_id = 9012');
+    const nouveau = { points: [[point([-6, 16]).lon, point([-6, 16]).lat], [point([6, 16]).lon, point([6, 16]).lat]], type: 'feux', feux: [rows[0]!.id] };
+    const cree = (await http().post('/api/reseau/passages').send(nouveau).expect(201)).body;
+    // Les tronçons qu'il coupe sont trouvés tout seuls : la rue Nord, entre la ligne d'arrêt et le passage sur nœud.
+    expect(cree.properties.troncons).toHaveLength(1);
+    expect((await reseau()).passages.features.map((p) => p.id)).toContain(cree.id);
+    const vue = await branches();
+    expect(vue.passages?.N).toEqual({ id: cree.id, type: 'feux', feux: [rows[0]!.id] });
+    // ST_AsGeoJSON arrondit à 9 décimales.
+    vue.branches.find((b) => b.code === 'N')!.traversee!.flat().forEach((c, i) => expect(c).toBeCloseTo(nouveau.points.flat()[i]!, 7));
+
+    await http().patch(`/api/reseau/passages/${cree.id}`).send({ type: 'marquee', feux: [] }).expect(200);
+    expect((await branches()).passages?.N).toMatchObject({ type: 'marquee', feux: [] });
+    await http().delete(`/api/reseau/passages/${cree.id}`).expect(204);
+    expect((await branches()).passages).toBeUndefined();
+  });
+
   it('GET /reseau/sumo/* should export plain XML, the carrefour core as one traffic light junction', async () => {
     const nod = (await http().get('/api/reseau/sumo/reseau.nod.xml').expect(200).expect('Content-Type', /xml/)).text;
     const edg = (await http().get('/api/reseau/sumo/reseau.edg.xml').expect(200)).text;
@@ -292,6 +310,15 @@ describe('Réseau routier, carrefours bâtis sur ses nœuds et export SUMO (e2e)
     expect(con.match(/<connection /g)!.length).toBeGreaterThan(10);
     expect(cfg).toContain('<connection-files value="reseau.con.xml"/>');
     await http().get('/api/reseau/sumo/autre.xml').expect(400);
+  });
+
+  it('POST /reseau/noeuds/fusion { carrefour } should merge the carrefour nodes into one, keeping its branches', async () => {
+    const noeud = (await http().post('/api/reseau/noeuds/fusion').send({ carrefour }).expect(201)).body;
+    expect(noeud.properties).toMatchObject({ carrefour_id: carrefour, feux: true, degre: 4 });
+    const { rows } = await client.query('SELECT id FROM noeud WHERE carrefour_id = $1', [carrefour]);
+    expect(rows).toHaveLength(1);
+    expect((await branches()).branches.map((b) => b.code).sort()).toEqual(['E', 'N', 'O', 'S']);
+    await http().post('/api/reseau/noeuds/fusion').send({ carrefour }).expect(400);
   });
 
   it('POST /reseau/semer { reinitialiser } should start again from OSM and find the carrefour nodes again', async () => {

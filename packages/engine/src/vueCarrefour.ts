@@ -54,6 +54,11 @@ export interface EntreeVue {
   troncons: TronconVue[];
   /** Nombre de tronçons de chaque nœud touché, dans tout le réseau. */
   degres: ReadonlyMap<string, number>;
+  /**
+   * Passages piétons tracés librement qui traversent ces tronçons : un passage qui coupe la ligne
+   * d'arrêt ou l'approche d'une branche en fait la traversée (docs/pipeline-donnees.md, étape 11).
+   */
+  passages?: ReadonlyArray<{ id: string; points: readonly [LonLat, LonLat]; troncons: readonly string[] }>;
 }
 
 export interface VoieVue {
@@ -74,6 +79,8 @@ export interface BrancheVue {
   geom: LonLat[];
   voies: VoieVue[];
   traversee: Segment | null;
+  /** Passage piéton libre qui fait cette traversée ; null : passage sur nœud, ou aucun. */
+  passage: string | null;
   /** Branche interne : ligne d'arrêt à feux sur un tronçon du carrefour. */
   interne: boolean;
 }
@@ -140,7 +147,7 @@ interface Porte {
   approche: Array<{ troncon: TronconVue; noeud: string }>;
 }
 
-export function vueCarrefour({ noeuds, troncons, degres }: EntreeVue): VueCarrefour {
+export function vueCarrefour({ noeuds, troncons, degres, passages = [] }: EntreeVue): VueCarrefour {
   const dans = new Map(noeuds.map((n) => [n.id, n]));
   const alertes: string[] = [];
   const noeudA = (t: TronconVue, extremite: 'de' | 'vers') => (extremite === 'de' ? t.noeud_de : t.noeud_vers);
@@ -271,15 +278,19 @@ export function vueCarrefour({ noeuds, troncons, degres }: EntreeVue): VueCarref
         })),
         ...sortantes.polylignes.map((l, rang): VoieVue => ({ sens: 'sortante', rang, type: sortantes.types[rang]!, geom: segmentDepuis(l) })),
       ],
-      traversee: p.interne ? null : traverseeDe(p),
+      ...(p.interne ? { traversee: null, passage: null } : traverseeDe(p)),
       interne: p.interne,
     };
   });
 
-  // Passage piéton d'une branche : sur sa ligne d'arrêt, entre elle et l'intersection, sinon en amont.
-  function traverseeDe(p: Porte): Segment | null {
+  // Passage piéton d'une branche : un passage libre qui coupe sa ligne d'arrêt ou son approche ;
+  // sinon celui d'un nœud, sur sa ligne d'arrêt, entre elle et l'intersection, sinon en amont.
+  function traverseeDe(p: Porte): { traversee: Segment | null; passage: string | null } {
+    const approche = new Set([p.troncon.id, ...p.approche.map((a) => a.troncon.id)]);
+    const libre = passages.find((pp) => pp.troncons.some((t) => approche.has(t)));
+    if (libre) return { traversee: [libre.points[0], libre.points[1]], passage: libre.id };
     const trouve = [{ troncon: p.troncon, noeud: p.noeud }, ...p.approche].find((a) => dans.get(a.noeud)?.pieton);
-    return trouve ? travers(trouve.troncon, trouve.noeud) : null;
+    return { traversee: trouve ? travers(trouve.troncon, trouve.noeud) : null, passage: null };
   }
   function travers(t: TronconVue, noeud: string): Segment {
     const centre = dans.get(noeud)!.position;

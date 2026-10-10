@@ -69,10 +69,17 @@ export async function materialiserCarrefour(db: Executeur, carrefourId: string):
     ) b WHERE n = ANY (${uuids(touches)}::uuid[]) GROUP BY n
   `);
 
+  // Passages piétons libres qui traversent ces tronçons (docs/pipeline-donnees.md, étape 11).
+  const { rows: passages } = await db.execute<{ id: string; points: [LonLat, LonLat]; troncons: string[] }>(sql`
+    SELECT id, (ST_AsGeoJSON(geom)::json)->'coordinates' AS points, troncons::text[] AS troncons FROM passage_pieton
+    WHERE troncons && ${uuids(troncons.map((t) => t.id))}::uuid[]
+    ORDER BY cree_le
+  `);
   const vue = vueCarrefour({
     noeuds: noeuds.map((n): NoeudVue => ({ id: n.id, position: [n.lon, n.lat], feux: n.feux, pieton: n.pieton, liaisons: n.liaisons })),
     troncons: troncons.map((t) => ({ ...t, types_avant: t.types_avant as TypeVoieReseau[] | null, types_arriere: t.types_arriere as TypeVoieReseau[] | null })),
     degres: new Map(degres.map((d) => [d.id, d.degre])),
+    passages,
   });
   const branches: Branche[] = vue.branches.map((b) => ({
     code: b.code,
@@ -88,7 +95,8 @@ export async function materialiserCarrefour(db: Executeur, carrefourId: string):
   }));
   const { rows: etat } = await db.execute<{ saisies: boolean }>(sql`SELECT connexions_saisies AS saisies FROM carrefour WHERE id = ${carrefourId}`);
   const connexions = etat[0]?.saisies ? await connexionsEnregistrees(db, carrefourId) : vue.connexions;
-  await ecrireBranches(db, carrefourId, { branches, connexions, anneau: null });
+  const passagesBranches = new Map(vue.branches.flatMap((b) => (b.passage ? [[b.code, b.passage] as const] : [])));
+  await ecrireBranches(db, carrefourId, { branches, connexions, anneau: null }, passagesBranches);
   for (const { troncon, extremite, code } of vue.codes) {
     await db.execute(
       extremite === 'de'

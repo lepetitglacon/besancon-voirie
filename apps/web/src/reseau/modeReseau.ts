@@ -7,14 +7,24 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { boutsAuNoeud, cleEmprise, liaisonsRetenues, sensDuCote, typesVoies, type Liaison, type LonLat } from '@voirie/engine'
-import type { Bbox, CoupeTroncon, ModificationNoeud, ModificationTroncon, NouveauTroncon, ReseauGeoJson, SensTroncon } from '@voirie/schema'
+import type {
+  Bbox,
+  CoupeTroncon,
+  ModificationNoeud,
+  ModificationPassage,
+  ModificationTroncon,
+  NouveauPassage,
+  NouveauTroncon,
+  ReseauGeoJson,
+  SensTroncon,
+} from '@voirie/schema'
 import { useRef, useState } from 'react'
 import { api, type Noeud, type Troncon } from '../api'
 import { notifications } from '../ds'
 import { usePreference } from '../preferences'
 import type { OutilReseau } from './CoucheReseau'
 import { useHistorique } from './historique'
-import { REGLAGES_DEFAUT, type ReglagesOutils } from './reglages'
+import { completerReglages, REGLAGES_DEFAUT, type ReglagesOutils } from './reglages'
 import { cliquer, retirerDernier, versNouveauTroncon, type Cible, type Trace } from './trace'
 
 /** En dessous, l'emprise contient trop de tronçons : on ne les charge pas. */
@@ -22,8 +32,8 @@ export const ZOOM_MIN_RESEAU = 14
 /** À partir de ce zoom, les rues sont dessinées voie par voie, comme les carrefours. */
 export const ZOOM_VOIES = 16
 
-/** Tronçon ou nœud dont la popup est ouverte, ancrée au point cliqué. */
-export type SelectionReseau = { type: 'troncon' | 'noeud'; id: string; position: LonLat }
+/** Tronçon, nœud ou passage piéton dont la popup est ouverte, ancrée au point cliqué. */
+export type SelectionReseau = { type: 'troncon' | 'noeud' | 'passage'; id: string; position: LonLat }
 
 /** Emprise d'une voie en cours de dessin (outil Emprise) : la voie visée, puis les sommets posés. */
 export interface EmpriseEnCours {
@@ -111,7 +121,8 @@ function libelleNoeud(m: ModificationNoeud): string {
 export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour }: Options) {
   const queryClient = useQueryClient()
   const [outil, setOutil] = useState<OutilReseau>('selection')
-  const [reglages, setReglages] = usePreference<ReglagesOutils>('reglages-outils-voies', REGLAGES_DEFAUT)
+  const [reglagesLus, setReglages] = usePreference<ReglagesOutils>('reglages-outils-voies', REGLAGES_DEFAUT)
+  const reglages = completerReglages(reglagesLus)
   const [selection, setSelection] = useState<SelectionReseau | null>(null)
   const [trace, setTrace] = useState<Trace>([])
   // Le tracé courant, lu par les gestionnaires d'évènements sans attendre un rendu.
@@ -133,6 +144,13 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     formeActuelle.current = suivante
     setForme(suivante)
   }
+  /** Outil Passage, mode libre : premier bout du passage, posé sur un trottoir. */
+  const [passageEnCours, setPassageEnCours] = useState<LonLat | null>(null)
+  const passageActuel = useRef<LonLat | null>(null)
+  const changerPassage = (depart: LonLat | null) => {
+    passageActuel.current = depart
+    setPassageEnCours(depart)
+  }
   /** Outil Embranchements : nœud dont la popup est ouverte. */
   const [embranchement, setEmbranchement] = useState<{ id: string; position: LonLat } | null>(null)
   const historique = useHistorique()
@@ -152,10 +170,19 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     notifications.create({ type: 'error', title: titre, description: erreur.message })
   }
 
-  /** Dernières données reçues, toutes emprises confondues : une annulation peut viser ce qui a quitté la vue. */
-  const enCache = () => queryClient.getQueriesData<ReseauGeoJson>({ queryKey: ['reseau'] }).flatMap(([, r]) => (r ? [r] : []))
+  /**
+   * Données reçues, celles de la vue d'abord (les plus fraîches), puis celles des autres emprises :
+   * une annulation peut viser ce qui a quitté la vue.
+   */
+  const enCache = () => [
+    ...(donnees.data ? [donnees.data] : []),
+    ...queryClient
+      .getQueriesData<ReseauGeoJson>({ queryKey: ['reseau'] })
+      .flatMap(([, r]) => (r && r !== donnees.data ? [r] : [])),
+  ]
   const tronconEnCache = (id: string) => enCache().flatMap((r) => r.troncons.features).find((t) => t.id === id)
   const noeudEnCache = (id: string) => enCache().flatMap((r) => r.noeuds.features).find((n) => n.id === id)
+  const passageEnCache = (id: string) => enCache().flatMap((r) => r.passages?.features ?? []).find((p) => p.id === id)
   /** Tronçon qui relie ces deux nœuds (après une fusion, son identifiant peut être celui de l'une ou l'autre moitié). */
   const tronconEntre = (a: string, b: string) =>
     enCache()
@@ -249,6 +276,73 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     onSuccess: rafraichir,
     onError: echec('Liaison non enregistrée'),
   })
+
+  // ── Passages piétons libres (docs/pipeline-donnees.md, étape 11) ──
+
+  const passages = useMutation({
+    mutationFn: async (action: () => Promise<unknown>) => action(),
+    onSuccess: rafraichir,
+    onError: echec('Passage piéton non enregistré'),
+  })
+
+  const creerPassage = (nouveau: NouveauPassage) =>
+    passages.mutate(() => api.creerPassage(nouveau), {
+      onSuccess: (cree) => {
+        const passage = cree as Awaited<ReturnType<typeof api.creerPassage>>
+        let id = passage.id
+        const milieu = passage.geometry.coordinates
+        setSelection({ type: 'passage', id, position: [(milieu[0]![0] + milieu[1]![0]) / 2, (milieu[0]![1] + milieu[1]![1]) / 2] })
+        historique.enregistrer({
+          libelle: 'Passage piéton tracé',
+          annuler: () => rejouer(api.supprimerPassage(id)),
+          refaire: async () => {
+            id = (await rejouer(api.creerPassage({ ...nouveau, troncons: passage.properties.troncons }))).id
+          },
+        })
+      },
+    })
+
+  const modifierPassage = (id: string, m: ModificationPassage) => {
+    const avant = passageEnCache(id)
+    passages.mutate(() => api.modifierPassage(id, m), {
+      onSuccess: () => {
+        if (!avant) return
+        const p = avant.properties
+        const inverse: ModificationPassage = {
+          ...(m.points && { points: avant.geometry.coordinates as [LonLat, LonLat] }),
+          ...(m.type && { type: p.type }),
+          ...(m.troncons && { troncons: p.troncons }),
+          ...(m.feux && { feux: p.feux }),
+        }
+        historique.enregistrer({
+          libelle: m.feux ? 'Feux du passage' : m.troncons ? 'Tronçons du passage' : 'Passage piéton',
+          annuler: () => rejouer(api.modifierPassage(id, inverse)),
+          refaire: () => rejouer(api.modifierPassage(id, m)),
+        })
+      },
+    })
+  }
+
+  /** Supprime le passage ; l'annuler le recrée tel quel (sous un autre identifiant). */
+  const supprimerPassage = (id: string) => {
+    const avant = passageEnCache(id)
+    passages.mutate(() => api.supprimerPassage(id), {
+      onSuccess: () => {
+        setSelection(null)
+        if (!avant) return
+        const { type, troncons, feux } = avant.properties
+        const recreer: NouveauPassage = { points: avant.geometry.coordinates as [LonLat, LonLat], type, troncons, feux }
+        let actuel = id
+        historique.enregistrer({
+          libelle: 'Passage piéton supprimé',
+          annuler: async () => {
+            actuel = (await rejouer(api.creerPassage(recreer))).id
+          },
+          refaire: () => rejouer(api.supprimerPassage(actuel)),
+        })
+      },
+    })
+  }
 
   // ── Modifications qui s'annulent ──
 
@@ -416,7 +510,14 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
 
   /** Outil Passage : pose un passage piéton sur le nœud (ou l'en retire s'il est déjà de ce type), ou coupe la rue avec un passage. */
   const poserPassage = (cible: Cible, position: LonLat) => {
-    const type = reglages.passage.pieton
+    const { mode, pieton: type } = reglages.passage
+    if (cible?.type === 'passage') return setSelection({ type: 'passage', id: cible.id, position })
+    if (mode === 'libre') {
+      const depart = passageActuel.current
+      if (!depart) return changerPassage(position)
+      changerPassage(null)
+      return creerPassage({ points: [depart, position], type, feux: [] })
+    }
     if (cible?.type === 'noeud') {
       const actuel = noeudEnCache(cible.id)?.properties.pieton ?? null
       return modifierNoeud(cible.id, { pieton: actuel === type ? null : type })
@@ -508,6 +609,7 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     changerEmprise(null)
     changerForme(null)
     setEmbranchement(null)
+    changerPassage(null)
   }
 
   /** Outil Forme : retire le sommet sélectionné (les bouts restent sur leurs nœuds). */
@@ -533,19 +635,21 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     }
   }
 
-  /** Suppr : supprime le tronçon sélectionné, ou retire le nœud sélectionné (entre deux tronçons). */
+  /** Suppr : supprime le tronçon ou le passage sélectionné, ou retire le nœud sélectionné (entre deux tronçons). */
   const supprimerSelection = (): boolean => {
     if (!selection) return false
     if (selection.type === 'troncon') supprimer(selection.id)
+    else if (selection.type === 'passage') supprimerPassage(selection.id)
     else fusionner(selection.id)
     return true
   }
 
   /** Geste en cours (tracé, emprise, forme) : Entrée, ⌫, Suppr et Échap lui reviennent avant tout autre raccourci. */
-  const geste = trace.length > 0 || emprise !== null || forme !== null
+  const geste = trace.length > 0 || emprise !== null || forme !== null || passageEnCours !== null
 
   /** Entrée, ⌫, Suppr et Échap pendant un geste ; false s'il n'y en a pas. */
   const toucheGeste = (e: KeyboardEvent): boolean => {
+    if (passageActuel.current) return e.key === 'Escape' && (changerPassage(null), true)
     if (formeActuelle.current) {
       if (e.key === 'Escape') return (changerForme(formeActuelle.current.sommet === null ? null : { ...formeActuelle.current, sommet: null }), true)
       if ((e.key === 'Delete' || e.key === 'Backspace') && formeActuelle.current.sommet !== null) return (retirerSommet(), true)
@@ -582,6 +686,7 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
   /** Échap dans un carrefour ouvert : annule le geste, puis ferme la popup ; false s'il n'y avait rien. */
   const echap = (): boolean => {
     if (formeActuelle.current) return (changerForme(null), true)
+    if (passageActuel.current) return (changerPassage(null), true)
     if (embranchement) return (setEmbranchement(null), true)
     if (empriseActuelle.current) return (changerEmprise(null), true)
     if (traceActuel.current.length > 0) return (changerTrace([]), true)
@@ -591,6 +696,7 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
 
   const troncon = selection?.type === 'troncon' ? donnees.data?.troncons.features.find((t) => t.id === selection.id) : undefined
   const noeud = selection?.type === 'noeud' ? donnees.data?.noeuds.features.find((n) => n.id === selection.id) : undefined
+  const passage = selection?.type === 'passage' ? donnees.data?.passages?.features.find((p) => p.id === selection.id) : undefined
 
   return {
     outil,
@@ -611,6 +717,11 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     echap,
     troncon,
     noeud,
+    passage,
+    passageEnCours,
+    modifierPassage,
+    supprimerPassage,
+    enregistrementPassage: passages,
     trace,
     emprise,
     forme,

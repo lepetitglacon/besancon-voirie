@@ -173,6 +173,11 @@ export interface BranchesCarrefour {
    * celles proposées d'après les liaisons de ses nœuds.
    */
   connexions_saisies: boolean;
+  /**
+   * Carrefour bâti sur le réseau : passage piéton libre qui fait la traversée de chaque branche
+   * (code → passage), avec ses feux piétons (docs/pipeline-donnees.md, étape 11).
+   */
+  passages?: Record<string, { id: string; type: string; feux: string[] }>;
 }
 
 /** Proposition de branches, voies et connexions détectée depuis OSM, non enregistrée. */

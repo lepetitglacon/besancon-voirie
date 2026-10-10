@@ -33,6 +33,8 @@ interface Props {
   trace: Trace
   /** Sommets de l'emprise de voie en cours de dessin ; null : aucune. */
   emprise: LonLat[] | null
+  /** Premier bout du passage piéton en cours de tracé ; null : aucun. */
+  passage: LonLat | null
   /** Clic sur la carte : position et ce qui est sous le pointeur (nœud en priorité, puis tronçon). */
   onClic: (position: LonLat, cible: Cible, memePoint: (a: LonLat, b: LonLat) => boolean) => void
   /** Popup du tronçon sélectionné, ancrée au point cliqué. */
@@ -45,7 +47,7 @@ const largeur = (minimum: number, marge = 0) => metresEnPixels(['get', 'largeur_
 const auZoomDesVoies = (opacite: number): ExpressionSpecification => ['interpolate', ['linear'], ['zoom'], ZOOM_VOIES - 0.5, opacite, ZOOM_VOIES, 0]
 const sensUnique: ExpressionSpecification = ['any', ['==', ['get', 'voies_avant'], 0], ['==', ['get', 'voies_arriere'], 0]]
 
-export function CoucheReseau({ donnees, outil, selection, trace, emprise, onClic, popup }: Props) {
+export function CoucheReseau({ donnees, outil, selection, trace, emprise, passage, onClic, popup }: Props) {
   const { current: carte } = useMap()
   const dessous = useCoucheDessous()
   const [curseur, setCurseur] = useState<LonLat | null>(null)
@@ -69,8 +71,10 @@ export function CoucheReseau({ donnees, outil, selection, trace, emprise, onClic
         [x + TOLERANCE_PX, y + TOLERANCE_PX],
       ]
       // Au zoom des voies, les couches de CoucheVoies ; en dessous, celles des tronçons.
-      const couches = [ZONES.noeuds, 'reseau-noeuds', 'reseau-voies', COUCHE_COEUR, 'reseau-troncons'].filter((id) => map.getLayer(id))
+      const couches = [ZONES.passages, ZONES.noeuds, 'reseau-noeuds', 'reseau-voies', COUCHE_COEUR, 'reseau-troncons'].filter((id) => map.getLayer(id))
       const objets = map.queryRenderedFeatures(zone, { layers: couches })
+      const passage = objets.find((f) => f.layer.id === ZONES.passages)
+      if (passage) return { type: 'passage', id: passage.properties.id as string }
       const noeud = objets.find((f) => f.layer.id === ZONES.noeuds || f.layer.id === 'reseau-noeuds')
       if (noeud) return { type: 'noeud', id: noeud.properties.id as string }
       const voie = objets.find((f) => f.layer.id === 'reseau-voies' || f.layer.id === COUCHE_COEUR)
@@ -85,7 +89,7 @@ export function CoucheReseau({ donnees, outil, selection, trace, emprise, onClic
     const cliquer = (e: MapLayerMouseEvent) => {
       // Un feu (sa popup) ou le disque d'un carrefour (il s'ouvre) : le réseau ne répond pas en même
       // temps. Au zoom des voies, les voies et les nœuds sont dessinés par-dessus le disque et passent avant.
-      const couches = ['feux', 'carrefours', ZONES.noeuds, 'reseau-voies'].filter((id) => map.getLayer(id))
+      const couches = ['feux', 'carrefours', ZONES.passages, ZONES.noeuds, 'reseau-voies'].filter((id) => map.getLayer(id))
       const dessus = couches.length > 0 ? map.queryRenderedFeatures(e.point, { layers: couches })[0] : undefined
       if (dessus?.layer.id === 'feux' || dessus?.layer.id === 'carrefours') return
       relayerClic([e.lngLat.lng, e.lngLat.lat], cibleSous(e), memePoint)
@@ -106,9 +110,11 @@ export function CoucheReseau({ donnees, outil, selection, trace, emprise, onClic
     // Emprise : le polygone se referme sur le premier sommet ; tracé : la rue suit le pointeur.
     const sommets: Array<{ position: LonLat; accroche: string }> = emprise
       ? emprise.map((position) => ({ position, accroche: 'libre' }))
-      : trace.map((p) => ({ position: p.position, accroche: p.accroche.type }))
+      : passage
+        ? [{ position: passage, accroche: 'libre' }]
+        : trace.map((p) => ({ position: p.position, accroche: p.accroche.type }))
     const points = sommets.map((p) => p.position)
-    if ((outil === 'tracer' || emprise) && curseur && points.length > 0) points.push(curseur)
+    if ((outil === 'tracer' || emprise || passage) && curseur && points.length > 0) points.push(curseur)
     if (emprise && points.length >= 3) points.push(points[0]!)
     return {
       type: 'FeatureCollection' as const,
@@ -121,7 +127,7 @@ export function CoucheReseau({ donnees, outil, selection, trace, emprise, onClic
         })),
       ],
     }
-  }, [trace, emprise, curseur, outil])
+  }, [trace, emprise, passage, curseur, outil])
 
   // Largeur de chaussée de chaque tronçon, pour le dessiner à sa largeur au sol.
   const troncons = useMemo(

@@ -58,6 +58,7 @@ import { EnTeteReseau } from './reseau/EnTeteReseau'
 import { useModeReseau, ZOOM_VOIES } from './reseau/modeReseau'
 import { PopupEmbranchements } from './reseau/PopupEmbranchements'
 import { PopupNoeud } from './reseau/PopupNoeud'
+import { PopupPassage } from './reseau/PopupPassage'
 import { PopupTroncon } from './reseau/PopupTroncon'
 import { TableauMaturite } from './maturite/TableauMaturite'
 import { avecReglages } from './reseau/reglages'
@@ -630,6 +631,7 @@ function App() {
               selection={reseau.selection?.id ?? null}
               trace={reseau.trace}
               emprise={reseau.emprise?.points ?? null}
+              passage={reseau.passageEnCours}
               onClic={(position, cible, memePoint) => reseau.clic(position, cible, memePoint, outilEditeur ?? 'autre')}
               popup={
                 outilEditeur === 'embranchements' && reseau.embranchement?.noeud
@@ -642,6 +644,22 @@ function App() {
                           troncons={reseau.embranchement.troncons}
                           onChanger={(liaisons) => reseau.enregistrerLiaisons(reseau.embranchement!.noeud!.id, liaisons)}
                           onFermer={reseau.fermerEmbranchements}
+                        />
+                      ),
+                    }
+                  : (outilEditeur === 'selection' || outilEditeur === 'passage') && reseau.selection?.type === 'passage' && reseau.passage
+                  ? {
+                      position: reseau.selection.position,
+                      contenu: (
+                        <PopupPassage
+                          key={reseau.passage.id}
+                          passage={reseau.passage}
+                          troncons={reseau.donnees.data?.troncons.features ?? []}
+                          feux={feux.data?.features ?? []}
+                          enregistrement={{ enCours: reseau.enregistrementPassage.isPending, erreur: reseau.enregistrementPassage.error?.message ?? null }}
+                          onModifier={(m) => reseau.modifierPassage(reseau.passage!.id, m)}
+                          onSupprimer={() => reseau.supprimerPassage(reseau.passage!.id)}
+                          onFermer={reseau.fermerSelection}
                         />
                       ),
                     }

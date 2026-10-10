@@ -212,6 +212,19 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
     [noeuds, autour, geometrie, interieurs],
   )
 
+  // Passages piétons tracés librement : zébras sur leur tracé, à la largeur d'un passage.
+  const passagesLibres = useMemo(
+    () =>
+      collection<Ligne>(
+        (reseau.passages?.features ?? []).map((p) => ({
+          type: 'Feature' as const,
+          geometry: p.geometry,
+          properties: { id: p.id, type: p.properties.type, choisi: selection?.type === 'passage' && selection.id === p.id },
+        })),
+      ),
+    [reseau.passages, selection],
+  )
+
   const connecter = outil === 'connecter'
   // Liaisons de chaque nœud hors des carrefours, saisies ou proposées (outil Liaison seulement :
   // c'est le calcul le plus long). Celles d'un carrefour se relient dans son calque.
@@ -436,6 +449,30 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
             'line-opacity': enApparaissant(0.85),
           }}
         />
+      </Source>
+      <Source id="reseau-passages" type="geojson" data={passagesLibres}>
+        <Layer
+          id="reseau-passages-choisi"
+          type="line"
+          minzoom={minzoom}
+          beforeId={dessous}
+          filter={['get', 'choisi']}
+          paint={{ 'line-color': COULEURS_RESEAU.selection, 'line-width': metresEnPixels(3.5, 7), 'line-opacity': 0.6 }}
+        />
+        <Layer
+          id="reseau-passages"
+          type="line"
+          minzoom={minzoom}
+          beforeId={dessous}
+          paint={{
+            // À feux : bandes cerclées du rouge des feux ; non marqué : en tirets plus espacés.
+            'line-color': ['case', ['==', ['get', 'type'], 'feux'], COULEURS_RESEAU.feux, COULEURS_RESEAU.pieton],
+            'line-width': metresEnPixels(2.5, 4),
+            'line-dasharray': [0.2, 0.2],
+            'line-opacity': enApparaissant(['case', ['==', ['get', 'type'], 'non_marquee'], 0.45, 0.9]),
+          }}
+        />
+        <Layer id={ZONES.passages} type="line" minzoom={minzoom} beforeId={dessous} paint={{ 'line-width': 14, 'line-opacity': 0 }} />
       </Source>
       <Source id="reseau-voies-noeuds" type="geojson" data={pastilles}>
         <Layer

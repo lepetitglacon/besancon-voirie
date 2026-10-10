@@ -152,8 +152,11 @@ nœuds ce qu'attendent les lignes de feux, les conflits et le programme :
   Liaison) et enregistrées, elles sont **saisies** (`carrefour.connexions_saisies`) et gardées
   quand le réseau change, sauf celles dont une voie a disparu. « Reprendre les proposées »
   (`DELETE /branches/connexions`) les oublie.
-- **Passage piéton** d'une branche : sur sa ligne d'arrêt, entre elle et l'intersection, sinon en
-  amont ; en travers du tronçon, de la largeur de ses voies plus 1,5 m de chaque côté.
+- **Passage piéton** d'une branche : d'abord un passage tracé librement (`passage_pieton`) qui
+  coupe sa ligne d'arrêt ou son approche (`branche.passage_id`, ses feux reliés vont aux lignes
+  piétonnes qui la traversent) ; sinon celui d'un nœud, sur sa ligne d'arrêt, entre elle et
+  l'intersection, sinon en amont, en travers du tronçon, de la largeur de ses voies plus 1,5 m de
+  chaque côté.
 
 La vue est **écrite** dans `branche`, `voie` et `connexion` (`materialiserCarrefour`) à chaque
 modification du réseau autour du carrefour : nœud déplacé, ajouté ou retiré, tronçon tracé,
@@ -192,7 +195,7 @@ longitude, latitude : netconvert les projette en UTM (`proj.plain-geo`, `proj.ut
 
 | Méthode | Route | Effet |
 |---|---|---|
-| GET | `/api/reseau?bbox=` | Tronçons (6 000 au plus, `tronque` au-delà) et nœuds de l'emprise, avec leurs liaisons |
+| GET | `/api/reseau?bbox=` | Tronçons (6 000 au plus, `tronque` au-delà), nœuds de l'emprise avec leurs liaisons, passages piétons tracés librement |
 | POST | `/api/reseau/semer` | `{ reinitialiser? }` : sème le réseau depuis OSM, une seule fois (409 ensuite) ; bilan (`EditionGuard`) |
 | POST | `/api/reseau/troncons` | `{ points, de, vers, nom, voies_avant, voies_arriere, vitesse_kmh }` ; chaque bout s'accroche à un nœud (`{type:'noeud', id}`), coupe un tronçon (`{type:'troncon', id}`, au point le plus proche, ou sur son bout à moins de 1,5 m) ou crée un nœud (`{type:'libre'}`) (`EditionGuard`) |
 | PATCH | `/api/reseau/troncons/:id` | Nom, voies par sens, types de voies, vitesse, tracé (`points`, bouts gardés sur leurs nœuds), `inverser` ; `voie` : ajouter ou retirer une voie à un rang (types, emprises et liaisons saisies aux deux bouts suivent) ; `emprise` : poser ou retirer l'emprise d'une voie (`EditionGuard`) |
@@ -200,6 +203,9 @@ longitude, latitude : netconvert les projette en UTM (`proj.plain-geo`, `proj.ut
 | POST | `/api/reseau/troncons/:id/couper` | `{ position, feux?, pieton? }` : nouveau nœud, qui peut porter d'emblée une ligne d'arrêt ou un passage piéton, au point le plus proche ; voies, types et liaisons gardés de part et d'autre ; entre deux nœuds d'un même carrefour, le nœud en fait partie (`EditionGuard`) |
 | PATCH | `/api/reseau/noeuds/:id` | `{ position?, feux?, pieton?, carrefour_id? }` : déplacer (les tronçons suivent), ligne d'arrêt à feux, passage piéton, carrefour (null : l'en retirer) (`EditionGuard`) |
 | DELETE | `/api/reseau/noeuds/:id` | Retire un nœud entre deux tronçons de mêmes voies : ils n'en font plus qu'un ; 400 sinon (`EditionGuard`) |
+| POST | `/api/reseau/noeuds/fusion` | `{ noeuds, position? }` ou `{ carrefour, coeur?, position? }` : réunit des nœuds en un seul, au barycentre ; les tronçons entre eux disparaissent (masqués s'ils viennent d'OSM) ; 400 pour des nœuds de carrefours différents (`EditionGuard`) |
+| POST | `/api/reseau/passages` | `{ points: [a, b], type, troncons?, feux }` : passage piéton tracé librement ; sans `troncons`, ceux qu'il coupe (`EditionGuard`) |
+| PATCH / DELETE | `/api/reseau/passages/:id` | Tracé, type, tronçons traversés, feux reliés ; suppression. Les carrefours des tronçons touchés sont recalculés (`EditionGuard`) |
 | PUT | `/api/reseau/noeuds/:id/liaisons` | `{ liaisons: [...] \| null }` (null : proposées) ; 400 pour une voie qui n'arrive pas au nœud (`EditionGuard`) |
 | GET | `/api/reseau/sumo/:fichier[?bbox=]` | `reseau.nod.xml`, `reseau.edg.xml`, `reseau.con.xml`, `reseau.netccfg` |
 | GET | `/api/carrefours/:id/branches` | Vue du carrefour : `graphe: true` pour un carrefour bâti sur le réseau, et `connexions_saisies` |

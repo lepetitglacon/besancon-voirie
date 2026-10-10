@@ -12,16 +12,24 @@ export interface ReglagesOutils {
   couper: { pose: 'rien' | 'feux' | 'pieton'; pieton: TraverseePieton }
   /** Voie ajoutée (au bord de la chaussée ou contre l'axe), ou retirée. */
   voie: { action: 'ajouter' | 'retirer'; type: TypeVoie; position: 'bord' | 'axe' }
-  /** Passage piéton posé sur une rue ou un nœud. */
-  passage: { pieton: TraverseePieton }
+  /** Passage piéton : tracé librement (deux clics), ou posé sur une rue ou un nœud. */
+  passage: { mode: 'libre' | 'noeud'; pieton: TraverseePieton }
 }
 
 export const REGLAGES_DEFAUT: ReglagesOutils = {
   tracer: { nom: null, voies_avant: 1, voies_arriere: 1, type: 'generale', vitesse_kmh: null },
   couper: { pose: 'rien', pieton: 'marquee' },
   voie: { action: 'ajouter', type: 'generale', position: 'bord' },
-  passage: { pieton: 'marquee' },
+  passage: { mode: 'libre', pieton: 'marquee' },
 }
+
+/** Réglages gardés lors d'une visite précédente, complétés de ceux ajoutés depuis (outil par outil). */
+export const completerReglages = (lus: Partial<ReglagesOutils>): ReglagesOutils => ({
+  tracer: { ...REGLAGES_DEFAUT.tracer, ...lus.tracer },
+  couper: { ...REGLAGES_DEFAUT.couper, ...lus.couper },
+  voie: { ...REGLAGES_DEFAUT.voie, ...lus.voie },
+  passage: { ...REGLAGES_DEFAUT.passage, ...lus.passage },
+})
 
 export const TYPES_VOIE: Array<{ valeur: TypeVoie; libelle: string }> = [
   { valeur: 'generale', libelle: 'Générale' },

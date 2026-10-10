@@ -147,12 +147,27 @@ export function ReglagesOutil({ outil, reglages, onChanger }: Props) {
         <Segments
           fitted
           size="xs"
+          aria-label="Comment poser le passage"
+          valeur={reglages.passage.mode}
+          onChange={(mode) => changer('passage', { mode })}
+          options={[
+            { valeur: 'libre', libelle: 'Libre (deux clics)' },
+            { valeur: 'noeud', libelle: 'Sur un nœud' },
+          ]}
+        />
+        <Segments
+          fitted
+          size="xs"
           aria-label="Type de passage piéton"
           valeur={reglages.passage.pieton}
           onChange={(pieton) => changer('passage', { pieton })}
           options={PASSAGES}
         />
-        <Aide>Clic sur une rue : un nœud y est posé avec son passage. Clic sur un nœud : le passage y est posé, ou retiré s’il est déjà de ce type.</Aide>
+        <Aide>
+          {reglages.passage.mode === 'libre'
+            ? 'Clic sur un trottoir, puis sur l’autre : le passage relie les deux, en travers des rues qu’il coupe. Clic sur un passage : ses feux et ses tronçons.'
+            : 'Clic sur une rue : un nœud y est posé avec son passage. Clic sur un nœud : le passage y est posé, ou retiré s’il est déjà de ce type.'}
+        </Aide>
       </Section>
     )
   }
