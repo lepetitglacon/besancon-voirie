@@ -135,11 +135,33 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
         return {
           type: 'Feature',
           geometry: { type: 'LineString', coordinates: v.points },
-          properties: { troncon: v.troncon, couleur: COULEUR_TYPE[v.type] ?? COULEUR_SOURCE[origine], largeur: v.largeur * PART_DESSINEE },
+          properties: {
+            troncon: v.troncon,
+            // Sens et rang : l'outil Voie retire la voie visée, l'outil Emprise la dessine.
+            sens: v.cle.includes(':a') ? 'avant' : 'arriere',
+            rang: v.rang,
+            couleur: COULEUR_TYPE[v.type] ?? COULEUR_SOURCE[origine],
+            largeur: v.largeur * PART_DESSINEE,
+          },
         }
       }),
     )
   }, [geometrie, troncons, coeur])
+
+  // Emprises réelles des voies, posées sur la photo à côté de leur axe (outil Emprise).
+  const emprises = useMemo(
+    () =>
+      collection<{ type: 'Polygon'; coordinates: LonLat[][] }>(
+        troncons.flatMap((t) =>
+          Object.entries(t.properties.emprises ?? {}).map(([cle, polygone]) => ({
+            type: 'Feature' as const,
+            geometry: { type: 'Polygon' as const, coordinates: [[...polygone, polygone[0]!]] },
+            properties: { troncon: t.id, cle },
+          })),
+        ),
+      ),
+    [troncons],
+  )
 
   const axesCoeur = useMemo(
     () =>
@@ -361,6 +383,22 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
 
   return (
     <>
+      <Source id="reseau-emprises" type="geojson" data={emprises}>
+        <Layer
+          id="reseau-emprises"
+          type="fill"
+          minzoom={minzoom}
+          beforeId={dessous}
+          paint={{ 'fill-color': COULEURS_RESEAU.emprise, 'fill-opacity': enApparaissant(0.25) }}
+        />
+        <Layer
+          id="reseau-emprises-bord"
+          type="line"
+          minzoom={minzoom}
+          beforeId={dessous}
+          paint={{ 'line-color': COULEURS_RESEAU.emprise, 'line-width': 1.5, 'line-dasharray': [2, 1], 'line-opacity': enApparaissant(0.9) }}
+        />
+      </Source>
       <Source id="reseau-voies" type="geojson" data={voies}>
         <Layer
           id="reseau-voies"

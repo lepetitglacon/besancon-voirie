@@ -20,4 +20,6 @@ export const COULEURS_RESEAU = {
   tram: '#a855f7',
   culDeSac: '#ef4444',
   trace: '#f472b6',
+  /** Emprise réelle d'une voie, posée sur la photo. */
+  emprise: '#facc15',
 } as const

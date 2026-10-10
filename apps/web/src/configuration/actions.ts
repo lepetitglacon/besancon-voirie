@@ -5,7 +5,19 @@ import type { EntreeMenu } from '../ds'
  * sélection, tracer, couper et nœuds agissent sur le réseau (docs/RESEAU.md §7), liaison et feu
  * sur le carrefour ; ajuster, piéton et nœud (d'anneau) ne servent qu'aux branches dessinées à la main.
  */
-export type OutilCarte = 'selection' | 'ajuster' | 'connecter' | 'feux' | 'pieton' | 'noeud' | 'tracer' | 'couper' | 'noeuds'
+export type OutilCarte =
+  | 'selection'
+  | 'ajuster'
+  | 'connecter'
+  | 'feux'
+  | 'pieton'
+  | 'noeud'
+  | 'tracer'
+  | 'couper'
+  | 'noeuds'
+  | 'voie'
+  | 'passage'
+  | 'emprise'
 
 /** Actions de la configuration, partagées par la barre d'outils, le clavier et le menu contextuel. */
 export type ActionConfiguration = OutilCarte | 'osm' | 'ia' | 'json' | 'plan' | 'enregistrer' | 'fermer'
@@ -22,23 +34,44 @@ export const OUTILS: Array<{ outil: OutilCarte; glyphe: string; libelle: string;
 
 export const RACCOURCIS: Record<string, ActionConfiguration> = { v: 'selection', l: 'ajuster', c: 'connecter', f: 'feux', p: 'pieton', n: 'noeud', o: 'osm', i: 'ia' }
 
+/**
+ * Outils réglables de l'éditeur des voies (docs/pipeline-donnees.md, étape 1) : ajouter ou
+ * retirer une voie, poser un passage piéton, dessiner l'emprise réelle d'une voie.
+ */
+export const OUTILS_VOIES: Array<{ outil: 'voie' | 'passage' | 'emprise'; glyphe: string; libelle: string; raccourci: string }> = [
+  { outil: 'voie', glyphe: '≡', libelle: 'Voie', raccourci: 'L' },
+  { outil: 'passage', glyphe: '▦', libelle: 'Passage', raccourci: 'P' },
+  { outil: 'emprise', glyphe: '▱', libelle: 'Emprise', raccourci: 'E' },
+]
+
 /** Outils d'un carrefour bâti sur le réseau, à la TM:PE. */
 export const OUTILS_GRAPHE: Array<{ outil: OutilCarte; glyphe: string; libelle: string; raccourci: string }> = [
   { outil: 'selection', glyphe: '↖', libelle: 'Sélection', raccourci: 'V' },
   { outil: 'tracer', glyphe: '＋', libelle: 'Tracer', raccourci: 'T' },
   { outil: 'couper', glyphe: '✂', libelle: 'Couper', raccourci: 'X' },
+  ...OUTILS_VOIES,
   { outil: 'connecter', glyphe: '↝', libelle: 'Liaison', raccourci: 'C' },
   { outil: 'noeuds', glyphe: '◎', libelle: 'Nœuds', raccourci: 'N' },
   { outil: 'feux', glyphe: '●', libelle: 'Feu', raccourci: 'F' },
 ]
 
-export const RACCOURCIS_GRAPHE: Record<string, ActionConfiguration> = { v: 'selection', t: 'tracer', x: 'couper', c: 'connecter', n: 'noeuds', f: 'feux' }
+export const RACCOURCIS_GRAPHE: Record<string, ActionConfiguration> = {
+  v: 'selection',
+  t: 'tracer',
+  x: 'couper',
+  l: 'voie',
+  p: 'passage',
+  e: 'emprise',
+  c: 'connecter',
+  n: 'noeuds',
+  f: 'feux',
+}
 
 /**
  * Outils qui agissent sur le réseau (les autres sont propres au carrefour). La liaison relie les
  * voies du carrefour, d'une branche à l'autre, pas celles de ses nœuds : il est une boîte noire.
  */
-export const OUTILS_RESEAU = ['selection', 'tracer', 'couper', 'noeuds'] as const
+export const OUTILS_RESEAU = ['selection', 'tracer', 'couper', 'noeuds', 'voie', 'passage', 'emprise'] as const
 
 /** Entrées du menu contextuel de la carte pendant la configuration. */
 export const MENU_CONFIGURATION: EntreeMenu[] = [

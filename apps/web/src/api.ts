@@ -26,6 +26,7 @@ import type {
   FeuxTempsReel,
   HistoriqueTroncons,
   LignesCarrefour,
+  CoupeTroncon,
   ModificationNoeud,
   ModificationTroncon,
   ModifierCarrefour,
@@ -143,8 +144,8 @@ export const api = {
   modifierTroncon: (id: string, modification: ModificationTroncon) =>
     requete<Troncon>(`/api/reseau/troncons/${id}`, { method: 'PATCH', body: JSON.stringify(modification) }),
   supprimerTroncon: (id: string) => requete<void>(`/api/reseau/troncons/${id}`, { method: 'DELETE' }),
-  couperTroncon: (id: string, position: [number, number]) =>
-    requete<Noeud>(`/api/reseau/troncons/${id}/couper`, { method: 'POST', body: JSON.stringify({ position }) }),
+  couperTroncon: (id: string, coupe: CoupeTroncon) =>
+    requete<Noeud>(`/api/reseau/troncons/${id}/couper`, { method: 'POST', body: JSON.stringify(coupe) }),
   modifierNoeud: (id: string, modification: ModificationNoeud) =>
     requete<Noeud>(`/api/reseau/noeuds/${id}`, { method: 'PATCH', body: JSON.stringify(modification) }),
   fusionnerNoeud: (id: string) => requete<void>(`/api/reseau/noeuds/${id}`, { method: 'DELETE' }),

@@ -32,6 +32,20 @@ export type TraverseePieton = z.infer<typeof TraverseePieton>;
 
 export const VitesseKmh = z.number().int().min(5).max(130);
 
+/** Sens d'un tronçon : `avant` de `noeud_de` vers `noeud_vers`, `arriere` dans l'autre sens. */
+export const SensTroncon = z.enum(['avant', 'arriere']);
+export type SensTroncon = z.infer<typeof SensTroncon>;
+
+/** Polygone (anneau ouvert : le dernier point rejoint le premier) posé sur le marquage d'une voie. */
+export const PolygoneEmprise = z.array(LonLat).min(3).max(40);
+
+/**
+ * Emprise réelle des voies d'un tronçon (docs/pipeline-donnees.md, étape 3), à côté de leur axe
+ * déduit : clé `avant:0`, `arriere:1`… (sens et rang de la voie). null : aucune.
+ */
+export const EmprisesVoies = z.record(z.string().regex(/^(avant|arriere):\d$/), PolygoneEmprise).nullable();
+export type EmprisesVoies = z.infer<typeof EmprisesVoies>;
+
 /** Propriétés d'un tronçon sur la carte. `avant` : de `noeud_de` vers `noeud_vers`. */
 export interface TronconResume {
   id: string;
@@ -43,6 +57,8 @@ export interface TronconResume {
   types_avant: TypesVoies;
   types_arriere: TypesVoies;
   vitesse_kmh: number | null;
+  /** Emprise réelle de certaines voies, dessinée sur la photo. */
+  emprises: EmprisesVoies;
   source: SourceReseau;
   /** Tronçon OSM corrigé à la main : la régénération depuis OSM le garde tel quel. */
   modifie: boolean;
@@ -123,12 +139,26 @@ export const NouveauTroncon = ProprietesTroncon.extend({
   points: z.array(LonLat).min(2).max(200),
   de: Accroche,
   vers: Accroche,
+  /** Types des voies de chaque sens (réglages de l'outil Tracer) ; absent : toutes générales. */
+  types_avant: TypesVoies.optional(),
+  types_arriere: TypesVoies.optional(),
 }).refine(auMoinsUneVoie, MESSAGE_VOIES);
 export type NouveauTroncon = z.infer<typeof NouveauTroncon>;
 
 /**
+ * Voie ajoutée ou retirée à un rang précis (outil Voie) : les types, les emprises et les liaisons
+ * saisies aux deux bouts du tronçon suivent le décalage des rangs.
+ */
+export const EditionVoie = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('inserer'), sens: SensTroncon, rang: NombreVoies, type: TypeVoie }),
+  z.object({ action: z.literal('retirer'), sens: SensTroncon, rang: NombreVoies }),
+]);
+export type EditionVoie = z.infer<typeof EditionVoie>;
+
+/**
  * PATCH /api/reseau/troncons/:id : champs modifiés ; `inverser` retourne le tronçon (avant ↔
- * arrière) ; `points` redessine son tracé (ses bouts restent sur leurs nœuds).
+ * arrière) ; `points` redessine son tracé (ses bouts restent sur leurs nœuds) ; `voie` ajoute ou
+ * retire une voie à un rang ; `emprise` pose (ou retire, null) l'emprise d'une voie.
  */
 export const ModificationTroncon = ProprietesTroncon.partial()
   .extend({
@@ -136,8 +166,14 @@ export const ModificationTroncon = ProprietesTroncon.partial()
     types_arriere: TypesVoies.optional(),
     points: z.array(LonLat).min(2).max(200).optional(),
     inverser: z.boolean().optional(),
+    voie: EditionVoie.optional(),
+    emprise: z.object({ sens: SensTroncon, rang: NombreVoies, polygone: PolygoneEmprise.nullable() }).optional(),
   })
-  .refine(auMoinsUneVoie, MESSAGE_VOIES);
+  .refine(auMoinsUneVoie, MESSAGE_VOIES)
+  .refine((m) => !m.voie || (m.voies_avant === undefined && m.voies_arriere === undefined && !m.inverser), {
+    message: 'Une voie ajoutée ou retirée ne se combine pas avec un nombre de voies ni une inversion',
+    path: ['voie'],
+  });
 export type ModificationTroncon = z.infer<typeof ModificationTroncon>;
 
 /**
@@ -152,8 +188,15 @@ export const ModificationNoeud = z.object({
 });
 export type ModificationNoeud = z.infer<typeof ModificationNoeud>;
 
-/** POST /api/reseau/troncons/:id/couper : coupe le tronçon au point le plus proche (nouveau nœud). */
-export const CoupeTroncon = z.object({ position: LonLat });
+/**
+ * POST /api/reseau/troncons/:id/couper : coupe le tronçon au point le plus proche (nouveau nœud),
+ * qui peut porter d'emblée une ligne d'arrêt à feux ou un passage piéton.
+ */
+export const CoupeTroncon = z.object({
+  position: LonLat,
+  feux: z.boolean().optional(),
+  pieton: TraverseePieton.nullable().optional(),
+});
 export type CoupeTroncon = z.infer<typeof CoupeTroncon>;
 
 /** POST /api/reseau/semer : semis du réseau depuis OSM, une seule fois ; `reinitialiser` efface tout avant. */

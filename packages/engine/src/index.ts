@@ -13,6 +13,7 @@ export * from './graphe.js';
 export * from './polyligne.js';
 export * from './tram.js';
 export * from './reseau.js';
+export * from './editionVoies.js';
 export * from './sumo.js';
 export * from './synchro.js';
 export * from './vueCarrefour.js';

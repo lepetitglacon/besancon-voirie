@@ -4,7 +4,7 @@
  * ou Entrée pour finir sur un point libre (cul-de-sac, bout à relier plus tard).
  */
 import type { LonLat } from '@voirie/engine'
-import type { Accroche, NouveauTroncon } from '@voirie/schema'
+import type { Accroche, NouveauTroncon, SensTroncon } from '@voirie/schema'
 
 export interface PointTrace {
   position: LonLat
@@ -14,8 +14,11 @@ export interface PointTrace {
 
 export type Trace = PointTrace[]
 
-/** Ce qu'on a cliqué : un nœud ou un tronçon existant, ou rien (point libre). */
-export type Cible = { type: 'noeud'; id: string } | { type: 'troncon'; id: string } | null
+/**
+ * Ce qu'on a cliqué : un nœud ou un tronçon existant, ou rien (point libre). Au zoom des voies,
+ * un clic sur une voie dit aussi laquelle (sens et rang).
+ */
+export type Cible = { type: 'noeud'; id: string } | { type: 'troncon'; id: string; voie?: { sens: SensTroncon; rang: number } } | null
 
 export type ResultatClic = { trace: Trace; termine: boolean }
 
@@ -25,7 +28,7 @@ export type ResultatClic = { trace: Trace; termine: boolean }
  * clic sur le point précédent (à `memePoint`) termine aussi, sur ce point.
  */
 export function cliquer(trace: Trace, position: LonLat, cible: Cible, memePoint: (a: LonLat, b: LonLat) => boolean): ResultatClic {
-  const accroche: Accroche = cible ?? { type: 'libre' }
+  const accroche: Accroche = cible ? { type: cible.type, id: cible.id } : { type: 'libre' }
   const dernier = trace.at(-1)
   if (!dernier) return { trace: [{ position, accroche }], termine: false }
   if (cible?.type === 'noeud' && dernier.accroche.type === 'noeud' && dernier.accroche.id === cible.id) {

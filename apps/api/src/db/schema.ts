@@ -404,6 +404,8 @@ export const troncon = pgTable(
     /** Type de chaque voie par sens, rang 0 = la plus à gauche ; null : toutes générales. */
     typesAvant: jsonb('types_avant').$type<TypeVoie[]>(),
     typesArriere: jsonb('types_arriere').$type<TypeVoie[]>(),
+    /** Emprise réelle de certaines voies (`avant:0`, `arriere:1`…), posée sur la photo à côté de leur axe. */
+    emprises: jsonb('emprises').$type<Record<string, Array<[number, number]>>>(),
     vitesseKmh: smallint('vitesse_kmh'),
     source: sourceReseau('source').notNull(),
     /** Tags de la voie OSM au semis : de quoi comparer avec un nouvel import. */

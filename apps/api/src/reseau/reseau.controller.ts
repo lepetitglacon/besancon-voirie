@@ -68,11 +68,11 @@ export class ReseauController {
     return this.reseau.supprimer(id);
   }
 
-  /** POST /api/reseau/troncons/:id/couper { position } : nouveau nœud au point le plus proche. */
+  /** POST /api/reseau/troncons/:id/couper { position, feux?, pieton? } : nouveau nœud au point le plus proche. */
   @Post('troncons/:id/couper')
   @UseGuards(EditionGuard)
-  couper(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(CoupeTroncon)) { position }: CoupeTroncon) {
-    return this.reseau.couper(id, position);
+  couper(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(CoupeTroncon)) coupe: CoupeTroncon) {
+    return this.reseau.couper(id, coupe);
   }
 
   /** PATCH /api/reseau/noeuds/:id : position, ligne d'arrêt à feux, passage piéton, carrefour. */

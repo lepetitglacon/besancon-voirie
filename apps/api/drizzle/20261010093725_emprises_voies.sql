@@ -1,0 +1,1 @@
+ALTER TABLE "troncon" ADD COLUMN "emprises" jsonb;

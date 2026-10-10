@@ -7,7 +7,7 @@ import { useMap } from 'react-map-gl/maplibre'
 import { api } from './api'
 import { abandonnerBrouillons, useBrouillons, type BrouillonsCarrefour } from './configuration/brouillons'
 import { CarteSuivi } from './configuration/CarteSuivi'
-import { MENU_CONFIGURATION, MENU_GRAPHE, type ActionConfiguration } from './configuration/actions'
+import { MENU_CONFIGURATION, MENU_GRAPHE, OUTILS_VOIES, type ActionConfiguration } from './configuration/actions'
 import {
   ConfigurationCarrefour,
   hauteurPanneau,
@@ -56,6 +56,8 @@ import { EnTeteReseau } from './reseau/EnTeteReseau'
 import { useModeReseau, ZOOM_VOIES } from './reseau/modeReseau'
 import { PopupNoeud } from './reseau/PopupNoeud'
 import { PopupTroncon } from './reseau/PopupTroncon'
+import { avecReglages } from './reseau/reglages'
+import { ReglagesOutil } from './reseau/ReglagesOutil'
 
 /** Le flux Ginko est mis en cache 10 s par l'API. */
 const RAFRAICHISSEMENT_TRAMS_MS = 15_000
@@ -441,12 +443,25 @@ function App() {
     window.addEventListener('keydown', touche)
     return () => window.removeEventListener('keydown', touche)
   }, [])
-  // Rue en cours de tracé, même carrefour ouvert : Entrée la finit, ⌫ retire un point, Échap l'annule,
-  // avant les raccourcis de la configuration (écoute en phase de capture).
+  // Rue ou emprise en cours de tracé, même carrefour ouvert : Entrée la finit, ⌫ retire un point,
+  // Échap l'annule, avant les raccourcis de la configuration (écoute en phase de capture).
+  // Éditeur des voies : Ctrl Z / Ctrl Maj Z annulent et refont, Suppr retire la sélection.
   const toucheTrace = useEffectEvent((e: KeyboardEvent) => {
-    if (reseau.trace.length === 0 || !['Enter', 'Backspace', 'Escape'].includes(e.key)) return
+    if (!editeur) return
     if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
-    reseau.clavier(e)
+    const lettre = e.key.toLowerCase()
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (lettre === 'z' || lettre === 'y')) {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      return void reseau.annulerOuRefaire(lettre === 'y' || e.shiftKey)
+    }
+    // Hors carrefour, le mode réseau traite Suppr avec ses autres raccourcis.
+    if (e.key === 'Delete' && configuration && reseau.supprimerSelection()) {
+      e.preventDefault()
+      return e.stopImmediatePropagation()
+    }
+    if (!reseau.geste || !['Enter', 'Backspace', 'Escape'].includes(e.key)) return
+    reseau.toucheGeste(e)
     e.preventDefault()
     e.stopImmediatePropagation()
   })
@@ -538,7 +553,7 @@ function App() {
           }
           onEmprise={changerEmprise}
           reseauActif={modeReseau && !configuration}
-          curseur={outilEditeur === 'tracer' || outilEditeur === 'couper' ? 'crosshair' : undefined}
+          curseur={outilEditeur && ['tracer', 'couper', 'voie', 'passage', 'emprise'].includes(outilEditeur) ? 'crosshair' : undefined}
           couchesReseau={voiesDessinees ? couchesInteractivesVoies(outilEditeur) : undefined}
           onBasculerFeu={basculerFeu}
           onAjouterFeux={ajouterFeux}
@@ -604,6 +619,7 @@ function App() {
               outil={outilEditeur === 'tracer' ? 'tracer' : 'selection'}
               selection={reseau.selection?.id ?? null}
               trace={reseau.trace}
+              emprise={reseau.emprise?.points ?? null}
               onClic={(position, cible, memePoint) => reseau.clic(position, cible, memePoint, outilEditeur ?? 'autre')}
               popup={
                 outilEditeur !== 'selection' || !reseau.selection
@@ -681,6 +697,11 @@ function App() {
           onSupprimer={() => confirmerSuppression(configuration.carrefour)}
           onFermer={() => setConfiguration(null)}
           onEchapVoies={reseau.echap}
+          reglagesVoies={
+            carrefourGraphe && outilEditeur !== 'autre' && avecReglages(outilEditeur) ? (
+              <ReglagesOutil outil={outilEditeur!} reglages={reseau.reglages} onChanger={reseau.changerReglages} />
+            ) : null
+          }
         />
       ) : sumo ? (
         <ModeSumo />
@@ -766,6 +787,7 @@ function App() {
                 tronque={reseau.donnees.data?.tronque ?? false}
                 bbox={bbox}
                 generation={{ enCours: reseau.generation.isPending, onGenerer: (reinitialiser) => reseau.generation.mutate(reinitialiser) }}
+                reglages={<ReglagesOutil outil={reseau.outil} reglages={reseau.reglages} onChanger={reseau.changerReglages} />}
               />
             )}
           </CarteEnTete>
@@ -834,6 +856,24 @@ function App() {
                   raccourci="C"
                   actif={reseau.outil === 'connecter'}
                   onClick={() => reseau.choisirOutil('connecter')}
+                />
+                {OUTILS_VOIES.map((o) => (
+                  <BarreOutils.Outil key={o.outil} {...o} actif={reseau.outil === o.outil} onClick={() => reseau.choisirOutil(o.outil)} />
+                ))}
+                <BarreOutils.Separateur />
+                <BarreOutils.Outil
+                  glyphe="↶"
+                  libelle="Annuler"
+                  raccourci="Ctrl Z"
+                  disabled={!reseau.peutAnnuler}
+                  onClick={() => void reseau.annulerOuRefaire(false)}
+                />
+                <BarreOutils.Outil
+                  glyphe="↷"
+                  libelle="Refaire"
+                  raccourci="Ctrl Y"
+                  disabled={!reseau.peutRefaire}
+                  onClick={() => void reseau.annulerOuRefaire(true)}
                 />
                 <BarreOutils.Separateur />
                 <BarreOutils.Outil glyphe="×" libelle="Quitter" raccourci="Échap" onClick={() => setModeReseau(false)} />

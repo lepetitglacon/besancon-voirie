@@ -23,7 +23,8 @@ export const COUCHE_COEUR = 'reseau-voies-coeur'
 
 /** Couches de CoucheVoies qui répondent au pointeur selon l'outil (curseur de la carte, survols). */
 export function couchesInteractivesVoies(outil: OutilVoies | null): string[] {
-  if (outil === 'selection' || outil === 'couper') return [ZONES.noeuds, 'reseau-voies']
+  if (outil === 'selection' || outil === 'couper' || outil === 'passage') return [ZONES.noeuds, 'reseau-voies']
+  if (outil === 'voie' || outil === 'emprise') return ['reseau-voies']
   if (outil === 'noeuds') return [ZONES.noeuds]
   if (outil === 'connecter') return [ZONES.arrivees, ZONES.liaisons]
   return []

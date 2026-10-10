@@ -29,7 +29,7 @@ import {
   type PlanSaisi,
   type SourceBranche,
 } from '@voirie/schema'
-import { useCallback, useEffect, useEffectEvent, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
+import { useCallback, useEffect, useEffectEvent, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
 import { createPortal } from 'react-dom'
 import { useMap } from 'react-map-gl/maplibre'
 import { api } from '../api'
@@ -112,7 +112,13 @@ const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>>
     titre: 'Tracer une rue',
     aides: ['Clic sur un nœud, une rue ou un point libre, puis les points de la rue', 'Entrée : finir', '⌫ : retirer le dernier point'],
   },
-  couper: { titre: 'Couper une rue', aides: ['Clic sur une rue : un nœud y est posé (ligne d’arrêt, passage piéton, voie qui s’ajoute)'] },
+  couper: { titre: 'Couper une rue', aides: ['Clic sur une rue : un nœud y est posé, avec ce que disent les réglages'] },
+  voie: { titre: 'Voies', aides: ['Clic sur une rue, du côté du sens voulu : ajouter ou retirer une voie (réglages)'] },
+  passage: { titre: 'Passages piétons', aides: ['Clic sur une rue : poser un passage', 'Clic sur un nœud : poser ou retirer son passage'] },
+  emprise: {
+    titre: 'Emprise d’une voie',
+    aides: ['Clic sur une voie, puis sur les coins de son marquage', 'Entrée ou clic sur le premier coin : enregistrer', '⌫ : retirer le dernier coin'],
+  },
   noeuds: { titre: 'Nœuds du carrefour', aides: ['Clic sur un nœud : l’ajouter au carrefour ou l’en retirer'] },
   ajuster: { titre: 'Caler les voies', aides: ['Glisser les extrémités des voies et des passages sur le marquage de la photo'] },
   connecter: { titre: 'Relier les voies', aides: ['Glisser d’une voie entrante vers une voie sortante', 'Clic sur une liaison : la retirer'] },
@@ -184,6 +190,8 @@ interface Props {
    * true s'il a défait quelque chose.
    */
   onEchapVoies?: () => boolean
+  /** Réglages de l'outil actif de l'éditeur des voies (carrefour bâti sur le réseau). */
+  reglagesVoies?: ReactNode
 }
 
 /** Le focus est dans un champ : les raccourcis d'une lettre ne doivent pas s'y déclencher. */
@@ -196,7 +204,7 @@ const focusLibre = () => {
   return !actif || actif === document.body || actif.classList.contains('maplibregl-canvas')
 }
 
-export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneauBas, onModifierFeux, onSupprimer, onFermer, onEchapVoies }: Props) {
+export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneauBas, onModifierFeux, onSupprimer, onFermer, onEchapVoies, reglagesVoies }: Props) {
   const queryClient = useQueryClient()
   const [outil, setOutil] = useState<OutilCarte>('selection')
   const [popup, setPopup] = useState<Popup | null>(null)
@@ -843,6 +851,11 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
               </>
             )}
           </Indice>
+        )}
+        {graphe && reglagesVoies && (
+          <Box mt="2" pt="2" borderTopWidth="1px" borderColor="border.muted">
+            {reglagesVoies}
+          </Box>
         )}
         {graphe && branches.length > 0 && (
           <Stack gap="1.5" mt="2">

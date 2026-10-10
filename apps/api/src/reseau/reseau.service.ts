@@ -1,9 +1,18 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   boutsAuNoeud,
+  boutsDuSens,
+  cleEmprise,
   configurationNetconvert,
+  decalerEmprises,
+  decalerLiaisons,
   exporterSumo,
+  insererType,
+  inverserEmprises,
   liaisonsRetenues,
+  partagerEmprises,
+  retirerType,
+  type EmprisesTroncon,
   type LonLat,
   type ReseauSumo,
   type TypeVoieReseau,
@@ -12,6 +21,7 @@ import type {
   Accroche,
   Bbox,
   BilanSemis,
+  CoupeTroncon,
   FichierSumo,
   Liaison,
   ModificationNoeud,
@@ -39,7 +49,7 @@ type LigneNoeud = { [K in keyof NoeudResume]: NoeudResume[K] } & { geometry: { t
 
 const COLONNES = sql`
   t.id, ST_AsGeoJSON(t.geom)::json AS geometry, t.nom, t.highway, t.voies_avant, t.voies_arriere, t.types_avant, t.types_arriere,
-  t.vitesse_kmh, t.source, t.modifie, t.noeud_de, t.noeud_vers, nd.carrefour_id AS carrefour_de, nv.carrefour_id AS carrefour_vers,
+  t.emprises, t.vitesse_kmh, t.source, t.modifie, t.noeud_de, t.noeud_vers, nd.carrefour_id AS carrefour_de, nv.carrefour_id AS carrefour_vers,
   t.branche_de, t.branche_vers`;
 
 const FROM_TRONCONS = sql`troncon t JOIN noeud nd ON nd.id = t.noeud_de JOIN noeud nv ON nv.id = t.noeud_vers`;
@@ -52,6 +62,7 @@ const enveloppe = ([minLon, minLat, maxLon, maxLat]: Bbox) => sql`ST_MakeEnvelop
 const pointSql = ([lon, lat]: LonLat) => sql`ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)`;
 const ligneSql = (points: readonly LonLat[]) => sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify({ type: 'LineString', coordinates: points })}), 4326)`;
 const typesSql = (types: TypesVoies | undefined) => (types ? JSON.stringify(types) : null);
+const emprisesSql = (emprises: EmprisesTroncon | null) => (emprises && Object.keys(emprises).length > 0 ? JSON.stringify(emprises) : null);
 
 const enFeature = ({ geometry, ...properties }: LigneTroncon) => ({ type: 'Feature' as const, id: properties.id, geometry, properties });
 const enFeatureNoeud = ({ geometry, ...properties }: LigneNoeud) => ({ type: 'Feature' as const, id: properties.id, geometry, properties });
@@ -82,6 +93,14 @@ async function renvoyerLiaisons(db: Executeur, noeud: string, ancien: string, no
     UPDATE noeud SET liaisons = replace(liaisons::text, ${ancien}, ${nouveau})::jsonb
     WHERE id = ${noeud} AND liaisons IS NOT NULL
   `);
+}
+
+/** Réécrit les liaisons saisies d'un nœud (celles proposées par défaut, null, se recalculent seules). */
+async function reecrireLiaisons(db: Executeur, noeud: string, changer: (liaisons: Liaison[] | null) => Liaison[] | null): Promise<void> {
+  const { rows } = await db.execute<{ liaisons: Liaison[] | null }>(sql`SELECT liaisons FROM noeud WHERE id = ${noeud} FOR UPDATE`);
+  const avant = rows[0]?.liaisons ?? null;
+  if (!avant) return;
+  await db.execute(sql`UPDATE noeud SET liaisons = ${JSON.stringify(changer(avant))}::jsonb WHERE id = ${noeud}`);
 }
 
 /** Nœuds voisins d'un nœud (à l'autre bout de ses tronçons) : leurs voies bougent avec lui. */
@@ -163,8 +182,10 @@ export class ReseauService {
       if (de.id === vers.id) throw new BadRequestException('Un tronçon relie deux nœuds différents');
       const points = [de.position, ...nouveau.points.slice(1, -1), vers.position];
       const { rows } = await tx.execute<{ id: string }>(sql`
-        INSERT INTO troncon (noeud_de, noeud_vers, geom, nom, voies_avant, voies_arriere, vitesse_kmh, source)
+        INSERT INTO troncon (noeud_de, noeud_vers, geom, nom, voies_avant, voies_arriere, types_avant, types_arriere, vitesse_kmh, source)
         VALUES (${de.id}, ${vers.id}, ${ligneSql(points)}, ${nouveau.nom}, ${nouveau.voies_avant}, ${nouveau.voies_arriere},
+                ${typesSql(typesPour(nouveau.voies_avant, nouveau.types_avant))}::jsonb,
+                ${typesSql(typesPour(nouveau.voies_arriere, nouveau.types_arriere))}::jsonb,
                 ${nouveau.vitesse_kmh}, 'manuel')
         RETURNING id
       `);
@@ -184,8 +205,9 @@ export class ReseauService {
         voies_arriere: number;
         types_avant: TypeVoieReseau[] | null;
         types_arriere: TypeVoieReseau[] | null;
+        emprises: EmprisesTroncon | null;
       }>(sql`
-        SELECT source, noeud_de, noeud_vers, voies_avant, voies_arriere, types_avant, types_arriere
+        SELECT source, noeud_de, noeud_vers, voies_avant, voies_arriere, types_avant, types_arriere, emprises
         FROM troncon WHERE id = ${id} AND NOT supprime FOR UPDATE
       `);
       const troncon = rows[0];
@@ -219,6 +241,37 @@ export class ReseauService {
       if (modification.types_arriere !== undefined || modification.voies_arriere !== undefined) {
         champs.push(sql`types_arriere = ${typesSql(typesPour(nouveauxArriere, modification.types_arriere ?? typesArriere))}::jsonb`);
       }
+      let emprises = modification.inverser ? inverserEmprises(troncon.emprises) : troncon.emprises;
+      if (modification.voie) {
+        const { sens, rang } = modification.voie;
+        const nombre = sens === 'avant' ? avant : arriere;
+        const autre = sens === 'avant' ? arriere : avant;
+        const types = sens === 'avant' ? typesAvant : typesArriere;
+        const ajout = modification.voie.action === 'inserer';
+        if (ajout && nombre >= 9) throw new BadRequestException('9 voies au plus par sens');
+        if (!ajout && rang >= nombre) throw new BadRequestException('Aucune voie à ce rang');
+        if (!ajout && nombre - 1 + autre === 0) throw new BadRequestException('Au moins une voie dans un sens');
+        const position = Math.min(rang, nombre);
+        const nouveaux = modification.voie.action === 'inserer' ? insererType(nombre, types, position, modification.voie.type) : retirerType(nombre, types, rang);
+        const typesRetenus = typesSql(typesPour(nouveaux.length, nouveaux));
+        champs.push(
+          sens === 'avant'
+            ? sql`voies_avant = ${nouveaux.length}, types_avant = ${typesRetenus}::jsonb`
+            : sql`voies_arriere = ${nouveaux.length}, types_arriere = ${typesRetenus}::jsonb`,
+        );
+        // Les emprises et les liaisons saisies aux deux bouts suivent les rangs décalés.
+        const decalage = ajout ? 1 : -1;
+        emprises = decalerEmprises(emprises, sens, position, decalage);
+        const bouts = boutsDuSens(troncon, sens);
+        await reecrireLiaisons(tx, bouts.arrivent, (l) => decalerLiaisons(l, id, 'arrivent', position, decalage));
+        await reecrireLiaisons(tx, bouts.repartent, (l) => decalerLiaisons(l, id, 'repartent', position, decalage));
+      }
+      if (modification.emprise) {
+        const { sens, rang, polygone } = modification.emprise;
+        const { [cleEmprise(sens, rang)]: _retiree, ...autres } = emprises ?? {};
+        emprises = polygone ? { ...autres, [cleEmprise(sens, rang)]: polygone } : autres;
+      }
+      if (modification.voie || modification.emprise || modification.inverser) champs.push(sql`emprises = ${emprisesSql(emprises)}::jsonb`);
       if (modification.points) {
         // Les bouts restent sur leurs nœuds : seul le tracé entre eux change.
         champs.push(sql`geom = ST_SetPoint(ST_SetPoint(${ligneSql(modification.points)}, 0, ST_StartPoint(geom)), -1, ST_EndPoint(geom))`);
@@ -300,10 +353,17 @@ export class ReseauService {
     return this.lireNoeud(this.db, id);
   }
 
-  /** Coupe un tronçon au point le plus proche de `position` : nouveau nœud, voies et liaisons gardées. */
-  async couper(id: string, position: LonLat) {
+  /**
+   * Coupe un tronçon au point le plus proche de `position` : nouveau nœud, voies et liaisons
+   * gardées. Le nœud peut porter d'emblée une ligne d'arrêt à feux ou un passage piéton.
+   */
+  async couper(id: string, { position, feux, pieton }: CoupeTroncon) {
     const noeud = await this.db.transaction(async (tx) => {
       const coupe = await this.accrocher(tx, { type: 'troncon', id }, position);
+      const champs: SQL[] = [];
+      if (feux !== undefined) champs.push(sql`feux = ${feux}`);
+      if (pieton !== undefined) champs.push(sql`pieton = ${pieton}::traversee_pieton`);
+      if (champs.length > 0) await tx.execute(sql`UPDATE noeud SET ${sql.join(champs, sql`, `)} WHERE id = ${coupe.id}`);
       await rafraichirCarrefours(tx, [coupe.id, ...(await voisins(tx, coupe.id))]);
       return coupe.id;
     });
@@ -327,8 +387,9 @@ export class ReseauService {
         source: string;
         branche_de: string | null;
         branche_vers: string | null;
+        emprises: EmprisesTroncon | null;
       }>(sql`
-        SELECT id, noeud_de, noeud_vers, voies_avant, voies_arriere, types_avant, types_arriere, source, branche_de, branche_vers
+        SELECT id, noeud_de, noeud_vers, voies_avant, voies_arriere, types_avant, types_arriere, source, branche_de, branche_vers, emprises
         FROM troncon WHERE NOT supprime AND (noeud_de = ${id} OR noeud_vers = ${id})
       `);
       if (rows.length !== 2) throw new BadRequestException('Seul un nœud entre deux tronçons se retire');
@@ -346,6 +407,9 @@ export class ReseauService {
       const loinA = a!.versLeNoeud ? { noeud: a!.noeud_de, code: a!.branche_de } : { noeud: a!.noeud_vers, code: a!.branche_vers };
       const loinB = b!.versLeNoeud ? { noeud: b!.noeud_de, code: b!.branche_de } : { noeud: b!.noeud_vers, code: b!.branche_vers };
       if (loinA.noeud === loinB.noeud) throw new BadRequestException('Les deux tronçons relient les mêmes nœuds : impossible de les fusionner');
+      // Emprises des deux moitiés, dans le sens du tronçon fusionné (un tronçon retourné échange avant et arrière).
+      const orienter = (t: typeof a, versLeNoeud: boolean) => (t!.versLeNoeud === versLeNoeud ? t!.emprises : inverserEmprises(t!.emprises));
+      const emprises = { ...orienter(b, false), ...orienter(a, true) };
       await tx.execute(sql`
         UPDATE troncon SET
           geom = ST_RemoveRepeatedPoints(ST_MakeLine(
@@ -355,6 +419,7 @@ export class ReseauService {
           voies_avant = ${va.avant}, voies_arriere = ${va.arriere},
           types_avant = ${typesSql(va.types_avant)}::jsonb, types_arriere = ${typesSql(va.types_arriere)}::jsonb,
           branche_de = ${loinA.code}, branche_vers = ${loinB.code},
+          emprises = ${emprisesSql(emprises)}::jsonb,
           modifie_le = now()
         WHERE id = ${a!.id}
       `);
@@ -413,8 +478,11 @@ export class ReseauService {
       longueur: number;
       lon: number;
       lat: number;
+      points: LonLat[];
+      emprises: EmprisesTroncon | null;
     }>(sql`
       SELECT source, noeud_de, noeud_vers, f, ST_Length(geom::geography) AS longueur,
+             (ST_AsGeoJSON(geom)::json)->'coordinates' AS points, emprises,
              -- Coupé entre deux nœuds du même carrefour, le nouveau nœud en fait partie.
              (SELECT nd.carrefour_id FROM noeud nd JOIN noeud nv ON nv.id = t.noeud_vers
               WHERE nd.id = t.noeud_de AND nd.carrefour_id = nv.carrefour_id) AS carrefour,
@@ -432,18 +500,22 @@ export class ReseauService {
       INSERT INTO noeud (geom, carrefour_id) VALUES (${pointSql(position)}, ${coupe.carrefour}) RETURNING id
     `);
     const milieu = noeud[0]!.id;
+    // Chaque emprise reste sur la moitié où elle est posée.
+    const [emprisesDebut, emprisesSuite] = partagerEmprises(coupe.emprises, coupe.points, coupe.f);
     const { rows: suite } = await tx.execute<{ id: string }>(sql`
       INSERT INTO troncon (noeud_de, noeud_vers, geom, osm_way_id, osm_de, osm_vers, osm_tags, nom, highway, voies_avant, voies_arriere,
-                           types_avant, types_arriere, vitesse_kmh, source, modifie, branche_vers)
+                           types_avant, types_arriere, emprises, vitesse_kmh, source, modifie, branche_vers)
       SELECT ${milieu}, noeud_vers, ST_LineSubstring(geom, ${coupe.f}, 1), osm_way_id, osm_de, osm_vers, osm_tags, nom, highway,
-             voies_avant, voies_arriere, types_avant, types_arriere, vitesse_kmh, source, modifie, branche_vers
+             voies_avant, voies_arriere, types_avant, types_arriere, ${emprisesSql(emprisesSuite)}::jsonb, vitesse_kmh, source, modifie,
+             branche_vers
       FROM troncon WHERE id = ${accroche.id}
       RETURNING id
     `);
     // Au bout `vers`, c'est désormais la seconde moitié qui arrive.
     await renvoyerLiaisons(tx, coupe.noeud_vers, accroche.id, suite[0]!.id);
     await tx.execute(sql`
-      UPDATE troncon SET geom = ST_LineSubstring(geom, 0, ${coupe.f}), noeud_vers = ${milieu}, branche_vers = NULL
+      UPDATE troncon SET geom = ST_LineSubstring(geom, 0, ${coupe.f}), noeud_vers = ${milieu}, branche_vers = NULL,
+        emprises = ${emprisesSql(emprisesDebut)}::jsonb
       WHERE id = ${accroche.id}
     `);
     if (coupe.source === 'osm') await marquerModifie(tx, accroche.id);

@@ -6,7 +6,7 @@
  * le relais : le clic y cherche aussi la voie ou le nœud visé.
  */
 import { largeurTroncon, type LonLat } from '@voirie/engine'
-import type { ReseauGeoJson } from '@voirie/schema'
+import type { ReseauGeoJson, SensTroncon } from '@voirie/schema'
 import type { ExpressionSpecification, MapLayerMouseEvent, MapMouseEvent } from 'maplibre-gl'
 import { useEffect, useEffectEvent, useMemo, useState, type ReactNode } from 'react'
 import { Layer, Source, useMap } from 'react-map-gl/maplibre'
@@ -17,8 +17,11 @@ import { metresEnPixels } from './largeurs'
 import { ZOOM_VOIES } from './modeReseau'
 import type { Cible, Trace } from './trace'
 
-/** Outils de l'éditeur des voies (le dernier seulement avec un carrefour ouvert). */
-export type OutilReseau = 'selection' | 'tracer' | 'couper' | 'connecter' | 'noeuds'
+/**
+ * Outils de l'éditeur des voies (`noeuds` seulement avec un carrefour ouvert). Voie, passage et
+ * emprise : docs/pipeline-donnees.md, étapes 1 et 3.
+ */
+export type OutilReseau = 'selection' | 'tracer' | 'couper' | 'connecter' | 'noeuds' | 'voie' | 'passage' | 'emprise'
 
 /** Distance (px) à laquelle un clic accroche un nœud ou un tronçon. */
 const TOLERANCE_PX = 8
@@ -28,6 +31,8 @@ interface Props {
   outil: OutilReseau
   selection: string | null
   trace: Trace
+  /** Sommets de l'emprise de voie en cours de dessin ; null : aucune. */
+  emprise: LonLat[] | null
   /** Clic sur la carte : position et ce qui est sous le pointeur (nœud en priorité, puis tronçon). */
   onClic: (position: LonLat, cible: Cible, memePoint: (a: LonLat, b: LonLat) => boolean) => void
   /** Popup du tronçon sélectionné, ancrée au point cliqué. */
@@ -40,7 +45,7 @@ const largeur = (minimum: number, marge = 0) => metresEnPixels(['get', 'largeur_
 const auZoomDesVoies = (opacite: number): ExpressionSpecification => ['interpolate', ['linear'], ['zoom'], ZOOM_VOIES - 0.5, opacite, ZOOM_VOIES, 0]
 const sensUnique: ExpressionSpecification = ['any', ['==', ['get', 'voies_avant'], 0], ['==', ['get', 'voies_arriere'], 0]]
 
-export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }: Props) {
+export function CoucheReseau({ donnees, outil, selection, trace, emprise, onClic, popup }: Props) {
   const { current: carte } = useMap()
   const dessous = useCoucheDessous()
   const [curseur, setCurseur] = useState<LonLat | null>(null)
@@ -69,6 +74,10 @@ export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }
       const noeud = objets.find((f) => f.layer.id === ZONES.noeuds || f.layer.id === 'reseau-noeuds')
       if (noeud) return { type: 'noeud', id: noeud.properties.id as string }
       const voie = objets.find((f) => f.layer.id === 'reseau-voies' || f.layer.id === COUCHE_COEUR)
+      if (voie?.layer.id === 'reseau-voies') {
+        const { troncon, sens, rang } = voie.properties as { troncon: string; sens: SensTroncon; rang: number }
+        return { type: 'troncon', id: troncon, voie: { sens, rang } }
+      }
       if (voie) return { type: 'troncon', id: voie.properties.troncon as string }
       const troncon = objets.find((f) => f.layer.id === 'reseau-troncons')
       return troncon ? { type: 'troncon', id: troncon.properties.id as string } : null
@@ -94,20 +103,25 @@ export function CoucheReseau({ donnees, outil, selection, trace, onClic, popup }
   }, [carte])
 
   const apercu = useMemo(() => {
-    const points = trace.map((p) => p.position)
-    if (outil === 'tracer' && curseur && points.length > 0) points.push(curseur)
+    // Emprise : le polygone se referme sur le premier sommet ; tracé : la rue suit le pointeur.
+    const sommets: Array<{ position: LonLat; accroche: string }> = emprise
+      ? emprise.map((position) => ({ position, accroche: 'libre' }))
+      : trace.map((p) => ({ position: p.position, accroche: p.accroche.type }))
+    const points = sommets.map((p) => p.position)
+    if ((outil === 'tracer' || emprise) && curseur && points.length > 0) points.push(curseur)
+    if (emprise && points.length >= 3) points.push(points[0]!)
     return {
       type: 'FeatureCollection' as const,
       features: [
         ...(points.length >= 2 ? [{ type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: points } }] : []),
-        ...trace.map((p) => ({
+        ...sommets.map((p) => ({
           type: 'Feature' as const,
-          properties: { accroche: p.accroche.type },
+          properties: { accroche: p.accroche },
           geometry: { type: 'Point' as const, coordinates: p.position },
         })),
       ],
     }
-  }, [trace, curseur, outil])
+  }, [trace, emprise, curseur, outil])
 
   // Largeur de chaussée de chaque tronçon, pour le dessiner à sa largeur au sol.
   const troncons = useMemo(

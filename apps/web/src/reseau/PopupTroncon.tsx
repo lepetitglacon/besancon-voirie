@@ -3,8 +3,8 @@
  * vitesse, sens du tracé, coupe. Chaque changement est enregistré aussitôt.
  */
 import { Badge, Button, HStack, Input, Stack, Text } from '@chakra-ui/react'
-import { typesVoies, vitesseParDefaut } from '@voirie/engine'
-import type { ModificationTroncon, TypeVoie } from '@voirie/schema'
+import { largeurEmprise, typesVoies, vitesseParDefaut } from '@voirie/engine'
+import type { ModificationTroncon, SensTroncon, TypeVoie } from '@voirie/schema'
 import { useState } from 'react'
 import type { Troncon } from '../api'
 import { Aide, BarreOutils, Compteur, Message, PopupCarte, Section, Selecteur } from '../ds'
@@ -13,6 +13,7 @@ interface Props {
   troncon: Troncon
   enregistrement: { enCours: boolean; erreur: string | null }
   onModifier: (modification: ModificationTroncon) => void
+  /** Supprime (ou masque) le tronçon, après confirmation. */
   onSupprimer: () => void
   /** Coupe le tronçon là où on a cliqué : un nœud y est posé. */
   onCouper: () => void
@@ -86,11 +87,8 @@ export function PopupTroncon({ troncon, enregistrement, onModifier, onSupprimer,
             variant="plain"
             colorPalette="red"
             px="2"
-            onClick={() => {
-              const message =
-                t.source === 'osm' ? 'Masquer ce tronçon OSM ? Il ne reviendra pas à la régénération.' : 'Supprimer ce tronçon ?'
-              if (window.confirm(message)) onSupprimer()
-            }}
+            title="Suppr"
+            onClick={onSupprimer}
           >
             Supprimer
           </Button>
@@ -161,6 +159,35 @@ export function PopupTroncon({ troncon, enregistrement, onModifier, onSupprimer,
           />
         </HStack>
       </Section>
+      {t.emprises && Object.keys(t.emprises).length > 0 && (
+        <Section libelle="Emprises dessinées">
+          <Stack gap="1">
+            {Object.entries(t.emprises)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([cle, polygone]) => {
+                const [sens, rang] = cle.split(':') as [SensTroncon, string]
+                const largeur = largeurEmprise(polygone, troncon.geometry.coordinates)
+                return (
+                  <HStack key={cle} justify="space-between" textStyle="sm">
+                    <Text>
+                      {sens === 'avant' ? 'Tracé (>)' : 'Inverse (<)'}, voie {Number(rang) + 1}
+                      {largeur !== null && ` · ${largeur.toFixed(1).replace('.', ',')} m de large`}
+                    </Text>
+                    <Button
+                      variant="lien"
+                      size="xs"
+                      colorPalette="red"
+                      onClick={() => onModifier({ emprise: { sens, rang: Number(rang), polygone: null } })}
+                    >
+                      retirer
+                    </Button>
+                  </HStack>
+                )
+              })}
+          </Stack>
+          <Aide>Surface réelle de la voie, posée sur la photo (outil Emprise, E) : sa largeur part dans l’export SUMO.</Aide>
+        </Section>
+      )}
       {enregistrement.erreur && <Message ton="erreur">{enregistrement.erreur}</Message>}
     </PopupCarte>
   )

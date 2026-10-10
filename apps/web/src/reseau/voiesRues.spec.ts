@@ -12,7 +12,7 @@ const troncon = (id: string, de: string, vers: string, points: LonLat[], avant: 
   id,
   geometry: { type: 'LineString', coordinates: points },
   properties: {
-    id, nom: null, highway: null, voies_avant: avant, voies_arriere: arriere, types_avant: null, types_arriere: null, vitesse_kmh: null,
+    id, nom: null, highway: null, voies_avant: avant, voies_arriere: arriere, types_avant: null, types_arriere: null, vitesse_kmh: null, emprises: null,
     source: 'osm', modifie: false, noeud_de: de, noeud_vers: vers, carrefour_de: null, carrefour_vers: null, branche_de: null, branche_vers: null,
   } satisfies TronconResume,
 })

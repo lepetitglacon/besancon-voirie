@@ -1,6 +1,7 @@
 /** Contenu de la carte d'en-tête de l'éditeur des voies : aide, légende, semis OSM, export SUMO. */
 import { Box, Button, HStack, Kbd, Link, Stack, Text } from '@chakra-ui/react'
 import type { Bbox } from '@voirie/schema'
+import type { ReactNode } from 'react'
 import { api } from '../api'
 import { Aide, Message, Pastille } from '../ds'
 import type { OutilReseau } from './CoucheReseau'
@@ -22,9 +23,11 @@ interface Props {
   tronque: boolean
   bbox: Bbox | undefined
   generation: { enCours: boolean; onGenerer: (reinitialiser: boolean) => void }
+  /** Réglages de l'outil actif (rien pour un outil sans réglage). */
+  reglages: ReactNode
 }
 
-export function EnTeteReseau({ outil, visible, nbTroncons, tronque, bbox, generation }: Props) {
+export function EnTeteReseau({ outil, visible, nbTroncons, tronque, bbox, generation, reglages }: Props) {
   return (
     <Stack gap="2.5" mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
       <Aide>
@@ -35,8 +38,17 @@ export function EnTeteReseau({ outil, visible, nbTroncons, tronque, bbox, genera
           </>
         ) : outil === 'couper' ? (
           <>
-            Cliquez une rue pour y poser un nœud : ligne d’arrêt, passage piéton, début d’une voie de présélection. Les
-            voies et les liaisons sont gardées de part et d’autre.
+            Cliquez une rue pour y poser un nœud : ligne d’arrêt, passage piéton, début d’une voie de présélection, selon
+            les réglages. Les voies et les liaisons sont gardées de part et d’autre.
+          </>
+        ) : outil === 'voie' ? (
+          <>Cliquez une rue du côté du sens voulu : une voie s’y ajoute, ou s’en retire, selon les réglages.</>
+        ) : outil === 'passage' ? (
+          <>Cliquez une rue pour y poser un passage piéton, ou un nœud pour poser ou retirer le sien.</>
+        ) : outil === 'emprise' ? (
+          <>
+            Cliquez une voie (zoom 16 et plus), puis les coins de son marquage sur la photo ; <Kbd>Entrée</Kbd> ou un clic
+            sur le premier coin enregistre, <Kbd>⌫</Kbd> retire le dernier coin. Sa largeur réelle part dans l’export SUMO.
           </>
         ) : outil === 'connecter' ? (
           <>
@@ -47,10 +59,13 @@ export function EnTeteReseau({ outil, visible, nbTroncons, tronque, bbox, genera
           <>
             Tout le réseau, voie par voie à partir du zoom 16, sur la photo IGN. Glissez un nœud pour le caler, cliquez
             une rue ou un nœud pour ses réglages ; <Kbd>T</Kbd> trace une rue, <Kbd>X</Kbd> coupe une rue,{' '}
-            <Kbd>C</Kbd> relie les voies. Un carrefour se compose à partir de ses feux, puis s’ouvre d’un clic.
+            <Kbd>C</Kbd> relie les voies, <Kbd>L</Kbd> ajoute une voie, <Kbd>P</Kbd> un passage piéton, <Kbd>E</Kbd> dessine
+            l’emprise d’une voie ; <Kbd>Suppr</Kbd> retire la sélection, <Kbd>Ctrl Z</Kbd> annule. Un carrefour se
+            compose à partir de ses feux, puis s’ouvre d’un clic.
           </>
         )}
       </Aide>
+      {reglages}
       <HStack as="ul" gap="3" listStyleType="none" textStyle="xs" wrap="wrap">
         {LEGENDE.map((l) => (
           <HStack as="li" key={l.libelle} gap="1">
