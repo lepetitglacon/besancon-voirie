@@ -2,7 +2,7 @@ import { Badge, Box, Button } from '@chakra-ui/react'
 import type { LonLat } from '@voirie/engine'
 import type { Bbox, CarrefourResume, CarrefoursGeoJson, EmpriseIa, FeuResume, FeuxGeoJson } from '@voirie/schema'
 import { AttributionControl, type Map as CarteMapLibre, type MapGeoJSONFeature } from 'maplibre-gl'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from 'react'
 import Map, {
   Layer,
   Source,
@@ -15,6 +15,7 @@ import { CalqueCarrefour, type ApercuFeu, type ClicCalque, type FeuPlacable } fr
 import type { Poignee } from '../configuration/modele'
 import type { AffichageConfiguration } from '../configuration/ConfigurationCarrefour'
 import { Aide, BarreOutils, ControleZoom, PopupCarte, PopupSurCarte } from '../ds'
+import { CoucheMesure } from './CoucheMesure'
 import { coucheCarrefours, coucheFeux, coucheFeuxNonRejoues } from './couches'
 import { FondDeCarte, type OptionsFond } from './FondDeCarte'
 
@@ -99,8 +100,15 @@ interface Props {
   onClicCalque: (clic: ClicCalque) => void
   /** Reçoit l'élément où rendre le contenu de la popup de configuration (portail). */
   onCiblePopup: (cible: HTMLElement | null) => void
-  /** Clic droit : position, pour le menu contextuel. */
-  onMenuContextuel: (position: LonLat) => void
+  /** Clic droit sans glisser : position sur la carte et point de l'écran, pour le menu contextuel. */
+  onMenuContextuel: (position: LonLat, point: { x: number; y: number }) => void
+  /** Points de la mesure de distance en cours (null hors mesure) : un clic ajoute un point. */
+  mesure: LonLat[] | null
+  /** Point de la mesure visé (survol sur la carte ou dans la frise). */
+  mesureVisee: number | null
+  onViserMesure: (i: number | null) => void
+  onPointMesure: (position: LonLat) => void
+  onDeplacerPointMesure: (i: number, position: LonLat) => void
   /** Glisser-déposer dans l'éditeur de configuration. */
   onDeplacerPoignee: (poignee: Poignee, position: LonLat) => void
   onConnecter: (de: string, vers: string) => void
@@ -138,6 +146,53 @@ function Demarrage({ onEmprise }: { onEmprise: (bbox: Bbox, zoom: number) => voi
       carte.removeControl(attribution)
     }
   }, [current, onEmprise])
+  return null
+}
+
+/** Au-delà de ce déplacement (px), un clic droit est une rotation, pas une ouverture de menu. */
+const TOLERANCE_CLIC_DROIT = 4
+
+/**
+ * Rotation au clic droit façon Google Maps : le glisser horizontal tourne la carte autour du
+ * centre de l'écran, quelle que soit la place du curseur, et plus lentement que par défaut (0,8°/px).
+ * Options lues par MapLibre à la construction, absentes des types de react-map-gl.
+ */
+const ROTATION = { aroundCenter: false, rotateDegreesPerPixelMoved: 0.3 } as object
+
+/**
+ * Le menu contextuel s'ouvre au relâchement d'un clic droit resté sur place ; un clic droit
+ * glissé tourne ou incline la carte. Le menu natif du navigateur est bloqué.
+ */
+function ClicDroit({ onMenu }: { onMenu: (position: LonLat, point: { x: number; y: number }) => void }) {
+  const { current } = useMap()
+  const ouvrir = useEffectEvent(onMenu)
+  useEffect(() => {
+    const carte = current?.getMap()
+    if (!carte) return
+    const conteneur = carte.getCanvasContainer()
+    let depart: { x: number; y: number } | null = null
+    const appuyer = (e: MouseEvent) => {
+      if (e.button === 2) depart = { x: e.clientX, y: e.clientY }
+    }
+    const relacher = (e: MouseEvent) => {
+      if (e.button !== 2 || !depart) return
+      const bouge = Math.hypot(e.clientX - depart.x, e.clientY - depart.y) > TOLERANCE_CLIC_DROIT
+      depart = null
+      if (bouge) return
+      const cadre = conteneur.getBoundingClientRect()
+      const { lng, lat } = carte.unproject([e.clientX - cadre.left, e.clientY - cadre.top])
+      ouvrir([lng, lat], { x: e.clientX, y: e.clientY })
+    }
+    const bloquer = (e: MouseEvent) => e.preventDefault()
+    conteneur.addEventListener('mousedown', appuyer)
+    window.addEventListener('mouseup', relacher)
+    conteneur.addEventListener('contextmenu', bloquer)
+    return () => {
+      conteneur.removeEventListener('mousedown', appuyer)
+      window.removeEventListener('mouseup', relacher)
+      conteneur.removeEventListener('contextmenu', bloquer)
+    }
+  }, [current])
   return null
 }
 
@@ -192,12 +247,13 @@ export function CarteCarrefours(props: Props) {
 
   const [bulle, setBulle] = useState<Bulle>()
   const [survol, setSurvol] = useState(false)
+  const [glisseMesure, setGlisseMesure] = useState(false)
   const [rectangle, setRectangle] = useState<Rectangle | null>(null)
   const depart = useRef<{ x: number; y: number } | null>(null)
   const majEnfoncee = useMajEnfoncee()
   // Rectangle tracé à la souris : feux à ajouter au carrefour composé, ou zone de la photo IA.
   const zoneIa = configuration?.cadreIa != null
-  const traceActif = zoneIa || (edition !== null && (edition.modeRectangle || majEnfoncee))
+  const traceActif = props.mesure === null && (zoneIa || (edition !== null && (edition.modeRectangle || majEnfoncee)))
 
   const commencerTrace = (evenement: MapMouseEvent) => {
     if (!traceActif) return
@@ -248,6 +304,11 @@ export function CarteCarrefours(props: Props) {
   const cliquer = (evenement: MapLayerMouseEvent) => {
     const objet = evenement.features?.[0]
     const { lng: longitude, lat: latitude } = evenement.lngLat
+    if (props.mesure) {
+      // Un clic sur un point existant ne pose pas de nouveau point.
+      if (evenement.target.queryRenderedFeatures(evenement.point, { layers: ['mesure-points'] }).length) return
+      return props.onPointMesure([longitude, latitude])
+    }
     const vise = carrefourVise(objet)
     if (props.tempsReel || props.reseauActif) {
       if (vise) props.onOuvrir(vise)
@@ -283,7 +344,18 @@ export function CarteCarrefours(props: Props) {
       hash
       attributionControl={false}
       interactiveLayerIds={['feux', 'carrefours', 'feux-temps-reel', ...(props.couchesReseau ?? [])]}
-      cursor={props.curseur ?? (traceActif ? 'crosshair' : survol ? 'pointer' : 'grab')}
+      cursor={
+        props.curseur ??
+        (glisseMesure
+          ? 'grabbing'
+          : props.mesure && props.mesureVisee !== null
+            ? 'grab'
+            : traceActif || props.mesure
+              ? 'crosshair'
+              : survol
+                ? 'pointer'
+                : 'grab')
+      }
       dragPan={!traceActif}
       boxZoom={edition === null}
       onMouseDown={commencerTrace}
@@ -292,10 +364,11 @@ export function CarteCarrefours(props: Props) {
       onMouseEnter={() => setSurvol(true)}
       onMouseLeave={() => setSurvol(false)}
       onClick={cliquer}
-      onContextMenu={(evenement) => props.onMenuContextuel([evenement.lngLat.lng, evenement.lngLat.lat])}
+      {...ROTATION}
       onMoveEnd={(evenement) => props.onEmprise(emprise(evenement.target), evenement.target.getZoom())}
     >
       <Demarrage onEmprise={props.onEmprise} />
+      <ClicDroit onMenu={props.onMenuContextuel} />
       <ControleZoom position="absolute" top="4" right="4" zIndex="1" />
       <FondDeCarte {...fond} />
       {children}
@@ -334,6 +407,15 @@ export function CarteCarrefours(props: Props) {
                 : coucheFeux(edition?.selection ?? [], edition?.carrefourId ?? null, edition !== null))}
           />
         </Source>
+      )}
+      {props.mesure && (
+        <CoucheMesure
+          points={props.mesure}
+          visee={props.mesureVisee}
+          onViser={props.onViserMesure}
+          onDeplacer={props.onDeplacerPointMesure}
+          onGlisse={setGlisseMesure}
+        />
       )}
       {configuration && (
         <CalqueCarrefour

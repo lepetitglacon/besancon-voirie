@@ -17,6 +17,7 @@ import {
   COTE_PHOTO_IA_MIN_M,
   ConfigurationBranches,
   type AnalyseIa,
+  type EssaiIa,
   type Anneau,
   type Branche,
   type BranchesCarrefour,
@@ -293,10 +294,16 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
     demandeIa.mutate(cadrage.emprise ?? undefined)
   }
   const chargementIa = useMutation({
-    mutationFn: async (id: string) => {
-      const analyse = await api.analyseIa(id)
+    /** Proposition retenue d'une analyse, ou celle d'un essai précis (un modèle), pour comparer. */
+    mutationFn: async (source: { analyse: string } | { essai: string }) => {
+      if ('essai' in source) {
+        const essai = await api.essaiIa(source.essai)
+        if (!essai.resultat) throw new Error('Proposition IA indisponible')
+        return essai.resultat
+      }
+      const analyse = await api.analyseIa(source.analyse)
       if (!analyse.resultat) throw new Error('Proposition IA indisponible')
-      await api.consulterAnalyseIa(id)
+      await api.consulterAnalyseIa(source.analyse)
       return analyse.resultat
     },
     onSuccess: async (proposition) => {
@@ -318,15 +325,15 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   })
   const chargerIa = chargementIa.mutate
   const chargerAnalyse = useCallback(
-    (id: string) => {
+    (source: { analyse: string } | { essai: string }) => {
       if (!lireBrouillons(carrefour.id)?.branches || window.confirm('Remplacer les modifications non enregistrées par la proposition IA ?')) {
-        chargerIa(id)
+        chargerIa(source)
       }
     },
     [chargerIa, carrefour.id],
   )
   useEffect(() => {
-    if (ouvrirAnalyseIa) chargerAnalyse(ouvrirAnalyseIa.id)
+    if (ouvrirAnalyseIa) chargerAnalyse({ analyse: ouvrirAnalyseIa.id })
   }, [ouvrirAnalyseIa, chargerAnalyse])
 
   /** Import d'un JSON `ConfigurationBranches` (le corps d'un `PUT /branches`), validé par le même schéma. */
@@ -866,7 +873,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
           />
         )}
         {analyseCarrefour && !(analyseCarrefour.statut === 'terminee' && analyseCarrefour.consultee_le) && (
-          <SuiviAnalyse analyse={analyseCarrefour} chargement={chargementIa.isPending} onCharger={() => chargerAnalyse(analyseCarrefour.id)} />
+          <SuiviAnalyse analyse={analyseCarrefour} chargement={chargementIa.isPending} onCharger={() => chargerAnalyse({ analyse: analyseCarrefour.id })} />
         )}
         {analyseIa && (
           <Stack gap="1" mt="2" pt="2" borderTopWidth="1px" borderColor="border.muted">
@@ -881,6 +888,13 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
             )}
           </Stack>
         )}
+        <EssaisIa
+          carrefourId={carrefour.id}
+          statutAnalyse={analyseCarrefour?.statut}
+          actif={analyseIa?.essai_id}
+          chargement={chargementIa.isPending}
+          onCharger={(essai) => chargerAnalyse({ essai })}
+        />
         {erreur && (
           <Message ton="erreur" mt="1">
             {erreur.message}
@@ -1135,6 +1149,63 @@ function CadrageIa({ dimensions, auto, envoi, onAuto, onAnnuler, onLancer }: Pro
           Lancer l’analyse (Entrée)
         </Button>
       </HStack>
+    </Stack>
+  )
+}
+
+const LIBELLES_ESSAI: Record<EssaiIa['statut'], string> = { terminee: 'ok', echec: 'échec', delai: 'délai dépassé' }
+
+/** Essais IA du carrefour (un par modèle et par analyse) : temps, coût, tokens, et proposition de chacun. */
+function EssaisIa({
+  carrefourId,
+  statutAnalyse,
+  actif,
+  chargement,
+  onCharger,
+}: {
+  carrefourId: string
+  /** Rafraîchit la liste quand l'analyse en cours se termine. */
+  statutAnalyse?: AnalyseIa['statut']
+  actif?: string
+  chargement: boolean
+  onCharger: (essai: string) => void
+}) {
+  const [ouvert, setOuvert] = useState(false)
+  const { data: essais = [] } = useQuery({
+    queryKey: ['essais-ia', carrefourId, statutAnalyse],
+    queryFn: () => api.essaisIa(carrefourId),
+  })
+  if (essais.length === 0) return null
+  return (
+    <Stack gap="1" mt="2" pt="2" borderTopWidth="1px" borderColor="border.muted">
+      <Button size="xs" variant="ghost" alignSelf="start" onClick={() => setOuvert((o) => !o)} aria-expanded={ouvert}>
+        {ouvert ? '▾' : '▸'} Comparer les essais IA ({essais.length})
+      </Button>
+      {ouvert && (
+        <Stack gap="1" maxH="220px" overflowY="auto">
+          {essais.map((e) => (
+            <HStack key={e.id} gap="2" title={e.erreur ?? e.dossier ?? undefined}>
+              <Stack gap="0" flex="1">
+                <Aide color="fg">
+                  {e.modele_reel ?? e.modele} · {e.effort} · {LIBELLES_ESSAI[e.statut]}
+                  {e.id === actif && ' · chargé'}
+                </Aide>
+                <Aide>
+                  {new Date(e.cree_le).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })} · {Math.round(e.duree_s)} s
+                  {e.cout_usd !== null && ` · ${e.cout_usd.toFixed(2)} $`}
+                  {e.tokens_sortie !== null && ` · ${e.tokens_sortie} tokens générés`}
+                  {e.erreur && ` · ${e.erreur}`}
+                </Aide>
+              </Stack>
+              {e.statut === 'terminee' && (
+                <Button size="xs" variant="outline" onClick={() => onCharger(e.id)} loading={chargement} disabled={e.id === actif}>
+                  Charger
+                </Button>
+              )}
+            </HStack>
+          ))}
+        </Stack>
+      )}
     </Stack>
   )
 }

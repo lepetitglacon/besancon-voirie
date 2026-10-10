@@ -125,7 +125,7 @@ describe('consigne', () => {
     expect(e0.debut).toEqual({ x: Math.round(attendu.x), y: Math.round(attendu.y) });
   });
 
-  it('should give the image path, scale and OSM data', () => {
+  it('should give the image scale and OSM data', () => {
     const texte = consigne(
       {
         cadre,
@@ -134,9 +134,8 @@ describe('consigne', () => {
         feux: [{ id: '00000000-0000-4000-8000-000000000001', numero: 1, type: 'vehicule', position: centre, tags: { highway: 'traffic_signals', note: 'x' } }],
         voiesOsm: [],
       },
-      '/tmp/orthophoto.jpg',
     );
-    expect(texte).toContain('/tmp/orthophoto.jpg');
+    expect(texte).toContain('Image (jointe)');
     expect(texte).toContain('0.117 m/pixel');
     expect(texte).toContain('"numero":"F1"');
     expect(texte).not.toContain('note'); // tags inutiles écartés
@@ -240,7 +239,7 @@ describe('giratoire : nœuds lus sur la photo', () => {
   });
 
   it('should explain the node model in the instructions', () => {
-    const texte = consigne({ cadre, giratoire: true, detection: giratoire, feux: [], voiesOsm: [] }, '/tmp/orthophoto.jpg');
+    const texte = consigne({ cadre, giratoire: true, detection: giratoire, feux: [], voiesOsm: [] });
     expect(texte).toContain('## Giratoire');
     expect(texte).toContain('quatre nœuds au moins');
     expect(texte).toContain('à deux nœuds différents');

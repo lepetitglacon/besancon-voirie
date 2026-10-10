@@ -7,6 +7,7 @@ import { FeuxModule } from './feux/feux.module.js';
 import { HealthController } from './health/health.controller.js';
 import { LignesModule } from './lignes/lignes.module.js';
 import { ProgrammeModule } from './programme/programme.module.js';
+import { SumoModule } from './sumo/sumo.module.js';
 import { TempsReelModule } from './temps-reel/temps-reel.module.js';
 import { ReseauModule } from './reseau/reseau.module.js';
 import { TramModule } from './tram/tram.module.js';
@@ -24,6 +25,7 @@ import { TramModule } from './tram/tram.module.js';
     TramModule,
     TempsReelModule,
     ReseauModule,
+    SumoModule,
   ],
   controllers: [HealthController],
 })

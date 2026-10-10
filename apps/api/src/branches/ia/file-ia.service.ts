@@ -9,10 +9,11 @@ import {
   type OnApplicationShutdown,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { AnalyseIa, AnalyseIaDetail, EmpriseIa } from '@voirie/schema';
+import { randomUUID } from 'node:crypto';
+import type { AnalyseIa, AnalyseIaDetail, DetectionBranchesIa, EmpriseIa, EssaiIa, EssaiIaDetail } from '@voirie/schema';
 import { sql, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../../db/db.module.js';
-import { IaService, TAILLE_PHOTO_PX } from './ia.service.js';
+import { DELAI_DEFAUT_S, IaService, TAILLE_PHOTO_PX, type EssaiCalcule } from './ia.service.js';
 import { cadreEmprise, refusEmprise } from './photo.js';
 
 /** Analyses lancées en même temps (IA_PARALLELE) : chacune est un `claude -p` sur le serveur. */
@@ -34,6 +35,10 @@ const COLONNES = sql`
   CASE WHEN a.statut = 'en_attente' THEN
     (SELECT count(*)::int FROM analyse_ia p WHERE p.statut = 'en_attente' AND p.demandee_le <= a.demandee_le)
   END AS rang`;
+
+const COLONNES_ESSAI = sql`
+  e.id, e.analyse_id, e.carrefour_id, e.modele, e.modele_reel, e.effort, e.statut, e.duree_s, e.cout_usd,
+  e.tokens_entree, e.tokens_sortie, e.erreur, e.dossier, to_json(e.cree_le) AS cree_le`;
 
 /**
  * File d'attente des propositions « OSM + IA », en base pour survivre à un redémarrage de
@@ -112,6 +117,23 @@ export class FileIaService implements OnApplicationBootstrap, OnApplicationShutd
       SELECT ${COLONNES}, a.resultat FROM analyse_ia a JOIN carrefour c ON c.id = a.carrefour_id WHERE a.id = ${id}
     `);
     if (!rows[0]) throw new NotFoundException('Analyse inconnue');
+    const { rows: essais } = await this.db.execute<Ligne<EssaiIa>>(sql`
+      SELECT ${COLONNES_ESSAI} FROM essai_ia e WHERE e.analyse_id = ${id} ORDER BY e.cree_le, e.modele
+    `);
+    return { ...rows[0], essais };
+  }
+
+  /** Essais d'un carrefour, du plus récent au plus ancien : ils restent quand l'analyse est retirée. */
+  async essais(carrefourId: string): Promise<EssaiIa[]> {
+    const { rows } = await this.db.execute<Ligne<EssaiIa>>(sql`
+      SELECT ${COLONNES_ESSAI} FROM essai_ia e WHERE e.carrefour_id = ${carrefourId} ORDER BY e.cree_le DESC LIMIT 100
+    `);
+    return rows;
+  }
+
+  async lireEssai(id: string): Promise<EssaiIaDetail> {
+    const { rows } = await this.db.execute<Ligne<EssaiIaDetail>>(sql`SELECT ${COLONNES_ESSAI}, e.resultat FROM essai_ia e WHERE e.id = ${id}`);
+    if (!rows[0]) throw new NotFoundException('Essai inconnu');
     return rows[0];
   }
 
@@ -129,7 +151,7 @@ export class FileIaService implements OnApplicationBootstrap, OnApplicationShutd
   }
 
   private async resume(id: string): Promise<AnalyseIa> {
-    const { resultat: _resultat, ...analyse } = await this.lire(id);
+    const { resultat: _resultat, essais: _essais, ...analyse } = await this.lire(id);
     return analyse;
   }
 
@@ -157,6 +179,32 @@ export class FileIaService implements OnApplicationBootstrap, OnApplicationShutd
     }
   }
 
+  /**
+   * Enregistre un essai par modèle ; renvoie la proposition retenue (celle du premier modèle
+   * d'IA_MODELES qui a réussi), marquée de son analyse et de son essai, ou null.
+   */
+  private async enregistrerEssais(
+    analyseId: string,
+    carrefourId: string,
+    essais: readonly EssaiCalcule[],
+    dossier: string | null,
+  ): Promise<DetectionBranchesIa | null> {
+    let retenu: DetectionBranchesIa | null = null;
+    for (const e of essais) {
+      const id = randomUUID();
+      const resultat = e.resultat && { ...e.resultat, ia: { ...e.resultat.ia, analyse_id: analyseId, essai_id: id } };
+      retenu ??= resultat;
+      await this.db.execute(sql`
+        INSERT INTO essai_ia (id, analyse_id, carrefour_id, modele, modele_reel, effort, statut, duree_s, cout_usd,
+                              tokens_entree, tokens_sortie, resultat, erreur, dossier)
+        VALUES (${id}, ${analyseId}, ${carrefourId}, ${e.modele}, ${e.modele_reel}, ${e.effort}, ${e.statut}, ${e.duree_s},
+                ${e.cout_usd}, ${e.tokens_entree}, ${e.tokens_sortie}, ${resultat ? JSON.stringify(resultat) : null}::jsonb,
+                ${e.erreur}, ${dossier})
+      `);
+    }
+    return retenu;
+  }
+
   /** Prend la plus ancienne analyse en attente et la mène à son terme. Faux si la file est vide. */
   private async suivante(): Promise<boolean> {
     const { rows } = await this.db.execute<{ id: string; carrefour_id: string; emprise: EmpriseIa | null }>(sql`
@@ -169,9 +217,11 @@ export class FileIaService implements OnApplicationBootstrap, OnApplicationShutd
     const analyse = rows[0];
     if (!analyse) return false;
     try {
-      const resultat = await this.ia.analyser(analyse.carrefour_id, analyse.emprise);
+      const { essais, dossier } = await this.ia.analyser(analyse.carrefour_id, analyse.emprise);
+      const retenu = await this.enregistrerEssais(analyse.id, analyse.carrefour_id, essais, dossier);
+      if (!retenu) throw new Error(messageEchec(essais, Number(this.config.get<string>('IA_DELAI_S') || DELAI_DEFAUT_S)));
       await this.db.execute(sql`
-        UPDATE analyse_ia SET statut = 'terminee', resultat = ${JSON.stringify(resultat)}::jsonb, finie_le = now()
+        UPDATE analyse_ia SET statut = 'terminee', resultat = ${JSON.stringify(retenu)}::jsonb, finie_le = now()
         WHERE id = ${analyse.id}
       `);
     } catch (erreur) {
@@ -183,6 +233,17 @@ export class FileIaService implements OnApplicationBootstrap, OnApplicationShutd
     }
     return true;
   }
+}
+
+/** Ce qui est montré quand aucun modèle n'a fait de proposition. */
+export function messageEchec(essais: readonly Pick<EssaiCalcule, 'modele' | 'statut' | 'erreur'>[], delaiS: number): string {
+  if (essais.length > 0 && essais.every((e) => e.statut === 'delai')) {
+    return (
+      `L'IA n'a pas répondu en ${delaiS} s (${essais.map((e) => e.modele).join(', ')}). C'est anormal pour une seule photo : ` +
+      'réessayez, et si ça se reproduit vérifiez que Claude Code est connecté sur le serveur (claude -p).'
+    );
+  }
+  return essais.map((e) => `${e.modele} : ${e.erreur ?? 'sans proposition'}`).join(' ; ') || 'Aucun modèle lancé (IA_MODELES)';
 }
 
 /** `db.execute` attend un type indexable ; les interfaces partagées ne le sont pas. */

@@ -22,7 +22,7 @@ Hors périmètre : déploiement sur le VPS.
 | `drizzle-kit migrate` compare les dates | Il n'applique que les migrations dont le `when` (journal) est **postérieur à la dernière appliquée**. Une migration plus ancienne est ignorée **sans message**. |
 | Chaîne de snapshots | Chaque `meta/<tag>_snapshot.json` décrit le schéma complet et pointe sur le précédent (`prevId`). Deux branches qui génèrent chacune une migration à partir du même parent produisent deux snapshots « frères » : le prochain `db:generate` se base sur le dernier du journal, qui ignore les changements de l'autre branche, et régénère ou supprime du DDL déjà existant. |
 | Migration déjà appliquée = figée | Drizzle ne rejoue pas une migration modifiée après application (il ne regarde que `created_at`). Modifier ou re-dater une migration déjà appliquée sur la base du worktree impose de **recréer cette base**. |
-| Base de worktree vide au départ | Seul le schéma est créé : pas de feux, pas de carrefours composés à la main. Les données saisies dans un worktree **ne partent pas au merge** (seul le code part). |
+| Base de worktree = copie de `voirie` | À sa création, la base du worktree reçoit tout `voirie` (schéma, données, journal des migrations), puis les migrations de la branche. Copie faite une seule fois : ensuite les deux bases vivent séparément, et les données saisies dans un worktree **ne partent pas au merge** (seul le code part). |
 | SRID perdu par drizzle-kit 0.31 | Chaque migration générée doit être corrigée en `geometry(Point, 4326)` / `geometry(LineString, 4326)`, y compris après une régénération. |
 
 ## Prérequis
@@ -116,33 +116,24 @@ Puis `start` dans le manager.
 `3400 + slot` ; `curl http://localhost:<port web>/api/tram/historique/etat` renvoie
 `"collecteActive":false`.
 
-### Étape 3 — Remplir la base du worktree
+### Étape 3 — Données du worktree (automatique)
 
-Au choix :
+Rien à faire : au premier `start`, [prepare-db.ts](../apps/api/scripts/prepare-db.ts) crée
+`voirie_wt_<nom>` en copiant `voirie` en entier (`pg_dump | pg_restore` dans le conteneur),
+retire de la copie les analyses IA `en_attente` / `en_cours` de `main` (le worktree les
+relancerait et les facturerait), puis `drizzle-kit migrate` applique les migrations de la branche.
+La base de test `voirie_wt_<nom>_test` reste vide.
 
-- **Données OSM seules** (feux, voies, tram ; aucun carrefour composé), depuis le worktree :
+**Résultat attendu** : dans les logs, `copie de voirie terminée`, puis la carte du worktree
+affiche les mêmes feux et carrefours que `main`.
 
-  ```bash
-  pnpm osm:import
-  ```
-
-- **Copie des données de `main`** (carrefours composés compris), depuis n'importe quel checkout.
-  Remplacer `voirie_wt_mon_wt` par le nom affiché à l'étape 2 :
-
-  ```bash
-  docker compose exec -T db sh -c 'pg_dump -U voirie -Fc --data-only --exclude-schema=drizzle voirie | pg_restore -U voirie -d voirie_wt_mon_wt --data-only --disable-triggers'
-  ```
-
-  À faire juste après la création, tant que la base du worktree a le même schéma que `main`.
-  La copie emporte la file `analyse_ia` : les demandes `en_attente` / `en_cours` de `main`
-  seraient relancées (et facturées) par le worktree. Les annuler dans la base du worktree
-  avant de le relancer :
-
-  ```bash
-  docker compose exec db psql -U voirie -d voirie_wt_mon_wt -c "DELETE FROM analyse_ia WHERE statut IN ('en_attente', 'en_cours')"
-  ```
-
-**Résultat attendu** : la carte du worktree affiche les feux.
+- **Refus** : `Copie de voirie impossible : drizzle-kit migrate y ignorerait …`. La branche a des
+  migrations datées avant la dernière de `main` : elles seraient sautées sur la copie. Fusionner
+  `main` dans la branche et re-dater ses migrations (étape 5), puis relancer. Rien n'est créé
+  tant que la copie est refusée.
+- **Base vide voulue** (schéma seul) : `VOIRIE_COPIE=0` dans le `.env` du worktree avant le
+  premier `start`, puis `pnpm osm:import` depuis le worktree pour les données OSM.
+- **Recopier** plus tard les données de `main` : recréer la base (étape 7).
 
 ### Étape 4 — Écrire une migration dans le worktree
 
@@ -177,7 +168,7 @@ migration de la branche :
 2. relancer `pnpm --filter api db:generate` : une seule migration, datée de maintenant, basée sur
    le snapshot de `main` ;
 3. recorriger le SRID ;
-4. recréer la base du worktree (étape 7) puis `pnpm db:prepare` et refaire l'étape 3.
+4. recréer la base du worktree (étape 7) puis relancer le worktree : `db:prepare` recopie `voirie` (étape 3).
 
 Si seule `main` a de nouvelles migrations (rien côté branche) : rien à régénérer, `pnpm db:migrate`.
 
@@ -205,7 +196,8 @@ worktree dans le manager, puis :
 docker compose exec db psql -U voirie -d postgres -c 'DROP DATABASE voirie_wt_mon_wt' -c 'DROP DATABASE voirie_wt_mon_wt_test'
 ```
 
-Relancer le worktree : `db:prepare` recrée les deux bases et applique tout le journal.
+Relancer le worktree : `db:prepare` recopie `voirie` dans la base de développement, recrée la
+base de test, et applique les migrations de la branche.
 
 ### Étape 8 — Merger dans `main` puis migrer `voirie`
 
@@ -241,11 +233,18 @@ supprimées avec le worktree).
   `VOIRIE_WORKTREE_SANDBOX` absent → vérifier `extraEnv` du projet et que le `.env` est bien copié.
 - Si deux worktrees modifient la même table → le conflit ne se voit qu'au merge de `schema.ts` ;
   merger `main` souvent dans les branches longues.
+- Si une analyse IA reste « en attente » dans un worktree → `IA_PARALLELE=0` (réglage par
+  défaut des worktrees) : la file n'a aucun travailleur → mettre `IA_PARALLELE=2` dans le `.env`
+  du worktree puis le relancer ; les demandes en attente partent au démarrage.
+- Si une analyse IA passe en `echec` avec « OAuth session expired » → le CLI `claude` de la
+  machine n'est plus connecté (même erreur hors du manager) → se reconnecter dans un terminal
+  (`claude`, puis `/login`) et relancer l'analyse depuis la carte.
 - `pnpm db:psql` ouvre toujours `voirie` : `\c voirie_wt_mon_wt` pour changer de base.
 
 ## Journal
 
 - 2026-09-27 — création
 - 2026-09-27 — inventaire des appels extérieurs (étape 1), file IA copiée avec les données (étape 3)
+- 2026-09-27 — copie automatique de `voirie` à la création de la base d'un worktree (étape 3)
 - 2026-09-27 — projet créé dans le manager ; collecte tram et file IA coupées par défaut dans les worktrees
 - 2026-09-27 — premier worktree `essai-wtm` testé : port de l'API corrigé (`WEB_PORT`), copie manuelle du cache OSM (`seed` non géré)

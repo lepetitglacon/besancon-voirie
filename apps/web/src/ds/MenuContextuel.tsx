@@ -6,19 +6,41 @@ export type EntreeMenu =
   | { type: 'separateur' }
 
 interface Props {
-  /** Zone où le clic droit ouvre le menu (la carte). */
-  children: ReactNode
+  /** Point de l'écran où ouvrir le menu (coordonnées client) ; null : menu fermé. */
+  point: { x: number; y: number } | null
   /** Première ligne du menu, en police à chasse fixe : coordonnées du clic. */
   entete?: ReactNode
   entrees: EntreeMenu[]
   onChoisir: (valeur: string) => void
+  onFermer: () => void
 }
 
-/** Clic droit : actions rapides à l'emplacement du curseur, avec leurs raccourcis. */
-export function MenuContextuel({ children, entete, entrees, onChoisir }: Props) {
+/**
+ * Clic droit : actions rapides à l'emplacement du curseur, avec leurs raccourcis. L'ouverture est
+ * pilotée par la carte (clic droit sans glisser), pas par l'événement `contextmenu` : sous Linux,
+ * il part dès l'appui et ouvrait le menu au début d'une rotation.
+ */
+export function MenuContextuel({ point, entete, entrees, onChoisir, onFermer }: Props) {
   return (
-    <Menu.Root size="md" onSelect={(e) => onChoisir(e.value)}>
-      <Menu.ContextTrigger asChild>{children}</Menu.ContextTrigger>
+    <Menu.Root
+      size="md"
+      open={point !== null}
+      onOpenChange={(e) => !e.open && onFermer()}
+      onSelect={(e) => onChoisir(e.value)}
+      positioning={{ placement: 'bottom-start', gutter: 2 }}
+    >
+      {/* Ancre invisible, posée au point du clic. */}
+      <Menu.Trigger asChild>
+        <chakra.span
+          position="fixed"
+          w="0"
+          h="0"
+          pointerEvents="none"
+          aria-hidden
+          tabIndex={-1}
+          style={{ left: point?.x ?? 0, top: point?.y ?? 0 }}
+        />
+      </Menu.Trigger>
       <Portal>
         <Menu.Positioner>
           <Menu.Content minW="250px">

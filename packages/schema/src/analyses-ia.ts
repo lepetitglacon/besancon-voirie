@@ -51,5 +51,37 @@ export interface AnalyseIa {
 }
 
 export interface AnalyseIaDetail extends AnalyseIa {
+  /** Proposition retenue : celle du premier modèle d'IA_MODELES qui a réussi. */
+  resultat: DetectionBranchesIa | null;
+  /** Un essai par modèle lancé, dans l'ordre d'IA_MODELES, pour comparer. */
+  essais: EssaiIa[];
+}
+
+/** `delai` : le modèle n'a pas répondu dans IA_DELAI_S. */
+export const StatutEssaiIa = z.enum(['terminee', 'echec', 'delai']);
+export type StatutEssaiIa = z.infer<typeof StatutEssaiIa>;
+
+/** Un modèle lancé sur la photo d'une analyse, sans sa proposition. */
+export interface EssaiIa {
+  id: string;
+  analyse_id: string | null;
+  carrefour_id: string;
+  /** Modèle demandé (alias d'IA_MODELES). */
+  modele: string;
+  /** Modèle qui a répondu (nom complet). */
+  modele_reel: string | null;
+  effort: string;
+  statut: StatutEssaiIa;
+  duree_s: number;
+  cout_usd: number | null;
+  tokens_entree: number | null;
+  tokens_sortie: number | null;
+  erreur: string | null;
+  /** Photo, consigne et sortie brute gardées sur le serveur (IA_GARDER_FICHIERS=true). */
+  dossier: string | null;
+  cree_le: string;
+}
+
+export interface EssaiIaDetail extends EssaiIa {
   resultat: DetectionBranchesIa | null;
 }

@@ -20,6 +20,7 @@ import {
   BarreOutils,
   Bascule,
   CarteEnTete,
+  Curseur,
   MenuContextuel,
   Message,
   ModeCouleur,
@@ -33,10 +34,16 @@ import { useAnalysesIa, useNotificationsIa } from './configuration/analysesIa'
 import { PanneauEdition, type Edition } from './edition/PanneauEdition'
 import { CarteCarrefours } from './map/CarteCarrefours'
 import { CouchePertes } from './map/CouchePertes'
+import { PanneauMesure } from './map/PanneauMesure'
+import { useMesures } from './map/useMesures'
 import { CoucheFeuxTempsReel } from './map/CoucheFeuxTempsReel'
 import { CoucheTrams, type CouchesTram } from './map/CoucheTrams'
 import type { OptionsFond } from './map/FondDeCarte'
 import { usePreference } from './preferences'
+import { CoucheFlux } from './sumo/CoucheFlux'
+import { CoucheSumo } from './sumo/CoucheSumo'
+import { CoucheVehicules } from './sumo/CoucheVehicules'
+import { ModeSumo } from './sumo/ModeSumo'
 import { FicheTempsReel } from './tempsReel/FicheTempsReel'
 import { FIABILITES } from './tempsReel/libelles'
 import { carrefoursSurLeTrace, type ContexteTram } from './tempsReel/priorite'
@@ -59,9 +66,9 @@ const RAFRAICHISSEMENT_FEUX_MS = 60_000
 /**
  * « Temps réel » : la vue grand public, feux et trams à l'heure réelle, en lecture seule.
  * « Édition » : composition et configuration des carrefours. « Données brutes » : toutes les
- * couches, une par une.
+ * couches, une par une. « SUMO » : les essais de simulation de la ville, en lecture seule.
  */
-type Mode = 'temps_reel' | 'edition' | 'brut'
+type Mode = 'temps_reel' | 'edition' | 'brut' | 'sumo'
 
 interface CouchesBrutes extends CouchesTram {
   carrefours: boolean
@@ -69,7 +76,15 @@ interface CouchesBrutes extends CouchesTram {
   pertes: boolean
 }
 
-const FOND_DEFAUT: OptionsFond = { fond: 'satellite', relief3d: false, batiments: false }
+const FOND_DEFAUT: OptionsFond = {
+  fond: 'satellite',
+  batiments: false,
+  affichage3d: false,
+  batiments3d: true,
+  elevation: true,
+  soleil: false,
+  heure: null,
+}
 const COUCHES_BRUTES_DEFAUT: CouchesBrutes = {
   carrefours: true,
   lignes: true,
@@ -91,6 +106,28 @@ function typeJour(date: Date): TypeJour {
   return jour === 6 ? 'samedi' : jour === 0 ? 'dimanche' : 'semaine'
 }
 
+/** Heure du soleil simulé : l'heure réelle, ou une heure choisie au curseur (aujourd'hui). */
+function ReglageHeure({ heure, onChange }: { heure: number | null; onChange: (heure: number | null) => void }) {
+  const maintenant = new Date()
+  const minutes = heure ?? maintenant.getHours() * 60 + maintenant.getMinutes()
+  const libelle = `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+  return (
+    <Stack gap="1">
+      <HStack justify="space-between">
+        <Text textStyle="xs" color="fg.muted">
+          {heure === null ? `Heure réelle (${libelle})` : `Aujourd'hui à ${libelle}`}
+        </Text>
+        {heure !== null && (
+          <Button size="2xs" variant="ghost" onClick={() => onChange(null)}>
+            Maintenant
+          </Button>
+        )}
+      </HStack>
+      <Curseur size="sm" aria-label={['Heure du soleil']} min={0} max={1435} step={5} valeur={minutes} onChange={onChange} />
+    </Stack>
+  )
+}
+
 function App() {
   const queryClient = useQueryClient()
   const [bbox, setBbox] = useState<Bbox>()
@@ -104,6 +141,7 @@ function App() {
   const [modeReseau, setModeReseau] = useState(false)
   const [mode, setMode] = usePreference<Mode>('mode-carte', 'temps_reel')
   const tempsReel = mode === 'temps_reel'
+  const sumo = mode === 'sumo'
   const [fond, setFond] = usePreference<OptionsFond>('fond', FOND_DEFAUT)
   const [trams, setTrams] = usePreference<boolean>('trams', true)
   const [brut, setBrut] = usePreference<CouchesBrutes>('couches-brutes', COUCHES_BRUTES_DEFAUT)
@@ -147,6 +185,12 @@ function App() {
   })
   const [ciblePopup, setCiblePopup] = useState<HTMLElement | null>(null)
   const [pointMenu, setPointMenu] = useState<LonLat | null>(null)
+  // Point de l'écran où le menu est ouvert ; pointMenu reste lu après la fermeture.
+  const [ecranMenu, setEcranMenu] = useState<{ x: number; y: number } | null>(null)
+  const mesures = useMesures()
+  const mesure = mesures.courante
+  // Point de la mesure sous le curseur au clic droit : le menu propose de le retirer.
+  const [pointMesureMenu, setPointMesureMenu] = useState<number | null>(null)
   const { carte } = useMap()
   const panneauConfiguration = useRef<ConfigurationCarrefourHandle>(null)
   // Relais stables des gestes de la carte vers la configuration.
@@ -168,7 +212,11 @@ function App() {
 
 
   const couchesTram: CouchesTram =
-    mode === 'brut' ? brut : { lignes: trams, arrets: trams, zones: trams, rames: trams }
+    mode === 'brut'
+      ? brut
+      : sumo
+        ? { lignes: false, arrets: false, zones: false, rames: false }
+        : { lignes: trams, arrets: trams, zones: trams, rames: trams }
   const tramAffiche = Object.values(couchesTram).some(Boolean)
   const pertes = mode === 'brut' && brut.pertes
 
@@ -200,7 +248,7 @@ function App() {
   /** Le mode Temps réel est en lecture seule : on quitte l'édition en cours (les brouillons restent). */
   const changerMode = (suivant: Mode) => {
     setMode(suivant)
-    if (suivant === 'temps_reel') {
+    if (suivant === 'temps_reel' || suivant === 'sumo') {
       setEdition(null)
       setConfiguration(null)
     } else setFicheTempsReel(null)
@@ -407,6 +455,21 @@ function App() {
     return () => window.removeEventListener('keydown', toucheTrace, { capture: true })
   }, [])
 
+  // Mesure de distance : Échap la ferme, Retour arrière retire le dernier point.
+  const toucheMesure = useEffectEvent((e: KeyboardEvent) => {
+    if (!mesure) return
+    if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+    if (e.key === 'Escape') {
+      e.stopImmediatePropagation()
+      mesures.fermer()
+    } else if (e.key === 'Backspace') mesures.retirerDernier()
+  })
+  useEffect(() => {
+    // En capture : Échap ferme la mesure avant de quitter l'édition ou la configuration.
+    window.addEventListener('keydown', toucheMesure, true)
+    return () => window.removeEventListener('keydown', toucheMesure, true)
+  }, [])
+
   const entreesMenu: EntreeMenu[] = [
     ...(tempsReel
       ? []
@@ -416,10 +479,28 @@ function App() {
           : MENU_CONFIGURATION
         : [{ valeur: 'composer', glyphe: '⌖', libelle: 'Composer un carrefour', raccourci: 'N' }, { type: 'separateur' as const }]),
     { type: 'separateur' },
+    ...(mesure && pointMesureMenu !== null
+      ? [{ valeur: 'retirer-point', glyphe: '✕', libelle: `Retirer le point ${pointMesureMenu + 1}`, danger: true }]
+      : [{ valeur: 'mesurer', glyphe: '↔', libelle: mesure ? 'Nouvelle mesure ici' : 'Mesurer une distance' }]),
+    { valeur: 'mesures', glyphe: '☰', libelle: 'Mesures enregistrées' },
     { valeur: 'centrer', glyphe: '✥', libelle: 'Centrer la carte ici' },
     { valeur: 'copier', glyphe: '⎘', libelle: 'Copier les coordonnées' },
   ]
+  const centrerSur = (points: LonLat[]) => {
+    if (points.length === 1) return carte?.flyTo({ center: points[0]! })
+    if (points.length < 2) return
+    const lons = points.map((p) => p[0])
+    const lats = points.map((p) => p[1])
+    carte?.fitBounds(
+      [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)],
+      // Le bas de l'écran est occupé par le panneau de mesure.
+      { padding: { top: 80, right: 80, bottom: 380, left: 80 }, maxZoom: 18 },
+    )
+  }
   const choisirMenu = (valeur: string) => {
+    if (valeur === 'mesurer' && pointMenu) return mesures.commencer(pointMenu)
+    if (valeur === 'retirer-point' && pointMesureMenu !== null) return mesures.retirer(pointMesureMenu)
+    if (valeur === 'mesures') return mesures.ouvrirListe()
     if (valeur === 'centrer' && pointMenu) return carte?.flyTo({ center: pointMenu })
     if (valeur === 'copier' && pointMenu) return void navigator.clipboard?.writeText(`${pointMenu[1].toFixed(6)}, ${pointMenu[0].toFixed(6)}`)
     if (valeur === 'composer') return composer()
@@ -429,130 +510,157 @@ function App() {
   return (
     <>
       <MenuContextuel
+        point={ecranMenu}
         entete={pointMenu && `${pointMenu[1].toFixed(4)} N · ${pointMenu[0].toFixed(4)} E`}
         entrees={entreesMenu.filter((entree, i, liste) => entree.type !== 'separateur' || (i > 0 && liste[i - 1]!.type !== 'separateur'))}
         onChoisir={choisirMenu}
-      >
-        <Box position="fixed" inset="0">
-          <CarteCarrefours
-            carrefours={carrefours.data}
-            // Temps réel : seuls les feux ; un clic sur l'un d'eux ouvre la fiche de son carrefour.
-            afficherCarrefours={mode === 'edition' || (mode === 'brut' && brut.carrefours) || edition !== null || configuration !== null}
-            tempsReel={tempsReel}
-            carrefoursRejoues={carrefoursRejoues}
-            // Éditeur des voies : on cale nœuds et voies sur la photo IGN, vue de dessus.
-            fond={editeur ? { ...fond, fond: 'satellite', relief3d: false } : fond}
-            feux={feux.data}
-            edition={
-              edition && {
-                selection: edition.selection,
-                carrefourId: edition.carrefourId,
-                modeRectangle: edition.modeRectangle,
-              }
+        onFermer={() => setEcranMenu(null)}
+      />
+      <Box position="fixed" inset="0">
+        <CarteCarrefours
+          carrefours={carrefours.data}
+          // Temps réel et SUMO : seuls les feux ; un clic sur un feu en Temps réel ouvre la fiche de son carrefour.
+          afficherCarrefours={
+            !sumo && (mode === 'edition' || (mode === 'brut' && brut.carrefours) || edition !== null || configuration !== null)
+          }
+          // SUMO : lecture seule comme le Temps réel, sans fiche de carrefour.
+          tempsReel={tempsReel || sumo}
+          carrefoursRejoues={carrefoursRejoues}
+          // Éditeur des voies : on cale nœuds et voies sur la photo IGN, vue de dessus.
+          fond={editeur ? { ...fond, fond: 'satellite', affichage3d: false } : fond}
+          feux={feux.data}
+          edition={
+            edition && {
+              selection: edition.selection,
+              carrefourId: edition.carrefourId,
+              modeRectangle: edition.modeRectangle,
             }
-            onEmprise={changerEmprise}
-            reseauActif={modeReseau && !configuration}
-            curseur={outilEditeur === 'tracer' || outilEditeur === 'couper' ? 'crosshair' : undefined}
-            couchesReseau={voiesDessinees ? couchesInteractivesVoies(outilEditeur) : undefined}
-            onBasculerFeu={basculerFeu}
-            onAjouterFeux={ajouterFeux}
-            onComposerDepuis={(feu) =>
-              demarrer({
-                carrefourId: null,
-                selection: [feu.id],
-                nature: feu.type === 'pieton' ? 'traversee_pietonne' : 'carrefour',
-                nomSaisi: null,
-                modeRectangle: false,
-              })
+          }
+          onEmprise={changerEmprise}
+          reseauActif={modeReseau && !configuration}
+          curseur={outilEditeur === 'tracer' || outilEditeur === 'couper' ? 'crosshair' : undefined}
+          couchesReseau={voiesDessinees ? couchesInteractivesVoies(outilEditeur) : undefined}
+          onBasculerFeu={basculerFeu}
+          onAjouterFeux={ajouterFeux}
+          onComposerDepuis={(feu) =>
+            demarrer({
+              carrefourId: null,
+              selection: [feu.id],
+              nature: feu.type === 'pieton' ? 'traversee_pietonne' : 'carrefour',
+              nomSaisi: null,
+              modeRectangle: false,
+            })
+          }
+          onOuvrir={sumo ? () => {} : tempsReel ? setFicheTempsReel : configurer}
+          configuration={
+            configuration && {
+              carrefourId: configuration.carrefour.id,
+              position: configuration.position,
+              ...affichageConfiguration,
             }
-            onOuvrir={tempsReel ? setFicheTempsReel : configurer}
-            configuration={
-              configuration && {
-                carrefourId: configuration.carrefour.id,
-                position: configuration.position,
-                ...affichageConfiguration,
-              }
-            }
-            onClicFeuConfiguration={(feu, position) => panneauConfiguration.current?.clicFeu(feu, position)}
-            onClicCarteConfiguration={(position) => panneauConfiguration.current?.clicCarte(position)}
-            onClicCalque={(clic) => panneauConfiguration.current?.clicCalque(clic)}
-            onCiblePopup={setCiblePopup}
-            onMenuContextuel={setPointMenu}
-            onDeplacerPoignee={deplacerPoignee}
-            onConnecter={connecter}
-            onDessinerZoneIa={dessinerZoneIa}
-            onPlacerFeu={placerFeu}
-          >
-            {pertes && reseauTram.data && historique.data && (
-              <CouchePertes reseau={reseauTram.data} historique={historique.data} />
-            )}
-            {tempsReel && feuxTempsReel.data && <CoucheFeuxTempsReel tempsReel={feuxTempsReel.data} tram={contexteTram} />}
-            {tramAffiche && reseauTram.data && (
-              <CoucheTrams reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
-            )}
-            {voiesDessinees && reseau.donnees.data && (
-              <CoucheVoies
-                reseau={reseau.donnees.data}
-                outil={outilEditeur}
-                selection={reseau.selection}
-                carrefourOuvert={carrefourGraphe?.id ?? null}
-                onDeplacerNoeud={(id, position) => reseau.modifierNoeud(id, { position })}
-                onBasculerLiaison={reseau.basculerLiaison}
-              />
-            )}
-            {editeur && (
-              <CoucheReseau
-                donnees={reseau.visible ? reseau.donnees.data : undefined}
-                outil={outilEditeur === 'tracer' ? 'tracer' : 'selection'}
-                selection={reseau.selection?.id ?? null}
-                trace={reseau.trace}
-                onClic={(position, cible, memePoint) => reseau.clic(position, cible, memePoint, outilEditeur ?? 'autre')}
-                popup={
-                  outilEditeur !== 'selection' || !reseau.selection
-                    ? null
-                    : reseau.troncon
+          }
+          onClicFeuConfiguration={(feu, position) => panneauConfiguration.current?.clicFeu(feu, position)}
+          onClicCarteConfiguration={(position) => panneauConfiguration.current?.clicCarte(position)}
+          onClicCalque={(clic) => panneauConfiguration.current?.clicCalque(clic)}
+          onCiblePopup={setCiblePopup}
+          onMenuContextuel={(position, point) => {
+            setPointMenu(position)
+            setEcranMenu(point)
+            setPointMesureMenu(mesures.visee)
+          }}
+          mesure={mesure?.points ?? null}
+          mesureVisee={mesures.visee}
+          onViserMesure={mesures.setVisee}
+          onPointMesure={mesures.ajouter}
+          onDeplacerPointMesure={mesures.deplacer}
+          onDeplacerPoignee={deplacerPoignee}
+          onConnecter={connecter}
+          onDessinerZoneIa={dessinerZoneIa}
+          onPlacerFeu={placerFeu}
+        >
+          {sumo && <CoucheSumo />}
+          {sumo && <CoucheVehicules />}
+          {sumo && <CoucheFlux />}
+          {pertes && reseauTram.data && historique.data && (
+            <CouchePertes reseau={reseauTram.data} historique={historique.data} />
+          )}
+          {tempsReel && feuxTempsReel.data && <CoucheFeuxTempsReel tempsReel={feuxTempsReel.data} tram={contexteTram} />}
+          {tramAffiche && reseauTram.data && (
+            <CoucheTrams reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
+          )}
+          {voiesDessinees && reseau.donnees.data && (
+            <CoucheVoies
+              reseau={reseau.donnees.data}
+              outil={outilEditeur}
+              selection={reseau.selection}
+              carrefourOuvert={carrefourGraphe?.id ?? null}
+              onDeplacerNoeud={(id, position) => reseau.modifierNoeud(id, { position })}
+              onBasculerLiaison={reseau.basculerLiaison}
+            />
+          )}
+          {editeur && (
+            <CoucheReseau
+              donnees={reseau.visible ? reseau.donnees.data : undefined}
+              outil={outilEditeur === 'tracer' ? 'tracer' : 'selection'}
+              selection={reseau.selection?.id ?? null}
+              trace={reseau.trace}
+              onClic={(position, cible, memePoint) => reseau.clic(position, cible, memePoint, outilEditeur ?? 'autre')}
+              popup={
+                outilEditeur !== 'selection' || !reseau.selection
+                  ? null
+                  : reseau.troncon
+                    ? {
+                        position: reseau.selection.position,
+                        contenu: (
+                          <PopupTroncon
+                            key={reseau.troncon.id}
+                            troncon={reseau.troncon}
+                            enregistrement={{ enCours: reseau.modification.isPending, erreur: reseau.modification.error?.message ?? null }}
+                            onModifier={reseau.modifier}
+                            onSupprimer={reseau.supprimer}
+                            onCouper={() => {
+                              reseau.couper(reseau.troncon!.id, reseau.selection!.position)
+                              reseau.fermerSelection()
+                            }}
+                            onFermer={reseau.fermerSelection}
+                          />
+                        ),
+                      }
+                    : reseau.noeud
                       ? {
                           position: reseau.selection.position,
                           contenu: (
-                            <PopupTroncon
-                              key={reseau.troncon.id}
-                              troncon={reseau.troncon}
-                              enregistrement={{ enCours: reseau.modification.isPending, erreur: reseau.modification.error?.message ?? null }}
-                              onModifier={reseau.modifier}
-                              onSupprimer={reseau.supprimer}
-                              onCouper={() => {
-                                reseau.couper(reseau.troncon!.id, reseau.selection!.position)
-                                reseau.fermerSelection()
-                              }}
+                            <PopupNoeud
+                              key={reseau.noeud.id}
+                              noeud={reseau.noeud}
+                              carrefourOuvert={carrefourGraphe && { id: carrefourGraphe.id, nom: carrefourGraphe.nom }}
+                              nomCarrefour={(id) => carrefours.data?.features.find((f) => f.id === id)?.properties.nom ?? 'carrefour'}
+                              enregistrement={{ enCours: reseau.modificationNoeud.isPending, erreur: reseau.modificationNoeud.error?.message ?? null }}
+                              onModifier={(m) => reseau.modifierNoeud(reseau.noeud!.id, m)}
+                              onLiaisonsParDefaut={() => reseau.liaisonsParDefaut(reseau.noeud!.id)}
+                              onFusionner={() => reseau.fusionner(reseau.noeud!.id)}
+                              onOuvrirCarrefour={configurerCarrefour}
                               onFermer={reseau.fermerSelection}
                             />
                           ),
                         }
-                      : reseau.noeud
-                        ? {
-                            position: reseau.selection.position,
-                            contenu: (
-                              <PopupNoeud
-                                key={reseau.noeud.id}
-                                noeud={reseau.noeud}
-                                carrefourOuvert={carrefourGraphe && { id: carrefourGraphe.id, nom: carrefourGraphe.nom }}
-                                nomCarrefour={(id) => carrefours.data?.features.find((f) => f.id === id)?.properties.nom ?? 'carrefour'}
-                                enregistrement={{ enCours: reseau.modificationNoeud.isPending, erreur: reseau.modificationNoeud.error?.message ?? null }}
-                                onModifier={(m) => reseau.modifierNoeud(reseau.noeud!.id, m)}
-                                onLiaisonsParDefaut={() => reseau.liaisonsParDefaut(reseau.noeud!.id)}
-                                onFusionner={() => reseau.fusionner(reseau.noeud!.id)}
-                                onOuvrirCarrefour={configurerCarrefour}
-                                onFermer={reseau.fermerSelection}
-                              />
-                            ),
-                          }
-                        : null
-                }
-              />
-            )}
-          </CarteCarrefours>
-        </Box>
-      </MenuContextuel>
+                      : null
+              }
+            />
+          )}
+        </CarteCarrefours>
+      </Box>
+
+      <PanneauMesure
+        position="fixed"
+        left="50%"
+        transform="translateX(-50%)"
+        // Au-dessus de la barre d'outils centrale, quand elle est affichée.
+        bottom={configuration || sumo || tempsReel ? '22px' : '96px'}
+        zIndex="3"
+        mesures={mesures}
+        onCentrer={centrerSur}
+      />
 
       {configuration ? (
         <ConfigurationCarrefour
@@ -574,6 +682,8 @@ function App() {
           onFermer={() => setConfiguration(null)}
           onEchapVoies={reseau.echap}
         />
+      ) : sumo ? (
+        <ModeSumo />
       ) : tempsReel ? (
         <CarteEnTete
           position="fixed"
@@ -739,7 +849,7 @@ function App() {
         </>
       )}
 
-      {!tempsReel && <CarteSuivi
+      {!tempsReel && !sumo && <CarteSuivi
         position="fixed"
         right="3"
         bottom={configuration && panneauBasOuvert ? `calc(${hauteurPanneau} + 12px)` : '3'}
@@ -786,6 +896,7 @@ function App() {
                       <Tabs.Trigger value="temps_reel">Temps réel</Tabs.Trigger>
                       <Tabs.Trigger value="edition">Édition</Tabs.Trigger>
                       <Tabs.Trigger value="brut">Données brutes</Tabs.Trigger>
+                      <Tabs.Trigger value="sumo">SUMO</Tabs.Trigger>
                     </Tabs.List>
                   </Tabs.Root>
                   {tempsReel && (
@@ -805,7 +916,9 @@ function App() {
                       <Aide>Cycle calé sur l'heure légale (base de temps à 3 h), d'après les tops relevés au carrefour.</Aide>
                     </Stack>
                   )}
-                  {mode !== 'brut' ? (
+                  {sumo ? (
+                    <Aide>Essais, indicateurs et lecture : dans les cartes du mode SUMO.</Aide>
+                  ) : mode !== 'brut' ? (
                     <Stack gap="2.5">
                       <Bascule coche={trams} onChange={setTrams}>
                         Trams en temps réel
@@ -905,9 +1018,32 @@ function App() {
                     <Bascule coche={fond.batiments} onChange={(batiments) => setFond((options) => ({ ...options, batiments }))}>
                       Bâtiments
                     </Bascule>
-                    <Bascule coche={fond.relief3d} onChange={(relief3d) => setFond((options) => ({ ...options, relief3d }))}>
-                      3D (plus gourmand)
+                    <Bascule coche={fond.affichage3d} onChange={(affichage3d) => setFond((options) => ({ ...options, affichage3d }))}>
+                      Affichage 3D (gourmand)
                     </Bascule>
+                    {fond.affichage3d && (
+                      <Stack gap="2" ps="6">
+                        <Bascule
+                          size="sm"
+                          coche={fond.batiments3d}
+                          disabled={!fond.batiments}
+                          onChange={(batiments3d) => setFond((options) => ({ ...options, batiments3d }))}
+                        >
+                          Bâtiments en volume
+                        </Bascule>
+                        <Bascule
+                          size="sm"
+                          coche={fond.elevation}
+                          onChange={(elevation) => setFond((options) => ({ ...options, elevation }))}
+                        >
+                          Relief du terrain
+                        </Bascule>
+                        <Bascule size="sm" coche={fond.soleil} onChange={(soleil) => setFond((options) => ({ ...options, soleil }))}>
+                          Soleil et luminosité
+                        </Bascule>
+                        {fond.soleil && <ReglageHeure heure={fond.heure} onChange={(heure) => setFond((options) => ({ ...options, heure }))} />}
+                      </Stack>
+                    )}
                   </Section>
 
                   <Text textStyle="2xs" color="fg.muted">

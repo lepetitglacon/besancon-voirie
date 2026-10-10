@@ -3,6 +3,8 @@ import type {
   AjoutTops,
   AnalyseIa,
   AnalyseIaDetail,
+  EssaiIa,
+  EssaiIaDetail,
   Bbox,
   BilanSemis,
   BranchesCarrefour,
@@ -15,7 +17,11 @@ import type {
   CreerCarrefour,
   DetectionBranches,
   EmpriseIa,
+  EssaiSumo,
+  EssaiSumoResume,
   EtatHistoriqueTram,
+  LancementSumo,
+  LancerEssaiSumo,
   FeuxGeoJson,
   FeuxTempsReel,
   HistoriqueTroncons,
@@ -25,12 +31,14 @@ import type {
   ModifierCarrefour,
   NatureCarrefour,
   NouveauTroncon,
+  OptionsSumo,
   ProgrammeCarrefour,
   ReseauGeoJson,
   ReseauTram,
   SaisieLiaisons,
   TopsCarrefour,
   TramsTempsReel,
+  TronconsSumoGeoJson,
   TypeJour,
 } from '@voirie/schema'
 
@@ -86,6 +94,9 @@ export const api = {
   analysesIa: () => requete<AnalyseIa[]>('/api/analyses-ia'),
   analyseIa: (id: string) => requete<AnalyseIaDetail>(`/api/analyses-ia/${id}`),
   consulterAnalyseIa: (id: string) => requete<AnalyseIa>(`/api/analyses-ia/${id}/consultee`, { method: 'PUT' }),
+  /** Essais IA d'un carrefour (un par modèle et par analyse), du plus récent au plus ancien. */
+  essaisIa: (carrefourId: string) => requete<EssaiIa[]>(`/api/analyses-ia/essais?carrefour=${carrefourId}`),
+  essaiIa: (id: string) => requete<EssaiIaDetail>(`/api/analyses-ia/essais/${id}`),
   retirerAnalyseIa: (id: string) => requete<void>(`/api/analyses-ia/${id}`, { method: 'DELETE' }),
   enregistrerBranches: (carrefourId: string, configuration: ConfigurationBranches) =>
     requete<BranchesCarrefour>(`/api/carrefours/${carrefourId}/branches`, {
@@ -141,6 +152,31 @@ export const api = {
     requete<SaisieLiaisons>(`/api/reseau/noeuds/${noeudId}/liaisons`, { method: 'PUT', body: JSON.stringify(saisie) }),
   /** Lien de téléchargement d'un fichier de l'export SUMO (de l'emprise, ou de toute la ville). */
   urlSumo: (fichier: string, bbox?: Bbox) => `/api/reseau/sumo/${fichier}${bbox ? `?bbox=${parametreBbox(bbox)}` : ''}`,
+  /** Essais SUMO de la ville, du plus récent au plus ancien. */
+  essaisSumo: () => requete<EssaiSumoResume[]>('/api/sumo/essais'),
+  essaiSumo: (id: string) => requete<EssaiSumo>(`/api/sumo/essais/${encodeURIComponent(id)}`),
+  tronconsSumo: (id: string) => requete<TronconsSumoGeoJson>(`/api/sumo/essais/${encodeURIComponent(id)}/troncons`),
+  /** Mesures par tranche et par tronçon : uint16 [tranche][grandeur][tronçon]. */
+  seriesSumo: async (id: string) => {
+    const reponse = await fetch(`/api/sumo/essais/${encodeURIComponent(id)}/series`)
+    if (!reponse.ok) throw new Error(`HTTP ${reponse.status}`)
+    return new Uint16Array(await reponse.arrayBuffer())
+  },
+  /** Itinéraire et heures de sortie de chaque voiture (format dans data/sumo/ville/essai.py). */
+  vehiculesSumo: async (id: string) => {
+    const reponse = await fetch(`/api/sumo/essais/${encodeURIComponent(id)}/vehicules`)
+    if (!reponse.ok) throw new Error(`HTTP ${reponse.status}`)
+    return reponse.arrayBuffer()
+  },
+  /** Toutes les options de SUMO, par catégorie. */
+  optionsSumo: () => requete<OptionsSumo>('/api/sumo/options'),
+  lancementsSumo: () => requete<LancementSumo[]>('/api/sumo/lancements'),
+  lancerEssaiSumo: (demande: LancerEssaiSumo) =>
+    requete<LancementSumo>('/api/sumo/lancements', { method: 'POST', body: JSON.stringify(demande) }),
+  annulerLancementSumo: (id: string) =>
+    requete<LancementSumo>(`/api/sumo/lancements/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** URL du flux SSE d'avancement d'un lancement. */
+  fluxLancementSumo: (id: string) => `/api/sumo/lancements/${encodeURIComponent(id)}/flux`,
 }
 
 export type Troncon = ReseauGeoJson['troncons']['features'][number]

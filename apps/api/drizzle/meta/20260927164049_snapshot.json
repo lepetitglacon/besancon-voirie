@@ -1,6 +1,6 @@
 {
   "id": "23b11072-112d-4d0d-914c-ac375cf7252e",
-  "prevId": "e61a2c60-b970-47c9-8fa0-d7eec69160b4",
+  "prevId": "2d6e0655-abd1-402b-bf21-a4ca47c5799e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -447,6 +447,176 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.essai_ia": {
+      "name": "essai_ia",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "analyse_id": {
+          "name": "analyse_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "carrefour_id": {
+          "name": "carrefour_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "modele": {
+          "name": "modele",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "modele_reel": {
+          "name": "modele_reel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "effort": {
+          "name": "effort",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "statut": {
+          "name": "statut",
+          "type": "statut_essai_ia",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duree_s": {
+          "name": "duree_s",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cout_usd": {
+          "name": "cout_usd",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tokens_entree": {
+          "name": "tokens_entree",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tokens_sortie": {
+          "name": "tokens_sortie",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resultat": {
+          "name": "resultat",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "erreur": {
+          "name": "erreur",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dossier": {
+          "name": "dossier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cree_le": {
+          "name": "cree_le",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "essai_ia_analyse_idx": {
+          "name": "essai_ia_analyse_idx",
+          "columns": [
+            {
+              "expression": "analyse_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "essai_ia_carrefour_idx": {
+          "name": "essai_ia_carrefour_idx",
+          "columns": [
+            {
+              "expression": "carrefour_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "cree_le",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "essai_ia_analyse_id_analyse_ia_id_fk": {
+          "name": "essai_ia_analyse_id_analyse_ia_id_fk",
+          "tableFrom": "essai_ia",
+          "tableTo": "analyse_ia",
+          "columnsFrom": [
+            "analyse_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "essai_ia_carrefour_id_carrefour_id_fk": {
+          "name": "essai_ia_carrefour_id_carrefour_id_fk",
+          "tableFrom": "essai_ia",
+          "tableTo": "carrefour",
+          "columnsFrom": [
+            "carrefour_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -1657,6 +1827,15 @@
         "estime",
         "mesure",
         "verifie"
+      ]
+    },
+    "public.statut_essai_ia": {
+      "name": "statut_essai_ia",
+      "schema": "public",
+      "values": [
+        "terminee",
+        "echec",
+        "delai"
       ]
     },
     "public.statut_moderation": {
