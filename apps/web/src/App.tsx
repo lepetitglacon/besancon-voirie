@@ -63,6 +63,7 @@ import { PopupTroncon } from './reseau/PopupTroncon'
 import { TableauMaturite } from './maturite/TableauMaturite'
 import { avecReglages } from './reseau/reglages'
 import { ReglagesOutil } from './reseau/ReglagesOutil'
+import { ReglagesPlacement } from './reseau/ReglagesPlacement'
 
 /** Le flux Ginko est mis en cache 10 s par l'API. */
 const RAFRAICHISSEMENT_TRAMS_MS = 15_000
@@ -212,6 +213,8 @@ function App() {
     [],
   )
   const outilEditeur: OutilVoies | null = !editeur ? null : configuration ? affichageConfiguration.outilGraphe : reseau.outil
+  /** Outil Placer : place du bout de voie choisi (docs/voies-position-visuelle.md). */
+  const reglagesPlacement = <ReglagesPlacement voies={reseau.voiesPlacees} onPlacer={reseau.placerVoies} />
   /** Rues voie par voie : à l'approche du zoom des voies, où le réseau par tronçons s'efface. */
   const voiesDessinees = editeur && zoom >= ZOOM_VOIES - 0.5
   const dessinerZoneIa = useCallback<ConfigurationCarrefourHandle['dessinerZoneIa']>(
@@ -613,6 +616,9 @@ function App() {
               carrefourOuvert={carrefourGraphe?.id ?? null}
               onDeplacerNoeud={(id, position) => reseau.modifierNoeud(id, { position })}
               onBasculerLiaison={reseau.basculerLiaison}
+              voiesPlacees={reseau.voiesPlacees}
+              onChoisirVoiePlacee={reseau.choisirVoiePlacee}
+              onPlacerVoies={reseau.placerVoies}
             />
           )}
           {outilEditeur === 'forme' && reseau.forme && reseau.tronconForme && (
@@ -748,7 +754,9 @@ function App() {
               : undefined
           }
           reglagesVoies={
-            carrefourGraphe && outilEditeur !== 'autre' && avecReglages(outilEditeur) ? (
+            carrefourGraphe && outilEditeur === 'placer' ? (
+              reglagesPlacement
+            ) : carrefourGraphe && outilEditeur !== 'autre' && avecReglages(outilEditeur) ? (
               <ReglagesOutil outil={outilEditeur!} reglages={reseau.reglages} onChanger={reseau.changerReglages} />
             ) : null
           }
@@ -837,7 +845,13 @@ function App() {
                 tronque={reseau.donnees.data?.tronque ?? false}
                 bbox={bbox}
                 generation={{ enCours: reseau.generation.isPending, onGenerer: (reinitialiser) => reseau.generation.mutate(reinitialiser) }}
-                reglages={<ReglagesOutil outil={reseau.outil} reglages={reseau.reglages} onChanger={reseau.changerReglages} />}
+                reglages={
+                  reseau.outil === 'placer' ? (
+                    reglagesPlacement
+                  ) : (
+                    <ReglagesOutil outil={reseau.outil} reglages={reseau.reglages} onChanger={reseau.changerReglages} />
+                  )
+                }
               />
             )}
           </CarteEnTete>

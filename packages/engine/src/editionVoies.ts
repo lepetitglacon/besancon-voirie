@@ -5,7 +5,7 @@
  * réelle.
  */
 import { repereLocal, type LonLat, type XY } from './geometrie.js';
-import { typesVoies, type Liaison, type TypeVoieReseau } from './reseau.js';
+import { placerBoutVoie, typesVoies, type Liaison, type PlacementVoie, type TypeVoieReseau, type VoiesTroncon } from './reseau.js';
 
 /** Sens d'un tronçon : `avant` de `noeud_de` vers `noeud_vers`, `arriere` dans l'autre sens. */
 export type SensVoieTroncon = 'avant' | 'arriere';
@@ -185,4 +185,99 @@ export function inverserEmprises(emprises: Readonly<EmprisesTroncon> | null | un
   return Object.fromEntries(
     Object.entries(emprises).map(([cle, polygone]) => [cle.startsWith('avant:') ? cle.replace('avant:', 'arriere:') : cle.replace('arriere:', 'avant:'), polygone]),
   );
+}
+
+// ── Places visuelles des bouts de voies à un nœud (docs/voies-position-visuelle.md) ──
+
+/** Places des bouts de voies d'un nœud, par clé `<tronçon>:avant:0`, `<tronçon>:arriere:1`… */
+export type PlacementsVoies = Record<string, PlacementVoie>;
+
+export const clePlacement = (troncon: string, sens: SensVoieTroncon, rang: number) => `${troncon}:${cleEmprise(sens, rang)}`;
+
+/** Tronçon, sens et rang d'une clé de placement ; null si elle est mal formée. */
+export function lireClePlacement(cle: string): { troncon: string; sens: SensVoieTroncon; rang: number } | null {
+  const morceaux = /^(.+):(avant|arriere):(\d)$/.exec(cle);
+  return morceaux ? { troncon: morceaux[1]!, sens: morceaux[2] as SensVoieTroncon, rang: Number(morceaux[3]) } : null;
+}
+
+/** Réécrit les clés des placements ; `changer` rend la nouvelle clé, ou null pour retirer le placement. null si plus rien. */
+function reecrirePlacements(
+  placements: Readonly<PlacementsVoies> | null | undefined,
+  changer: (cle: { troncon: string; sens: SensVoieTroncon; rang: number }) => string | null,
+): PlacementsVoies | null {
+  if (!placements) return null;
+  const suivants: PlacementsVoies = {};
+  for (const [cle, placement] of Object.entries(placements)) {
+    const lue = lireClePlacement(cle);
+    const nouvelle = lue ? changer(lue) : cle;
+    if (nouvelle !== null) suivants[nouvelle] = placement;
+  }
+  return Object.keys(suivants).length > 0 ? suivants : null;
+}
+
+/** Placements d'un nœud après l'ajout ou le retrait d'une voie du tronçon : ceux du même sens suivent leur voie. */
+export function decalerPlacements(
+  placements: Readonly<PlacementsVoies> | null | undefined,
+  troncon: string,
+  sens: SensVoieTroncon,
+  rang: number,
+  decalage: 1 | -1,
+): PlacementsVoies | null {
+  return reecrirePlacements(placements, (c) => {
+    if (c.troncon !== troncon || c.sens !== sens) return clePlacement(c.troncon, c.sens, c.rang);
+    const nouveau = rangDecale(c.rang, rang, decalage);
+    return nouveau === null ? null : clePlacement(c.troncon, c.sens, nouveau);
+  });
+}
+
+/**
+ * Placements d'un nœud après l'inversion du tronçon : ses voies avant deviennent arrière. Le
+ * rang et le décalage, comptés dans le sens de circulation, ne changent pas.
+ */
+export function inverserPlacements(placements: Readonly<PlacementsVoies> | null | undefined, troncon: string): PlacementsVoies | null {
+  return reecrirePlacements(placements, (c) =>
+    clePlacement(c.troncon, c.troncon === troncon ? (c.sens === 'avant' ? 'arriere' : 'avant') : c.sens, c.rang),
+  );
+}
+
+/**
+ * Placements d'un nœud quand un tronçon y est remplacé par un autre (coupe, fusion) ; `inverser` :
+ * le nouveau tronçon est tracé dans l'autre sens, ses voies avant sont les arrière de l'ancien.
+ */
+export function renommerPlacements(
+  placements: Readonly<PlacementsVoies> | null | undefined,
+  ancien: string,
+  nouveau: string,
+  inverser = false,
+): PlacementsVoies | null {
+  return reecrirePlacements(placements, (c) => {
+    if (c.troncon !== ancien) return clePlacement(c.troncon, c.sens, c.rang);
+    return clePlacement(nouveau, inverser ? (c.sens === 'avant' ? 'arriere' : 'avant') : c.sens, c.rang);
+  });
+}
+
+/** Placements d'un nœud sans ceux d'un tronçon (supprimé, ou qui n'y touche plus). */
+export function retirerPlacements(placements: Readonly<PlacementsVoies> | null | undefined, troncon: string): PlacementsVoies | null {
+  return reecrirePlacements(placements, (c) => (c.troncon === troncon ? null : clePlacement(c.troncon, c.sens, c.rang)));
+}
+
+/**
+ * Voies d'un tronçon (`voiesTroncon`) avec les bouts placés à chacun de ses nœuds : une voie
+ * avant part de `noeud_de` et arrive à `noeud_vers`, une voie arrière l'inverse.
+ */
+export function placerVoiesTroncon(
+  voies: VoiesTroncon,
+  troncon: string,
+  placementsDe: Readonly<PlacementsVoies> | null | undefined,
+  placementsVers: Readonly<PlacementsVoies> | null | undefined,
+): VoiesTroncon {
+  if (!placementsDe && !placementsVers) return voies;
+  const placer = (sens: SensVoieTroncon, depart: typeof placementsDe, arrivee: typeof placementsDe) => (points: LonLat[], rang: number) => {
+    const cle = clePlacement(troncon, sens, rang);
+    return placerBoutVoie(placerBoutVoie(points, 'debut', depart?.[cle]), 'fin', arrivee?.[cle]);
+  };
+  return {
+    avant: voies.avant.map(placer('avant', placementsDe, placementsVers)),
+    arriere: voies.arriere.map(placer('arriere', placementsVers, placementsDe)),
+  };
 }

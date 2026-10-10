@@ -1,0 +1,1 @@
+ALTER TABLE "voie" ADD COLUMN "trace" geometry(LineString, 4326);

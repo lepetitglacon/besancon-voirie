@@ -15,6 +15,9 @@ export const ZONES = {
   liaisons: 'reseau-liaisons-zone',
   /** Passages piétons tracés librement. */
   passages: 'reseau-passages-zone',
+  /** Bouts des voies à placer sur la photo (outil Placer), et poignées de pivot de leur bloc. */
+  bouts: 'reseau-bouts-voies-zone',
+  pivots: 'reseau-pivots-zone',
 } as const
 
 /** Zones de prise de l'outil Forme (CoucheForme) : sommets et milieux des segments. */
@@ -34,6 +37,7 @@ export function couchesInteractivesVoies(outil: OutilVoies | null): string[] {
   if (outil === 'forme') return ['reseau-voies', ZONES_FORME.sommets, ZONES_FORME.milieux]
   if (outil === 'noeuds' || outil === 'embranchements') return [ZONES.noeuds]
   if (outil === 'connecter') return [ZONES.arrivees, ZONES.liaisons]
+  if (outil === 'placer') return [ZONES.pivots, ZONES.bouts]
   return []
 }
 

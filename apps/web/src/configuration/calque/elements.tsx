@@ -12,7 +12,8 @@ const classes = (...noms: Array<string | false | null | undefined>) => noms.filt
 export type EtatVoie = 'normale' | 'survolee' | 'liee' | 'estompee' | 'cible-possible' | 'cible'
 
 interface PropsVoie {
-  segment: [XY, XY]
+  /** Dessin de la voie, depuis son bout côté carrefour : un segment, ou la rue qu'elle suit. */
+  trace: readonly XY[]
   largeur: number
   couleur: string
   sortante: boolean
@@ -23,11 +24,11 @@ interface PropsVoie {
   onClic?: (e: MouseEvent<SVGElement>) => void
 }
 
-export function Voie({ segment, largeur, couleur, sortante, etat, interactive, titre, onSurvol, onClic }: PropsVoie) {
+export function Voie({ trace, largeur, couleur, sortante, etat, interactive, titre, onSurvol, onClic }: PropsVoie) {
   return (
     <path
       className={classes('calque-voie', sortante && 'sortante', etat, interactive && 'interactive')}
-      d={d(segment)}
+      d={d(trace)}
       stroke={sortante ? undefined : couleur}
       strokeWidth={largeur}
       onPointerEnter={() => onSurvol(true)}

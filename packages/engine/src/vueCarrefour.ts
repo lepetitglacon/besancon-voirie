@@ -18,6 +18,7 @@
 import { codeCardinal } from './branches.js';
 import { cleVoie } from './connexions.js';
 import { LARGEUR_VOIE_M, repereLocal, type LonLat, type Segment, type XY } from './geometrie.js';
+import { placerVoiesTroncon, type PlacementsVoies } from './editionVoies.js';
 import { boutsAuNoeud, largeurTroncon, liaisonsRetenues, retraitAuNoeud, typesVoies, voiesTroncon, type Liaison, type TypeVoieReseau } from './reseau.js';
 
 export interface NoeudVue {
@@ -29,6 +30,8 @@ export interface NoeudVue {
   pieton: string | null;
   /** Liaisons saisies ; null : celles proposées par défaut. */
   liaisons: Liaison[] | null;
+  /** Places visuelles des bouts de voies (docs/voies-position-visuelle.md) ; seul le dessin les suit. */
+  placements?: PlacementsVoies | null;
 }
 
 export interface TronconVue {
@@ -65,8 +68,16 @@ export interface VoieVue {
   sens: 'entrante' | 'sortante';
   rang: number;
   type: TypeVoieReseau;
-  /** [bout côté carrefour, bout éloigné]. */
+  /**
+   * [bout côté carrefour, bout éloigné], à la place automatique : c'est elle que lisent les
+   * mouvements, les conflits et le temps réel.
+   */
   geom: Segment;
+  /**
+   * Dessin de la voie depuis son bout côté carrefour, sur `LONGUEUR_VOIE_M` : il suit la rue, et
+   * la place posée à la main (docs/voies-position-visuelle.md). Seul le calque le lit.
+   */
+  trace: LonLat[];
 }
 
 export interface BrancheVue {
@@ -164,15 +175,19 @@ export function vueCarrefour({ noeuds, troncons, degres, passages = [] }: Entree
       voiesTroncon(t.points, t.voies_avant, t.voies_arriere, retrait(t.noeud_de), retrait(t.noeud_vers), { avant: t.types_avant, arriere: t.types_arriere }),
     ]),
   );
-  /** Voies d'un tronçon qui arrivent au nœud (dans le sens de circulation) et leurs types. */
+  // Voies dessinées, bouts placés à la main (docs/voies-position-visuelle.md) : pour le calque seulement.
+  const dessinees = new Map(
+    troncons.map((t) => [t.id, placerVoiesTroncon(voies.get(t.id)!, t.id, dans.get(t.noeud_de)?.placements, dans.get(t.noeud_vers)?.placements)]),
+  );
+  /** Voies d'un tronçon qui arrivent au nœud (dans le sens de circulation), dessinées, et leurs types. */
   const arrivant = (t: TronconVue, noeud: string) =>
     noeud === t.noeud_vers
-      ? { polylignes: voies.get(t.id)!.avant, types: typesVoies(t.voies_avant, t.types_avant) }
-      : { polylignes: voies.get(t.id)!.arriere, types: typesVoies(t.voies_arriere, t.types_arriere) };
+      ? { polylignes: voies.get(t.id)!.avant, dessins: dessinees.get(t.id)!.avant, types: typesVoies(t.voies_avant, t.types_avant) }
+      : { polylignes: voies.get(t.id)!.arriere, dessins: dessinees.get(t.id)!.arriere, types: typesVoies(t.voies_arriere, t.types_arriere) };
   const partant = (t: TronconVue, noeud: string) =>
     noeud === t.noeud_de
-      ? { polylignes: voies.get(t.id)!.avant, types: typesVoies(t.voies_avant, t.types_avant) }
-      : { polylignes: voies.get(t.id)!.arriere, types: typesVoies(t.voies_arriere, t.types_arriere) };
+      ? { polylignes: voies.get(t.id)!.avant, dessins: dessinees.get(t.id)!.avant, types: typesVoies(t.voies_avant, t.types_avant) }
+      : { polylignes: voies.get(t.id)!.arriere, dessins: dessinees.get(t.id)!.arriere, types: typesVoies(t.voies_arriere, t.types_arriere) };
 
   // ── Liaisons de chaque nœud du carrefour ──
   const autour = new Map<string, TronconVue[]>();
@@ -275,8 +290,17 @@ export function vueCarrefour({ noeuds, troncons, degres, passages = [] }: Entree
           rang,
           type: entrantes.types[rang]!,
           geom: segmentDepuis([...l].reverse()),
+          trace: debut([...entrantes.dessins[rang]!].reverse(), LONGUEUR_VOIE_M),
         })),
-        ...sortantes.polylignes.map((l, rang): VoieVue => ({ sens: 'sortante', rang, type: sortantes.types[rang]!, geom: segmentDepuis(l) })),
+        ...sortantes.polylignes.map(
+          (l, rang): VoieVue => ({
+            sens: 'sortante',
+            rang,
+            type: sortantes.types[rang]!,
+            geom: segmentDepuis(l),
+            trace: debut(sortantes.dessins[rang]!, LONGUEUR_VOIE_M),
+          }),
+        ),
       ],
       ...(p.interne ? { traversee: null, passage: null } : traverseeDe(p)),
       interne: p.interne,

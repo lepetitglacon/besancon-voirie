@@ -22,4 +22,6 @@ export const COULEURS_RESEAU = {
   trace: '#f472b6',
   /** Emprise réelle d'une voie, posée sur la photo. */
   emprise: '#facc15',
+  /** Bout de voie placé à la main sur la photo (outil Placer). */
+  placement: '#06b6d4',
 } as const

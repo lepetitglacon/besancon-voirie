@@ -58,9 +58,10 @@ export function Compteur({ valeur, onChange, min = 0, max = Infinity, pas = 1, u
       <chakra.input
         value={saisie ?? (valeur === null ? '' : String(valeur))}
         placeholder={placeholder}
-        inputMode="numeric"
+        inputMode={min < 0 || pas % 1 !== 0 ? 'decimal' : 'numeric'}
         aria-label={props['aria-label']}
-        w={`${Math.max(2, String(max === Infinity ? 999 : max).length) + 1}ch`}
+        // Assez large pour la plus longue valeur : borne, valeur courante (décimales, signe).
+        w={`${Math.max(2, String(max === Infinity ? 999 : max).length, String(valeur ?? '').length) + 1}ch`}
         textAlign="center"
         fontFamily="mono"
         textStyle={taille === 'xs' ? 'xs' : 'sm'}
@@ -68,10 +69,10 @@ export function Compteur({ valeur, onChange, min = 0, max = Infinity, pas = 1, u
         outline="none"
         _placeholder={{ color: 'fg.subtle' }}
         onChange={(e) => {
-          const texte = e.target.value.replace(/[^0-9.]/g, '')
+          const texte = e.target.value.replace(',', '.').replace(min < 0 ? /[^0-9.-]/g : /[^0-9.]/g, '')
           setSaisie(texte)
           if (texte === '') onChange(null)
-          else if (!Number.isNaN(Number(texte))) changer(Number(texte))
+          else if (texte !== '-' && !Number.isNaN(Number(texte))) changer(Number(texte))
         }}
         onBlur={() => setSaisie(null)}
         onKeyDown={(e) => {

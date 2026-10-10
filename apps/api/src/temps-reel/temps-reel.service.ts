@@ -143,7 +143,8 @@ export class TempsReelService {
       JOIN feu f ON f.id = lf.feu_id
       WHERE l.carrefour_id = ANY (${uuids(carrefours)})
       UNION
-      SELECT l.carrefour_id, l.code, 'voie', ST_X(ST_StartPoint(ve.geom)), ST_Y(ST_StartPoint(ve.geom))
+      -- Au bout de la voie dessinée (place posée à la main, docs/voies-position-visuelle.md).
+      SELECT l.carrefour_id, l.code, 'voie', ST_X(ST_StartPoint(coalesce(ve.trace, ve.geom))), ST_Y(ST_StartPoint(coalesce(ve.trace, ve.geom)))
       FROM connexion cx
       JOIN voie ve ON ve.id = cx.voie_entree_id
       JOIN branche be ON be.id = ve.branche_id

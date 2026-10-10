@@ -130,6 +130,10 @@ const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>>
     aides: ['Clic sur une voie, puis sur les coins de son marquage', 'Entrée ou clic sur le premier coin : enregistrer', '⌫ : retirer le dernier coin'],
   },
   noeuds: { titre: 'Nœuds du carrefour', aides: ['Clic sur un nœud : l’ajouter au carrefour ou l’en retirer'] },
+  placer: {
+    titre: 'Placer les voies',
+    aides: ['Glisser le bout d’une voie sur la photo (le graphe et SUMO ne bougent pas)', 'Clic : ses réglages', 'Double-clic : place automatique'],
+  },
   ajuster: { titre: 'Caler les voies', aides: ['Glisser les extrémités des voies et des passages sur le marquage de la photo'] },
   connecter: { titre: 'Relier les voies', aides: ['Glisser d’une voie entrante vers une voie sortante', 'Clic sur une liaison : la retirer'] },
   feux: { titre: 'Poser les feux', aides: ['Glisser chaque feu jusqu’à son mât', 'Clic sur le point creux : position OSM'] },

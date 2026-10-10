@@ -20,7 +20,7 @@ const noeud = (id: string, degre: number, carrefour: string | null = null): Rese
   type: 'Feature',
   id,
   geometry: { type: 'Point', coordinates: origine },
-  properties: { id, carrefour_id: carrefour, osm_node_id: null, feux: false, pieton: null, degre, liaisons: null },
+  properties: { id, carrefour_id: carrefour, osm_node_id: null, feux: false, pieton: null, degre, liaisons: null, placements_voies: null },
 })
 
 describe('voies des rues', () => {

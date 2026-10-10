@@ -46,6 +46,27 @@ export const PolygoneEmprise = z.array(LonLat).min(3).max(40);
 export const EmprisesVoies = z.record(z.string().regex(/^(avant|arriere):\d$/), PolygoneEmprise).nullable();
 export type EmprisesVoies = z.infer<typeof EmprisesVoies>;
 
+/**
+ * Place visuelle du bout d'une voie à un nœud (docs/voies-position-visuelle.md) : `recul` (m) le
+ * long de la voie, vers l'intérieur de la rue (< 0 : plus loin que son bout), `decalage` (m) de
+ * côté, positif à droite du sens de circulation ; `decalage_loin` (m) : décalage au bout éloigné
+ * du bloc de 40 m, qui le fait pivoter (absent : égal à `decalage`). Seul le dessin la suit, pas
+ * le graphe ni SUMO.
+ */
+export const PlacementVoie = z.object({
+  recul: z.number().min(-30).max(60),
+  decalage: z.number().min(-15).max(15),
+  decalage_loin: z.number().min(-30).max(30).optional(),
+});
+export type PlacementVoie = z.infer<typeof PlacementVoie>;
+
+/** Places des bouts de voies d'un nœud, par clé `<tronçon>:avant:0`, `<tronçon>:arriere:1`… ; null : aucune. */
+export const PlacementsVoies = z
+  .record(z.string().regex(/^[0-9a-f-]{36}:(avant|arriere):\d$/), PlacementVoie)
+  .refine((p) => Object.keys(p).length <= 200, 'Trop de voies placées')
+  .nullable();
+export type PlacementsVoies = z.infer<typeof PlacementsVoies>;
+
 /** Propriétés d'un tronçon sur la carte. `avant` : de `noeud_de` vers `noeud_vers`. */
 export interface TronconResume {
   id: string;
@@ -97,6 +118,8 @@ export interface NoeudResume {
   degre: number;
   /** Liaisons saisies ; null : celles proposées par défaut. */
   liaisons: Liaison[] | null;
+  /** Places visuelles des bouts de voies ; null : toutes à leur place automatique. */
+  placements_voies: PlacementsVoies;
 }
 
 /** Passage piéton tracé librement (docs/pipeline-donnees.md, étape 11). */
@@ -217,13 +240,16 @@ export type ModificationTroncon = z.infer<typeof ModificationTroncon>;
 
 /**
  * PATCH /api/reseau/noeuds/:id : déplacer le nœud (les tronçons le suivent), dire s'il porte une
- * ligne d'arrêt à feux ou un passage piéton, le mettre dans un carrefour ou l'en retirer (null).
+ * ligne d'arrêt à feux ou un passage piéton, le mettre dans un carrefour ou l'en retirer (null),
+ * placer les bouts de ses voies sur la photo.
  */
 export const ModificationNoeud = z.object({
   position: LonLat.optional(),
   feux: z.boolean().optional(),
   pieton: TraverseePieton.nullable().optional(),
   carrefour_id: z.uuid().nullable().optional(),
+  /** Toutes les places visuelles des bouts de voies du nœud (remplacées) ; null : aucune. */
+  placements_voies: PlacementsVoies.optional(),
 });
 export type ModificationNoeud = z.infer<typeof ModificationNoeud>;
 

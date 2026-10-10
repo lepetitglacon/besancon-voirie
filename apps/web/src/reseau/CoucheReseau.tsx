@@ -19,9 +19,21 @@ import type { Cible, Trace } from './trace'
 
 /**
  * Outils de l'éditeur des voies (`noeuds` seulement avec un carrefour ouvert). Voie, passage,
- * emprise, forme et embranchements : docs/pipeline-donnees.md, étapes 1, 3, 8 et 9.
+ * emprise, forme et embranchements : docs/pipeline-donnees.md, étapes 1, 3, 8 et 9 ; placer les
+ * bouts des voies sur la photo : docs/voies-position-visuelle.md.
  */
-export type OutilReseau = 'selection' | 'tracer' | 'couper' | 'connecter' | 'noeuds' | 'voie' | 'passage' | 'emprise' | 'forme' | 'embranchements'
+export type OutilReseau =
+  | 'selection'
+  | 'tracer'
+  | 'couper'
+  | 'connecter'
+  | 'noeuds'
+  | 'voie'
+  | 'passage'
+  | 'emprise'
+  | 'forme'
+  | 'embranchements'
+  | 'placer'
 
 /** Distance (px) à laquelle un clic accroche un nœud ou un tronçon. */
 const TOLERANCE_PX = 8

@@ -54,6 +54,7 @@ CREATE TABLE noeud (
   carrefour_id  uuid REFERENCES carrefour ON DELETE SET NULL,  -- plusieurs nœuds par carrefour
   geom          geometry(Point, 4326) NOT NULL,
   liaisons      jsonb,              -- liaisons saisies [{de, voie_de, vers, voie_vers}] ; null : proposées
+  placements_voies jsonb,           -- places visuelles des bouts de voies {"<tronçon>:avant:0": {recul, decalage}} ; null : automatiques
   feux          boolean NOT NULL DEFAULT false,   -- ligne d'arrêt à feux des véhicules
   pieton        traversee_pieton                  -- passage piéton sur le nœud
 );
@@ -85,6 +86,7 @@ ALTER TABLE connexion ADD COLUMN trace geometry(LineString, 4326);  -- chemin à
 | Rang d'une voie | 0 = la plus à gauche dans son sens de circulation. Une voie vélo le long de la chaussée est la dernière (la plus à droite), sauf à gauche d'un sens unique. |
 | Types de voies | `generale`, `bus`, `velo`, `tram`. `types_avant` null : toutes générales ; une liste plus courte est complétée par des voies générales. |
 | Voies d'une rue | `voiesTroncon` : tout du long de l'axe, `avant` à droite de l'axe et `arriere` à gauche (rang 0 contre l'axe), un sens unique centré. Reculées aux intersections (`retraitAuNoeud` : 3 m entre deux tronçons, 4 m + 0,6 voie par voie au-delà) pour laisser la place aux liaisons. |
+| Place visuelle d'un bout de voie | Au nœud, le bout d'une voie peut être posé à la main sur la photo (docs/voies-position-visuelle.md) : `recul` le long de la voie, `decalage` de côté (positif à droite du sens de circulation). Le bloc de 40 m du bout glisse d'un tenant, et pivote si `decalage_loin` diffère de `decalage`, puis la voie rejoint sa place sur 10 m (`placerBoutVoie`). Dans un carrefour, chaque voie de branche garde `geom` (place automatique : mouvements, conflits) et reçoit `trace` (la voie dessinée, pour le calque). **Seul le dessin le suit** (rues, liaisons, calque du carrefour) : ni le graphe, ni les connexions, ni l'export SUMO. |
 | Liaisons d'un nœud | D'une voie qui arrive (`de`, `voie_de`) vers une voie qui repart (`vers`, `voie_vers`). Proposées par `liaisonsParDefaut` : tout droit voie à voie, tourne-à-gauche de gauche à gauche, tourne-à-droite de droite à droite, pas de demi-tour (braquage ≥ 150°, même vers l'autre chaussée d'un boulevard) ; deux tronçons seuls se prolongent voie à voie (`liensParDefaut` : 1 → 3 élargit, 3 → 1 rejoint). Les voies vélo se relient entre elles ; sans voie vélo en face, un vélo rejoint la voie de droite (de gauche pour tourner à gauche) ; une piste cyclable part de la voie de droite d'une rue sans voie vélo ; une voiture n'est jamais envoyée sur une voie vélo. Des liaisons saisies devenues impossibles sont ignorées. |
 | Ligne d'arrêt | Un nœud `feux` : feu véhicule OSM (`highway=traffic_signals`) posé sur la voie, ou saisi. Un feu piéton (`crossing=traffic_signals`) est un passage piéton `pieton = feux`. |
 
@@ -190,6 +192,7 @@ longitude, latitude : netconvert les projette en UTM (`proj.plain-geo`, `proj.ut
 | Carrefour coupé par l'emprise exportée | Ses nœuds restent séparés, `tl="c<carrefour>"` partagé (comme avant) |
 | Tronçon, sens avant / arrière | `t<tronçon>` / `-t<tronçon>` ; voies bus, vélo, tram : `<lane allow="bus\|bicycle\|tram"/>`, une voie vélo avec `width="1.50"` ; une voie dont l'emprise est dessinée prend sa largeur moyenne (`width`) |
 | Liaisons de chaque nœud hors carrefour | `<connection>` (saisies, ou à défaut proposées) : ce qu'on voit dans l'éditeur est ce que SUMO simule. SUMO numérote les voies de la droite vers la gauche : index = nombre de voies − 1 − rang. |
+| Places visuelles des bouts de voies | Ignorées : la forme des arêtes vient du tracé des tronçons, jamais de la géométrie des voies dessinées. |
 
 ## 6. API
 
@@ -201,7 +204,7 @@ longitude, latitude : netconvert les projette en UTM (`proj.plain-geo`, `proj.ut
 | PATCH | `/api/reseau/troncons/:id` | Nom, voies par sens, types de voies, vitesse, tracé (`points`, bouts gardés sur leurs nœuds), `inverser` ; `voie` : ajouter ou retirer une voie à un rang (types, emprises et liaisons saisies aux deux bouts suivent) ; `emprise` : poser ou retirer l'emprise d'une voie (`EditionGuard`) |
 | DELETE | `/api/reseau/troncons/:id` | Supprime (tracé à la main) ou masque (OSM) (`EditionGuard`) |
 | POST | `/api/reseau/troncons/:id/couper` | `{ position, feux?, pieton? }` : nouveau nœud, qui peut porter d'emblée une ligne d'arrêt ou un passage piéton, au point le plus proche ; voies, types et liaisons gardés de part et d'autre ; entre deux nœuds d'un même carrefour, le nœud en fait partie (`EditionGuard`) |
-| PATCH | `/api/reseau/noeuds/:id` | `{ position?, feux?, pieton?, carrefour_id? }` : déplacer (les tronçons suivent), ligne d'arrêt à feux, passage piéton, carrefour (null : l'en retirer) (`EditionGuard`) |
+| PATCH | `/api/reseau/noeuds/:id` | `{ position?, feux?, pieton?, carrefour_id?, placements_voies? }` : déplacer (les tronçons suivent), ligne d'arrêt à feux, passage piéton, carrefour (null : l'en retirer) (`EditionGuard`) |
 | DELETE | `/api/reseau/noeuds/:id` | Retire un nœud entre deux tronçons de mêmes voies : ils n'en font plus qu'un ; 400 sinon (`EditionGuard`) |
 | POST | `/api/reseau/noeuds/fusion` | `{ noeuds, position? }` ou `{ carrefour, coeur?, position? }` : réunit des nœuds en un seul, au barycentre ; les tronçons entre eux disparaissent (masqués s'ils viennent d'OSM) ; 400 pour des nœuds de carrefours différents (`EditionGuard`) |
 | POST | `/api/reseau/passages` | `{ points: [a, b], type, troncons?, feux }` : passage piéton tracé librement ; sans `troncons`, ceux qu'il coupe (`EditionGuard`) |
@@ -240,6 +243,7 @@ ne dessine que quelques dizaines d'éléments.
 | ＋ **Tracer** (<kbd>T</kbd>) | Cliquer le départ (un nœud, une rue, qui sera coupée à cet endroit, ou un point libre), les points de la rue, puis l'arrivée ; <kbd>Entrée</kbd> finit sur un point libre, <kbd>⌫</kbd> retire le dernier point, <kbd>Échap</kbd> annule. |
 | ✂ **Couper** (<kbd>X</kbd>) | Un clic sur une voie pose un nœud : ligne d'arrêt, passage piéton, début d'une voie de présélection (le tronçon d'approche a alors ses propres voies). |
 | ↝ **Liaison** (<kbd>C</kbd>) | Du bout d'une voie qui arrive (poignée bleue) vers le début d'une voie qui repart (poignée creuse), à un nœud hors des carrefours ; pointillés : proposées ; refaire le geste ou cliquer une liaison la retire. |
+| ✥ **Placer** (<kbd>B</kbd>) | Glisser le bout d'une voie (poignée ronde, à chaque nœud ; dans un carrefour ouvert, à ses nœuds) le pose là où il est sur la photo : ligne d'arrêt, bord de la piste. Un clic le choisit (recul et décalage au centimètre, rotation, « Auto ») ; <kbd>Maj</kbd> + clic en choisit plusieurs, qui se glissent ensemble ; la poignée de pivot (anneau cyan, au bout du bloc) fait tourner le bloc ; un double-clic remet à la place automatique. Le graphe et SUMO ne bougent pas. |
 | ◎ **Nœuds** (<kbd>N</kbd>, carrefour ouvert) | Un clic sur un nœud l'ajoute au carrefour ou l'en retire. |
 
 **Carrefour ouvert** : Sélection, Tracer, Couper et Nœuds agissent sur le réseau ; ↝ **Liaison**

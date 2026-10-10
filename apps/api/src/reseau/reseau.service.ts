@@ -6,16 +6,22 @@ import {
   configurationNetconvert,
   decalerEmprises,
   decalerLiaisons,
+  decalerPlacements,
   exporterSumo,
   insererType,
   inverserEmprises,
+  inverserPlacements,
   liaisonsRetenues,
+  lireClePlacement,
   noeudsApproche,
   partagerEmprises,
+  renommerPlacements,
+  retirerPlacements,
   retirerType,
   type CarrefourSumo,
   type EmprisesTroncon,
   type LonLat,
+  type PlacementsVoies,
   type ReseauSumo,
   type TypeVoieReseau,
 } from '@voirie/engine';
@@ -65,7 +71,8 @@ const COLONNES = sql`
 const FROM_TRONCONS = sql`troncon t JOIN noeud nd ON nd.id = t.noeud_de JOIN noeud nv ON nv.id = t.noeud_vers`;
 
 const COLONNES_NOEUD = sql`
-  n.id, ST_AsGeoJSON(n.geom)::json AS geometry, n.carrefour_id, n.osm_node_id::float8 AS osm_node_id, n.liaisons, n.feux, n.pieton,
+  n.id, ST_AsGeoJSON(n.geom)::json AS geometry, n.carrefour_id, n.osm_node_id::float8 AS osm_node_id, n.liaisons, n.placements_voies,
+  n.feux, n.pieton,
   (SELECT count(*)::int FROM troncon t WHERE NOT t.supprime AND (t.noeud_de = n.id OR t.noeud_vers = n.id)) AS degre`;
 
 type LignePassage = { [K in keyof PassageResume]: PassageResume[K] } & { geometry: { type: 'LineString'; coordinates: LonLat[] } };
@@ -115,6 +122,25 @@ async function reecrireLiaisons(db: Executeur, noeud: string, changer: (liaisons
   const avant = rows[0]?.liaisons ?? null;
   if (!avant) return;
   await db.execute(sql`UPDATE noeud SET liaisons = ${JSON.stringify(changer(avant))}::jsonb WHERE id = ${noeud}`);
+}
+
+const placementsSql = (placements: PlacementsVoies | null) => (placements && Object.keys(placements).length > 0 ? JSON.stringify(placements) : null);
+
+/**
+ * Réécrit les places visuelles des bouts de voies d'un nœud (docs/voies-position-visuelle.md),
+ * quand les voies d'un tronçon qui y touche changent de clé.
+ */
+async function reecrirePlacements(
+  db: Executeur,
+  noeud: string,
+  changer: (placements: PlacementsVoies) => PlacementsVoies | null,
+): Promise<void> {
+  const { rows } = await db.execute<{ placements: PlacementsVoies | null }>(sql`
+    SELECT placements_voies AS placements FROM noeud WHERE id = ${noeud} FOR UPDATE
+  `);
+  const avant = rows[0]?.placements ?? null;
+  if (!avant) return;
+  await db.execute(sql`UPDATE noeud SET placements_voies = ${placementsSql(changer(avant))}::jsonb WHERE id = ${noeud}`);
 }
 
 /** Nœuds voisins d'un nœud (à l'autre bout de ses tronçons) : leurs voies bougent avec lui. */
@@ -265,6 +291,10 @@ export class ReseauService {
         champs.push(sql`types_arriere = ${typesSql(typesPour(nouveauxArriere, modification.types_arriere ?? typesArriere))}::jsonb`);
       }
       let emprises = modification.inverser ? inverserEmprises(troncon.emprises) : troncon.emprises;
+      // Les places visuelles des bouts de voies suivent, aux deux nœuds.
+      if (modification.inverser) {
+        for (const n of [troncon.noeud_de, troncon.noeud_vers]) await reecrirePlacements(tx, n, (p) => inverserPlacements(p, id));
+      }
       if (modification.voie) {
         const { sens, rang } = modification.voie;
         const nombre = sens === 'avant' ? avant : arriere;
@@ -288,6 +318,7 @@ export class ReseauService {
         const bouts = boutsDuSens(troncon, sens);
         await reecrireLiaisons(tx, bouts.arrivent, (l) => decalerLiaisons(l, id, 'arrivent', position, decalage));
         await reecrireLiaisons(tx, bouts.repartent, (l) => decalerLiaisons(l, id, 'repartent', position, decalage));
+        for (const n of [troncon.noeud_de, troncon.noeud_vers]) await reecrirePlacements(tx, n, (p) => decalerPlacements(p, id, sens, position, decalage));
       }
       if (modification.emprise) {
         const { sens, rang, polygone } = modification.emprise;
@@ -295,6 +326,17 @@ export class ReseauService {
         emprises = polygone ? { ...autres, [cleEmprise(sens, rang)]: polygone } : autres;
       }
       if (modification.voie || modification.emprise || modification.inverser) champs.push(sql`emprises = ${emprisesSql(emprises)}::jsonb`);
+      // Moins de voies dans un sens : les places de celles qui disparaissent sont oubliées.
+      if (modification.voies_avant !== undefined || modification.voies_arriere !== undefined) {
+        const restantes = (p: PlacementsVoies) =>
+          Object.fromEntries(
+            Object.entries(p).filter(([cle]) => {
+              const c = lireClePlacement(cle);
+              return !c || c.troncon !== id || c.rang < (c.sens === 'avant' ? nouveauxAvant : nouveauxArriere);
+            }),
+          );
+        for (const n of [troncon.noeud_de, troncon.noeud_vers]) await reecrirePlacements(tx, n, restantes);
+      }
       if (modification.points) {
         // Les bouts restent sur leurs nœuds : seul le tracé entre eux change.
         champs.push(sql`geom = ST_SetPoint(ST_SetPoint(${ligneSql(modification.points)}, 0, ST_StartPoint(geom)), -1, ST_EndPoint(geom))`);
@@ -329,6 +371,7 @@ export class ReseauService {
       } else {
         await tx.execute(sql`DELETE FROM troncon WHERE id = ${id}`);
       }
+      for (const n of [troncon.noeud_de, troncon.noeud_vers]) await reecrirePlacements(tx, n, (p) => retirerPlacements(p, id));
       await rafraichirCarrefours(tx, [troncon.noeud_de, troncon.noeud_vers]);
       await tx.execute(sql`
         DELETE FROM noeud n WHERE n.id IN (${troncon.noeud_de}, ${troncon.noeud_vers})
@@ -340,7 +383,8 @@ export class ReseauService {
 
   /**
    * Déplace un nœud (les bouts de ses tronçons le suivent), change sa ligne d'arrêt à feux, son
-   * passage piéton, ou le carrefour dont il fait partie. Les carrefours touchés sont recalculés.
+   * passage piéton, le carrefour dont il fait partie, ou les places visuelles des bouts de ses
+   * voies. Les carrefours touchés sont recalculés.
    */
   async modifierNoeud(id: string, modification: ModificationNoeud) {
     await this.db.transaction(async (tx) => {
@@ -358,6 +402,10 @@ export class ReseauService {
         }
         champs.push(sql`carrefour_id = ${modification.carrefour_id}`);
       }
+      if (modification.placements_voies !== undefined) {
+        await this.verifierPlacements(tx, id, modification.placements_voies);
+        champs.push(sql`placements_voies = ${placementsSql(modification.placements_voies)}::jsonb`);
+      }
       if (champs.length > 0) await tx.execute(sql`UPDATE noeud SET ${sql.join(champs, sql`, `)} WHERE id = ${id}`);
       if (modification.position) {
         await tx.execute(sql`UPDATE troncon SET geom = ST_SetPoint(geom, 0, ${pointSql(modification.position)}), modifie_le = now() WHERE noeud_de = ${id}`);
@@ -374,6 +422,22 @@ export class ReseauService {
       }
     });
     return this.lireNoeud(this.db, id);
+  }
+
+  /** 400 si une place vise une voie qui ne touche pas ce nœud (tronçon absent, ou rang de trop). */
+  private async verifierPlacements(tx: Executeur, noeud: string, placements: PlacementsVoies | null): Promise<void> {
+    if (!placements) return;
+    const { rows } = await tx.execute<{ id: string; voies_avant: number; voies_arriere: number }>(sql`
+      SELECT id, voies_avant, voies_arriere FROM troncon WHERE NOT supprime AND (noeud_de = ${noeud} OR noeud_vers = ${noeud})
+    `);
+    const parId = new Map(rows.map((t) => [t.id, t]));
+    for (const cle of Object.keys(placements)) {
+      const c = lireClePlacement(cle);
+      const t = c && parId.get(c.troncon);
+      if (!c || !t || c.rang >= (c.sens === 'avant' ? t.voies_avant : t.voies_arriere)) {
+        throw new BadRequestException(`Place d’une voie qui n’arrive pas à ce nœud : ${cle}`);
+      }
+    }
   }
 
   /**
@@ -449,6 +513,10 @@ export class ReseauService {
         WHERE id = ${a!.id}
       `);
       await renvoyerLiaisons(tx, loinB.noeud, b!.id, a!.id);
+      // Places des bouts de voies aux nœuds éloignés : `b` y est remplacé par `a`, et un tronçon
+      // retourné pour suivre le sens du tronçon fusionné échange ses voies avant et arrière.
+      await reecrirePlacements(tx, loinB.noeud, (p) => renommerPlacements(p, b!.id, a!.id, b!.versLeNoeud));
+      if (!a!.versLeNoeud) await reecrirePlacements(tx, loinA.noeud, (p) => inverserPlacements(p, a!.id));
       if (b!.source === 'osm') {
         await marquerModifie(tx, b!.id);
         await tx.execute(sql`UPDATE troncon SET supprime = true WHERE id = ${b!.id}`);
@@ -471,8 +539,17 @@ export class ReseauService {
     const garde = await this.db.transaction(async (tx) => {
       const ids = 'noeuds' in fusion ? [...new Set(fusion.noeuds)] : await this.noeudsAFusionner(tx, fusion.carrefour, fusion.coeur);
       if (ids.length < 2) throw new BadRequestException('Au moins deux nœuds à fusionner');
-      const { rows } = await tx.execute<{ id: string; lon: number; lat: number; carrefour_id: string | null; feux: boolean; osm_node_id: number | null }>(sql`
-        SELECT id, ST_X(geom) AS lon, ST_Y(geom) AS lat, carrefour_id, feux, osm_node_id::float8 AS osm_node_id
+      const { rows } = await tx.execute<{
+        id: string;
+        lon: number;
+        lat: number;
+        carrefour_id: string | null;
+        feux: boolean;
+        osm_node_id: number | null;
+        placements: PlacementsVoies | null;
+      }>(sql`
+        SELECT id, ST_X(geom) AS lon, ST_Y(geom) AS lat, carrefour_id, feux, osm_node_id::float8 AS osm_node_id,
+               placements_voies AS placements
         FROM noeud WHERE id = ANY (${`{${ids.join(',')}}`}::uuid[]) ORDER BY osm_node_id NULLS LAST, id FOR UPDATE
       `);
       if (rows.length !== ids.length) throw new NotFoundException('Nœud inconnu');
@@ -488,9 +565,12 @@ export class ReseauService {
       `);
       const dedans = new Set(ids);
       const voisinsExterieurs = new Set<string>();
+      // Le nœud gardé reprend les places des bouts de voies de tous, sauf celles des tronçons qui disparaissent.
+      let placements: PlacementsVoies | null = Object.assign({}, ...rows.map((r) => r.placements ?? {}));
       for (const t of touches) {
         if (t.source === 'osm') await marquerModifie(tx, t.id);
         if (dedans.has(t.noeud_de) && dedans.has(t.noeud_vers)) {
+          placements = retirerPlacements(placements, t.id);
           if (t.source === 'osm') await tx.execute(sql`UPDATE troncon SET supprime = true WHERE id = ${t.id}`);
           else await tx.execute(sql`DELETE FROM troncon WHERE id = ${t.id}`);
           continue;
@@ -504,11 +584,11 @@ export class ReseauService {
       }
       await tx.execute(sql`
         UPDATE noeud SET geom = ${pointSql(position)}, feux = ${rows.some((r) => r.feux)}, pieton = NULL, liaisons = NULL,
-          carrefour_id = ${carrefours[0] ?? null}
+          placements_voies = ${placementsSql(placements)}::jsonb, carrefour_id = ${carrefours[0] ?? null}
         WHERE id = ${garde}
       `);
       await tx.execute(sql`
-        UPDATE noeud SET carrefour_id = NULL, liaisons = NULL WHERE id = ANY (${liste}) AND id <> ${garde}
+        UPDATE noeud SET carrefour_id = NULL, liaisons = NULL, placements_voies = NULL WHERE id = ANY (${liste}) AND id <> ${garde}
       `);
       await rafraichirCarrefours(tx, [garde, ...voisinsExterieurs]);
       return garde;
@@ -694,6 +774,7 @@ export class ReseauService {
     `);
     // Au bout `vers`, c'est désormais la seconde moitié qui arrive.
     await renvoyerLiaisons(tx, coupe.noeud_vers, accroche.id, suite[0]!.id);
+    await reecrirePlacements(tx, coupe.noeud_vers, (p) => renommerPlacements(p, accroche.id, suite[0]!.id));
     await tx.execute(sql`
       UPDATE troncon SET geom = ST_LineSubstring(geom, 0, ${coupe.f}), noeud_vers = ${milieu}, branche_vers = NULL,
         emprises = ${emprisesSql(emprisesDebut)}::jsonb

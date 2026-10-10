@@ -169,6 +169,20 @@
       "when": 1791629457655,
       "tag": "20261010105057_passages_pietons",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791642477492,
+      "tag": "20261010142757_placements_voies",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791644117445,
+      "tag": "20261010145517_trace_voies",
+      "breakpoints": true
     }
   ]
 }

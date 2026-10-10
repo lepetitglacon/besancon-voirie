@@ -1,0 +1,1 @@
+ALTER TABLE "noeud" ADD COLUMN "placements_voies" jsonb;

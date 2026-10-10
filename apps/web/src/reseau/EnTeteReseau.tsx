@@ -61,6 +61,11 @@ export function EnTeteReseau({ outil, visible, nbTroncons, tronque, bbox, genera
             Cliquez une voie (zoom 16 et plus), puis les coins de son marquage sur la photo ; <Kbd>Entrée</Kbd> ou un clic
             sur le premier coin enregistre, <Kbd>⌫</Kbd> retire le dernier coin. Sa largeur réelle part dans l’export SUMO.
           </>
+        ) : outil === 'placer' ? (
+          <>
+            Glissez le bout d’une voie (rond, à chaque nœud) là où elle arrive sur la photo : sa ligne d’arrêt, le bord de
+            la piste. Seul le dessin bouge : le nœud, les liaisons et l’export SUMO restent tels quels.
+          </>
         ) : outil === 'connecter' ? (
           <>
             Glissez du bout d’une voie (bleu) vers une voie qui repart, à chaque nœud. Pointillés : liaisons proposées ;

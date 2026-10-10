@@ -133,8 +133,9 @@ export async function ecrireBranches(
     `);
     for (const v of b.voies) {
       const { rows: voie } = await tx.execute<{ id: string }>(sql`
-        INSERT INTO voie (branche_id, sens, rang, type, geom)
-        VALUES (${rows[0]!.id}, ${v.sens}, ${v.rang}, ${v.type}, ST_SetSRID(ST_GeomFromGeoJSON(${ligne(v.geom)}), 4326))
+        INSERT INTO voie (branche_id, sens, rang, type, geom, trace)
+        VALUES (${rows[0]!.id}, ${v.sens}, ${v.rang}, ${v.type}, ST_SetSRID(ST_GeomFromGeoJSON(${ligne(v.geom)}), 4326),
+                ${v.trace ? sql`ST_SetSRID(ST_GeomFromGeoJSON(${ligne(v.trace)}), 4326)` : null})
         RETURNING id
       `);
       idsVoies.set(cleVoie(b.code, v.sens, v.rang), voie[0]!.id);
@@ -190,9 +191,11 @@ export class BranchesService {
              (ST_AsGeoJSON(b.traversee)::json)->'coordinates' AS traversee,
              b.priorite_entree, b.noeud, b.troncon,
              coalesce(
-               (SELECT json_agg(json_build_object(
+               -- Sans dessin (carrefour dessiné à la main), pas de clé trace.
+               (SELECT json_agg(json_strip_nulls(json_build_object(
                           'sens', v.sens, 'rang', v.rang, 'type', v.type,
-                          'geom', (ST_AsGeoJSON(v.geom)::json)->'coordinates')
+                          'geom', (ST_AsGeoJSON(v.geom)::json)->'coordinates',
+                          'trace', (ST_AsGeoJSON(v.trace)::json)->'coordinates'))
                         ORDER BY v.sens, v.rang)
                 FROM voie v WHERE v.branche_id = b.id),
                '[]'::json

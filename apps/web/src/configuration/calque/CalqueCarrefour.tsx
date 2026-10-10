@@ -96,6 +96,8 @@ const LARGEUR_PASSAGE_M = 2.5
 const TOLERANCE_CIBLE_PX = 14
 /** Au-delà (px) entre l'appui et le relâché, c'est un déplacement de la carte, pas un clic. */
 const TOLERANCE_CLIC_PX = 3
+/** Longueur (m) du bout d'une voie qui donne la tangente d'où partent ses courbes de connexion. */
+const AMORCE_M = 4
 const GRIS_SORTANTE = '#e5e7eb'
 const COULEUR_NOEUD = '#38bdf8'
 /** En dessous (m), relâcher un nœud après l'avoir saisi est un clic : sa popup s'ouvre. */
@@ -201,10 +203,35 @@ export function CalqueCarrefour(props: Props) {
   const largeurDessinee = (type: TypeVoie) => Math.max(2, (largeurVoie(type) * PART_DESSINEE) / metresParPixel)
   const largeurPassage = Math.max(2, LARGEUR_PASSAGE_M / metresParPixel)
 
+  // Chaque voie est dessinée d'après son tracé quand il y en a un (rue suivie, place posée à la
+  // main : docs/voies-position-visuelle.md), sinon d'après son segment.
   const voies = new Map(
-    apercu.branches.flatMap((b) => b.voies.map((v) => [cleVoie(b.code, v.sens, v.rang), { ...v, branche: b.code, troncon: b.troncon }] as const)),
+    apercu.branches.flatMap((b) =>
+      b.voies.map((v) => [cleVoie(b.code, v.sens, v.rang), { ...v, dessin: v.trace ?? v.geom, branche: b.code, troncon: b.troncon }] as const),
+    ),
   )
   const segmentPx = (geom: [LonLat, LonLat]): [XY, XY] => [px(geom[0]), px(geom[1])]
+  /** Bout du dessin d'une voie et un point quelques mètres plus loin : la tangente d'où partent les courbes. */
+  const amorcePx = (dessin: readonly LonLat[]): [XY, XY] => {
+    const points = dessin.map(px)
+    const depart = points[0]!
+    const loin = points.find((p) => Math.hypot(p[0] - depart[0], p[1] - depart[1]) * metresParPixel >= AMORCE_M) ?? points.at(-1)!
+    return [depart, loin]
+  }
+  /** Point aux `part` de la longueur du dessin d'une voie (pixels). */
+  const surLeDessinPx = (dessin: readonly LonLat[], part: number): XY => {
+    const points = dessin.map(px)
+    const longueurs = points.slice(1).map((p, i) => Math.hypot(p[0] - points[i]![0], p[1] - points[i]![1]))
+    let reste = longueurs.reduce((s, l) => s + l, 0) * part
+    for (let i = 0; i < longueurs.length; i++) {
+      if (reste <= longueurs[i]! && longueurs[i]! > 0) {
+        const t = reste / longueurs[i]!
+        return [points[i]![0] + (points[i + 1]![0] - points[i]![0]) * t, points[i]![1] + (points[i + 1]![1] - points[i]![1]) * t]
+      }
+      reste -= longueurs[i]!
+    }
+    return points.at(-1)!
+  }
 
   // ── Relations entre éléments, pour les états visuels ──
   const connexionsDeVoie = (cle: string) => apercu.connexions.filter((c) => c.de === cle || c.vers === cle)
@@ -258,7 +285,7 @@ export function CalqueCarrefour(props: Props) {
     let meilleure: { cle: string; distance: number } | null = null
     for (const [cle, voie] of voies) {
       if (voie.sens !== 'sortante') continue
-      const [vx, vy] = px(voie.geom[0])
+      const [vx, vy] = px(voie.dessin[0]!)
       const distance = Math.hypot(vx - x, vy - y)
       if (distance <= TOLERANCE_CIBLE_PX && (!meilleure || distance < meilleure.distance)) meilleure = { cle, distance }
     }
@@ -447,7 +474,7 @@ export function CalqueCarrefour(props: Props) {
       {[...voies].map(([cle, voie]) => (
         <Voie
           key={cle}
-          segment={segmentPx(voie.geom)}
+          trace={voie.dessin.map(px)}
           largeur={largeurDessinee(voie.type)}
           couleur={couleurs.get(cle) ?? GRIS_SORTANTE}
           sortante={voie.sens === 'sortante'}
@@ -467,8 +494,8 @@ export function CalqueCarrefour(props: Props) {
         return (
           <Courbe
             key={cle}
-            entree={segmentPx(entree.geom)}
-            sortie={segmentPx(sortie.geom)}
+            entree={amorcePx(entree.dessin)}
+            sortie={amorcePx(sortie.dessin)}
             couleur={couleurs.get(c.de) ?? '#ffffff'}
             etat={etatCourbe(cle)}
             feu={feux ? (feux.connexions.get(cle) ?? 'libre') : undefined}
@@ -486,16 +513,15 @@ export function CalqueCarrefour(props: Props) {
       })}
 
       {glisse?.type === 'connexion' && depart && (
-        <Elastique depart={px(depart.geom[0])} arrivee={cible ? px(cible.geom[0]) : px(glisse.position)} valide={cible !== undefined} />
+        <Elastique depart={px(depart.dessin[0]!)} arrivee={cible ? px(cible.dessin[0]!) : px(glisse.position)} valide={cible !== undefined} />
       )}
 
       {[...voies]
         .filter(([, v]) => v.sens === 'entrante')
         .map(([cle, voie]) => {
-          const [[x0, y0], [x1, y1]] = voie.geom
           const texte = (fleches[cle] ?? []).map((direction) => symboles.get(direction)).join('') || '∅'
           return (
-            <Etiquette key={`fleches-${cle}`} classe="calque-fleches" position={px([x0 + (x1 - x0) * 0.35, y0 + (y1 - y0) * 0.35])}>
+            <Etiquette key={`fleches-${cle}`} classe="calque-fleches" position={surLeDessinPx(voie.dessin, 0.35)}>
               {texte}
             </Etiquette>
           )

@@ -5,7 +5,7 @@
  * recalculées à chaque modification du réseau autour d'eux ; ses connexions aussi, tant qu'elles
  * n'ont pas été saisies à la main (`carrefour.connexions_saisies`), après quoi elles sont gardées.
  */
-import { vueCarrefour, type LonLat, type NoeudVue, type TronconVue, type TypeVoieReseau } from '@voirie/engine';
+import { vueCarrefour, type LonLat, type NoeudVue, type PlacementsVoies, type TronconVue, type TypeVoieReseau } from '@voirie/engine';
 import type { Branche, Liaison } from '@voirie/schema';
 import { sql } from 'drizzle-orm';
 import { connexionsEnregistrees, ecrireBranches } from '../branches/branches.service.js';
@@ -51,8 +51,17 @@ export async function rattacherNoeuds(db: Executeur, carrefourId: string): Promi
  * branches se saisissent à la main.
  */
 export async function materialiserCarrefour(db: Executeur, carrefourId: string): Promise<boolean> {
-  const { rows: noeuds } = await db.execute<{ id: string; lon: number; lat: number; feux: boolean; pieton: string | null; liaisons: Liaison[] | null }>(sql`
-    SELECT id, ST_X(geom) AS lon, ST_Y(geom) AS lat, feux, pieton, liaisons FROM noeud WHERE carrefour_id = ${carrefourId}
+  const { rows: noeuds } = await db.execute<{
+    id: string;
+    lon: number;
+    lat: number;
+    feux: boolean;
+    pieton: string | null;
+    liaisons: Liaison[] | null;
+    placements: PlacementsVoies | null;
+  }>(sql`
+    SELECT id, ST_X(geom) AS lon, ST_Y(geom) AS lat, feux, pieton, liaisons, placements_voies AS placements
+    FROM noeud WHERE carrefour_id = ${carrefourId}
   `);
   if (noeuds.length === 0) return false;
   const ids = noeuds.map((n) => n.id);
@@ -76,7 +85,9 @@ export async function materialiserCarrefour(db: Executeur, carrefourId: string):
     ORDER BY cree_le
   `);
   const vue = vueCarrefour({
-    noeuds: noeuds.map((n): NoeudVue => ({ id: n.id, position: [n.lon, n.lat], feux: n.feux, pieton: n.pieton, liaisons: n.liaisons })),
+    noeuds: noeuds.map(
+      (n): NoeudVue => ({ id: n.id, position: [n.lon, n.lat], feux: n.feux, pieton: n.pieton, liaisons: n.liaisons, placements: n.placements }),
+    ),
     troncons: troncons.map((t) => ({ ...t, types_avant: t.types_avant as TypeVoieReseau[] | null, types_arriere: t.types_arriere as TypeVoieReseau[] | null })),
     degres: new Map(degres.map((d) => [d.id, d.degre])),
     passages,

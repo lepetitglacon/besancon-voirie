@@ -9,11 +9,28 @@
  *   carrefour) ; en son cœur, on ne dessine que l'axe des tronçons, sans nœuds ni liaisons ;
  * - outil Sélection : glisser un nœud le déplace (les tronçons suivent) ;
  * - outil Liaison : du bout d'une voie qui arrive au début d'une voie qui repart (« lane
- *   connector »), à chaque nœud ; refaire le geste, ou cliquer une liaison, la retire.
+ *   connector »), à chaque nœud ; refaire le geste, ou cliquer une liaison, la retire ;
+ * - outil Placer : glisser le bout d'une voie le pose où il est sur la photo, sans toucher au
+ *   graphe (docs/voies-position-visuelle.md) ; la poignée de pivot (au bout du bloc des bouts
+ *   choisis) le fait tourner ; Maj + clic choisit plusieurs bouts, qui se glissent ensemble ; un
+ *   double-clic les remet à leur place automatique.
  * Les clics (popup, coupe, nœud du carrefour) passent par la couche du réseau, qui interroge
  * aussi ces couches-ci.
  */
-import { boutsAuNoeud, courbeConnexion, liaisonsRetenues, repereLocal, type Liaison, type LonLat, type TypeVoieReseau } from '@voirie/engine'
+import {
+  boutsAuNoeud,
+  courbeConnexion,
+  liaisonsRetenues,
+  pivotVers,
+  placementVers,
+  placerBoutVoie,
+  pointPivot,
+  repereLocal,
+  type Liaison,
+  type LonLat,
+  type PlacementVoie,
+  type TypeVoieReseau,
+} from '@voirie/engine'
 import type { ReseauGeoJson } from '@voirie/schema'
 import type { ExpressionSpecification, MapLayerMouseEvent, MapMouseEvent } from 'maplibre-gl'
 import { useEffect, useEffectEvent, useMemo, useState } from 'react'
@@ -23,8 +40,8 @@ import { FEU } from '../theme/couleurs'
 import { COULEURS_RESEAU } from './couleurs'
 import { COUCHE_COEUR, couchesInteractivesVoies, useCoucheDessous, ZONES, type OutilVoies } from './couchesVoies'
 import { metresEnPixels } from './largeurs'
-import { ZOOM_VOIES, type SelectionReseau } from './modeReseau'
-import { geometrieRues, type BoutVoie } from './voiesRues'
+import { ZOOM_VOIES, type ChangementPlacement, type SelectionReseau, type VoiePlacee } from './modeReseau'
+import { geometrieRues, type BoutAPlacer, type BoutVoie } from './voiesRues'
 
 interface Props {
   reseau: ReseauGeoJson
@@ -35,6 +52,12 @@ interface Props {
   onDeplacerNoeud: (id: string, position: LonLat) => void
   /** Ajoute la liaison au nœud, ou la retire si elle existe (les liaisons proposées deviennent saisies). */
   onBasculerLiaison: (noeud: string, liaison: Liaison) => void
+  /** Outil Placer : bouts de voies choisis (leurs réglages sont affichés). */
+  voiesPlacees: readonly VoiePlacee[]
+  /** Choisit un bout (null : aucun) ; `ajouter` (Maj) : l'ajoute aux bouts choisis, ou l'en retire. */
+  onChoisirVoiePlacee: (voie: VoiePlacee | null, ajouter: boolean) => void
+  /** Pose des bouts de voies ; placement null : à leur place automatique. */
+  onPlacerVoies: (changements: ChangementPlacement[]) => void
 }
 
 /** Les voies sont dessinées aux 8/10 de leur largeur, comme dans le calque du carrefour : on voit les séparations. */
@@ -43,6 +66,8 @@ const PART_DESSINEE = 0.8
 const DEBORD_ZEBRAS_M = 0.5
 /** Distance (px) à laquelle un début de voie attire l'élastique. */
 const TOLERANCE_CIBLE_PX = 14
+/** En deçà (m, le long de la voie comme de côté), un bout glissé revient à sa place automatique. */
+const AIMANT_AUTO_M = 0.3
 const GRIS = '#e5e7eb'
 /** Bout d'une voie qui arrive : c'est lui qu'on tire (les voies qui repartent sont des cibles, creuses). */
 const BLEU_ARRIVEE = '#2f6fd6'
@@ -71,6 +96,51 @@ interface Glisse {
   cible: BoutVoie | null
 }
 
+/** Bout de voie à placer, avec sa place enregistrée (null : automatique). */
+type BoutPlace = BoutAPlacer & { placement: PlacementVoie | null }
+
+/**
+ * Geste de l'outil Placer : le bout tiré (ou sa poignée de pivot) et les bouts qui le suivent
+ * (les bouts choisis, s'il en est), leur place pendant le geste.
+ */
+interface Placement {
+  type: 'bout' | 'pivot'
+  tire: BoutPlace
+  groupe: BoutPlace[]
+  /** Maj à l'appui : sans bouger, le bout est ajouté aux bouts choisis, ou en est retiré. */
+  ajouter: boolean
+  appui: [number, number]
+  depart: LonLat
+  places: Array<PlacementVoie | null>
+  bouge: boolean
+}
+
+const cleBout = (b: VoiePlacee) => `${b.noeud}|${b.cle}`
+const arrondiCm = (v: number) => Math.round(v * 100) / 100 || 0
+/** Décalage au bout éloigné du bloc. */
+const decalageLoin = (p: PlacementVoie | null) => (p ? (p.decalage_loin ?? p.decalage) : 0)
+
+/** Places du groupe quand le pointeur est en `pointeur`. */
+function placesGlissees(g: Placement, pointeur: LonLat): Array<PlacementVoie | null> {
+  if (g.type === 'bout') {
+    // Chaque bout glisse d'autant que le pointeur ; son bloc garde son pivot.
+    const [dlon, dlat] = [pointeur[0] - g.depart[0], pointeur[1] - g.depart[1]]
+    return g.groupe.map((b) => {
+      const place = placementVers(b.voie, b.extremite, [b.place[0] + dlon, b.place[1] + dlat], b.placement)
+      // Seul, et lâché tout près de sa place automatique, le bout y revient.
+      const aimante = g.groupe.length === 1 && !place.decalage_loin && Math.abs(place.recul) < AIMANT_AUTO_M && Math.abs(place.decalage) < AIMANT_AUTO_M
+      return aimante ? null : place
+    })
+  }
+  // Pivot : le bout éloigné du bloc tiré suit le pointeur de côté ; les autres tournent d'autant.
+  const ecart = decalageLoin(pivotVers(g.tire.voie, g.tire.extremite, g.tire.placement, pointeur)) - decalageLoin(g.tire.placement)
+  return g.groupe.map((b) => {
+    const a = b.placement ?? { recul: 0, decalage: 0 }
+    const loin = arrondiCm(decalageLoin(a) + ecart)
+    return loin === a.decalage ? { recul: a.recul, decalage: a.decalage } : { recul: a.recul, decalage: a.decalage, decalage_loin: loin }
+  })
+}
+
 /** Nœud saisi à la souris : où il a été pris, où il est maintenant. */
 interface Deplacement {
   id: string
@@ -79,7 +149,17 @@ interface Deplacement {
   bouge: boolean
 }
 
-export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDeplacerNoeud, onBasculerLiaison }: Props) {
+export function CoucheVoies({
+  reseau,
+  outil,
+  selection,
+  carrefourOuvert,
+  onDeplacerNoeud,
+  onBasculerLiaison,
+  voiesPlacees,
+  onChoisirVoiePlacee,
+  onPlacerVoies,
+}: Props) {
   const { current: carte } = useMap()
   const dessous = useCoucheDessous()
   const [survol, setSurvol] = useState<{ troncon: string | null; noeud: string | null; liaison: string | null }>({
@@ -89,6 +169,7 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
   })
   const [glisse, setGlisse] = useState<Glisse | null>(null)
   const [deplacement, setDeplacement] = useState<Deplacement | null>(null)
+  const [placement, setPlacement] = useState<Placement | null>(null)
 
   const troncons = reseau.troncons.features
   const noeuds = reseau.noeuds.features
@@ -270,7 +351,45 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
     }
   }, [connecter, noeuds, autour, geometrie])
 
-  // ── Gestes : glisser un nœud (Sélection), tirer une liaison (Liaison), survols ──
+  // Bouts des voies dessinées, à placer (outil Placer) : dans un carrefour ouvert, ceux de ses nœuds.
+  const placer = outil === 'placer'
+  const boutsAPlacer = useMemo(() => {
+    if (!placer) return []
+    const carrefourDe = new Map(noeuds.map((n) => [n.id, n.properties.carrefour_id]))
+    const placements = new Map(noeuds.map((n) => [n.id, n.properties.placements_voies]))
+    return geometrie.bouts
+      .filter((b) => !coeur.has(b.troncon) && (!carrefourOuvert || carrefourDe.get(b.noeud) === carrefourOuvert))
+      .map((b): BoutPlace => ({ ...b, placement: placements.get(b.noeud)?.[b.cle] ?? null }))
+  }, [placer, geometrie, noeuds, coeur, carrefourOuvert])
+  const choisis = useMemo(() => new Set(voiesPlacees.map(cleBout)), [voiesPlacees])
+  const boutsChoisis = useMemo(() => boutsAPlacer.filter((b) => choisis.has(cleBout(b))), [boutsAPlacer, choisis])
+  const poigneesBouts = useMemo(
+    () =>
+      collection<Point>(
+        boutsAPlacer.map((b) => ({
+          type: 'Feature' as const,
+          geometry: { type: 'Point' as const, coordinates: b.place },
+          properties: { id: cleBout(b), noeud: b.noeud, cle: b.cle, place: b.placement !== null },
+        })),
+      ),
+    [boutsAPlacer],
+  )
+  // Poignée de pivot au bout éloigné du bloc de chaque bout choisi, reliée à lui par un tireté.
+  const poigneesPivots = useMemo(
+    () =>
+      collection<Point | Ligne>(
+        boutsChoisis.flatMap((b) => {
+          const pivot = pointPivot(b.voie, b.extremite, b.placement)
+          return [
+            { type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: pivot }, properties: { id: cleBout(b), noeud: b.noeud, cle: b.cle } },
+            { type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: [b.place, pivot] }, properties: {} },
+          ]
+        }),
+      ),
+    [boutsChoisis],
+  )
+
+  // ── Gestes : glisser un nœud (Sélection), tirer une liaison (Liaison), placer un bout de voie (Placer), survols ──
 
   const surAppuiNoeud = useEffectEvent((e: MapLayerMouseEvent) => {
     if (outil !== 'selection' || e.originalEvent.button !== 0) return
@@ -287,8 +406,62 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
     e.preventDefault()
     setGlisse({ noeud: p.noeud as string, depart, pointeur: depart.bout, cible: null })
   })
+  const boutSous = (p: Record<string, unknown> | undefined) =>
+    p && boutsAPlacer.find((b) => b.noeud === p.noeud && b.cle === p.cle)
+  const commencerPlacement = (type: Placement['type'], tire: BoutPlace, groupe: BoutPlace[], ajouter: boolean, e: MapLayerMouseEvent) =>
+    setPlacement({
+      type,
+      tire,
+      groupe,
+      ajouter,
+      appui: [e.point.x, e.point.y],
+      depart: [e.lngLat.lng, e.lngLat.lat],
+      places: groupe.map((b) => b.placement),
+      bouge: false,
+    })
+  const surAppuiBout = useEffectEvent((e: MapLayerMouseEvent) => {
+    if (outil !== 'placer' || e.originalEvent.button !== 0) return
+    const bout = boutSous(e.features?.[0]?.properties)
+    if (!bout) return
+    // La carte ne se déplace pas, et Maj ne trace pas de zone de zoom.
+    e.preventDefault()
+    const ajouter = e.originalEvent.shiftKey
+    const choisi = choisis.has(cleBout(bout))
+    // Un bout choisi emmène les autres bouts choisis ; avec Maj, un bout non choisi les rejoint.
+    const groupe = choisi ? boutsChoisis : ajouter ? [...boutsChoisis, bout] : [bout]
+    if (!choisi && !ajouter) onChoisirVoiePlacee(bout, false)
+    commencerPlacement('bout', bout, groupe, ajouter, e)
+  })
+  const surAppuiPivot = useEffectEvent((e: MapLayerMouseEvent) => {
+    if (outil !== 'placer' || e.originalEvent.button !== 0) return
+    const bout = boutSous(e.features?.[0]?.properties)
+    if (!bout) return
+    e.preventDefault()
+    commencerPlacement('pivot', bout, boutsChoisis, false, e)
+  })
+  // Double-clic sur un bout : lui (et les bouts choisis, s'il en est) reviennent à leur place
+  // automatique ; sur une poignée de pivot : les blocs choisis ne pivotent plus. La carte ne zoome pas.
+  const surDoubleClicBout = useEffectEvent((e: MapLayerMouseEvent) => {
+    if (outil !== 'placer') return
+    const bout = boutSous(e.features?.[0]?.properties)
+    if (!bout) return
+    e.preventDefault()
+    const groupe = choisis.has(cleBout(bout)) ? boutsChoisis : [bout]
+    onPlacerVoies(groupe.map((b) => ({ noeud: b.noeud, cle: b.cle, placement: null })))
+  })
+  const surDoubleClicPivot = useEffectEvent((e: MapLayerMouseEvent) => {
+    if (outil !== 'placer') return
+    e.preventDefault()
+    onPlacerVoies(
+      boutsChoisis.map((b) => ({ noeud: b.noeud, cle: b.cle, placement: b.placement && { recul: b.placement.recul, decalage: b.placement.decalage } })),
+    )
+  })
   const surMouvement = useEffectEvent((e: MapMouseEvent) => {
     const pointeur: LonLat = [e.lngLat.lng, e.lngLat.lat]
+    if (placement) {
+      const bouge = placement.bouge || Math.hypot(e.point.x - placement.appui[0], e.point.y - placement.appui[1]) > TOLERANCE_CLIC_PX
+      if (bouge) setPlacement({ ...placement, places: placesGlissees(placement, pointeur), bouge })
+    }
     if (deplacement) {
       const bouge = deplacement.bouge || Math.hypot(e.point.x - deplacement.appui[0], e.point.y - deplacement.appui[1]) > TOLERANCE_CLIC_PX
       setDeplacement({ ...deplacement, position: pointeur, bouge })
@@ -303,6 +476,15 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
     }
   })
   const surRelache = useEffectEvent(() => {
+    if (placement) {
+      if (placement.bouge) {
+        onPlacerVoies(placement.groupe.map((b, i) => ({ noeud: b.noeud, cle: b.cle, placement: placement.places[i] ?? null })))
+      } else if (placement.type === 'bout') {
+        // Sans bouger, c'est un clic : le bout est choisi (Maj : ajouté ou retiré), ses réglages s'affichent.
+        onChoisirVoiePlacee(placement.tire, placement.ajouter)
+      }
+      setPlacement(null)
+    }
     if (deplacement?.bouge) onDeplacerNoeud(deplacement.id, deplacement.position)
     // Sans bouger, c'est un clic : la couche du réseau ouvre la popup du nœud.
     setDeplacement(null)
@@ -344,19 +526,42 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
     const relache = () => surRelache()
     map.on('mousedown', ZONES.noeuds, surAppuiNoeud)
     map.on('mousedown', ZONES.arrivees, surAppuiArrivee)
+    map.on('mousedown', ZONES.bouts, surAppuiBout)
+    map.on('mousedown', ZONES.pivots, surAppuiPivot)
+    map.on('dblclick', ZONES.bouts, surDoubleClicBout)
+    map.on('dblclick', ZONES.pivots, surDoubleClicPivot)
     map.on('click', ZONES.liaisons, surClicLiaison)
     map.on('mousemove', mouvement)
     window.addEventListener('mouseup', relache)
     return () => {
       map.off('mousedown', ZONES.noeuds, surAppuiNoeud)
       map.off('mousedown', ZONES.arrivees, surAppuiArrivee)
+      map.off('mousedown', ZONES.bouts, surAppuiBout)
+      map.off('mousedown', ZONES.pivots, surAppuiPivot)
+      map.off('dblclick', ZONES.bouts, surDoubleClicBout)
+      map.off('dblclick', ZONES.pivots, surDoubleClicPivot)
       map.off('click', ZONES.liaisons, surClicLiaison)
       map.off('mousemove', mouvement)
       window.removeEventListener('mouseup', relache)
     }
   }, [carte])
 
-  // ── Ce qui suit le pointeur : nœud déplacé, élastique ──
+  // ── Ce qui suit le pointeur : nœud déplacé, élastique, voie placée ──
+
+  /** Voies dont on glisse le bout ou le pivot, à la place qu'elles prendraient. */
+  const voieGlissee = useMemo(() => {
+    if (!placement?.bouge) return null
+    return collection<Ligne | Point>(
+      placement.groupe.flatMap((b, i) => {
+        const points = placerBoutVoie(b.voie, b.extremite, placement.places[i])
+        const bout = b.extremite === 'debut' ? points[0]! : points.at(-1)!
+        return [
+          { type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: points }, properties: { largeur: b.largeur * PART_DESSINEE } },
+          { type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: bout }, properties: {} },
+        ]
+      }),
+    )
+  }, [placement])
 
   const enCours = useMemo(() => {
     if (deplacement?.bouge) {
@@ -393,6 +598,9 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
   const couleurLiaison: ExpressionSpecification = ['case', ['==', ['get', 'cle'], survol.liaison ?? ''], FEU.rouge, '#ffffff']
   const largeurLiaison: ExpressionSpecification = ['case', ['==', ['get', 'cle'], survol.liaison ?? ''], 4, 2.5]
   const minzoom = ZOOM_VOIES - 0.5
+  const idsChoisis: ExpressionSpecification = ['in', ['get', 'id'], ['literal', [...choisis]]]
+  // Pendant le geste, les bouts glissés sont dessinés sur les voies qui les suivent.
+  const idsGlisses: ExpressionSpecification = ['in', ['get', 'id'], ['literal', placement?.bouge ? placement.groupe.map(cleBout) : []]]
 
   return (
     <>
@@ -561,6 +769,77 @@ export function CoucheVoies({ reseau, outil, selection, carrefourOuvert, onDepla
                 <Layer id={ZONES.arrivees} type="circle" beforeId={dessous} paint={{ 'circle-radius': 10, 'circle-opacity': 0 }} />
               </Source>
             </>
+          )}
+        </>
+      )}
+      {placer && (
+        <>
+          <Source id="reseau-voie-placee" type="geojson" data={voieGlissee ?? collection<Ligne | Point>([])}>
+            <Layer
+              id="reseau-voie-placee"
+              type="line"
+              beforeId={dessous}
+              filter={['==', ['geometry-type'], 'LineString']}
+              layout={{ 'line-cap': 'butt', 'line-join': 'round' }}
+              paint={{
+                'line-color': COULEURS_RESEAU.placement,
+                'line-width': metresEnPixels(['get', 'largeur'], 2),
+                'line-opacity': 0.75,
+              }}
+            />
+          </Source>
+          <Source id="reseau-bouts-voies" type="geojson" data={poigneesBouts}>
+            <Layer
+              id="reseau-bouts-voies"
+              type="circle"
+              beforeId={dessous}
+              paint={{
+                'circle-radius': ['case', idsChoisis, 6, 4.5],
+                // Placé à la main : plein ; à sa place automatique : creux.
+                'circle-color': ['case', ['get', 'place'], COULEURS_RESEAU.placement, '#ffffff'],
+                'circle-stroke-color': ['case', idsChoisis, '#ffffff', CONTOUR],
+                'circle-stroke-width': ['case', idsChoisis, 3, 1.5],
+                'circle-opacity': ['case', idsGlisses, 0, 1],
+                'circle-stroke-opacity': ['case', idsGlisses, 0, 1],
+              }}
+            />
+            <Layer id={ZONES.bouts} type="circle" beforeId={dessous} paint={{ 'circle-radius': 9, 'circle-opacity': 0 }} />
+          </Source>
+          {!placement?.bouge && (
+            <Source id="reseau-pivots" type="geojson" data={poigneesPivots}>
+              <Layer
+                id="reseau-pivots-liens"
+                type="line"
+                beforeId={dessous}
+                filter={['==', ['geometry-type'], 'LineString']}
+                paint={{ 'line-color': '#ffffff', 'line-width': 1.5, 'line-dasharray': [2, 2], 'line-opacity': 0.8 }}
+              />
+              {/* Poignée de pivot : un anneau cyan, pour la distinguer du bout. */}
+              <Layer
+                id="reseau-pivots"
+                type="circle"
+                beforeId={dessous}
+                filter={['==', ['geometry-type'], 'Point']}
+                paint={{ 'circle-radius': 5, 'circle-color': '#ffffff', 'circle-stroke-color': COULEURS_RESEAU.placement, 'circle-stroke-width': 3 }}
+              />
+              <Layer
+                id={ZONES.pivots}
+                type="circle"
+                beforeId={dessous}
+                filter={['==', ['geometry-type'], 'Point']}
+                paint={{ 'circle-radius': 10, 'circle-opacity': 0 }}
+              />
+            </Source>
+          )}
+          {voieGlissee && (
+            <Source id="reseau-bout-glisse" type="geojson" data={voieGlissee}>
+              <Layer
+                id="reseau-bout-glisse"
+                type="circle"
+                filter={['==', ['geometry-type'], 'Point']}
+                paint={{ 'circle-radius': 6, 'circle-color': COULEURS_RESEAU.placement, 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2.5 }}
+              />
+            </Source>
           )}
         </>
       )}

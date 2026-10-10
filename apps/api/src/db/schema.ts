@@ -22,7 +22,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import type { Anneau, ArcGraphe, Controleur, Etape, IntervalleVert, Liaison, Plage, TypeVoie } from '@voirie/schema';
+import type { Anneau, ArcGraphe, Controleur, Etape, IntervalleVert, Liaison, Plage, PlacementVoie, TypeVoie } from '@voirie/schema';
 
 // Tables du projet — voir docs/ARCHITECTURE.md §4.
 // Les tables issues d'OpenStreetMap (osm_*) sont gérées par l'import, pas par Drizzle.
@@ -157,6 +157,8 @@ export const voie = pgTable(
     rang: smallint('rang').notNull(),
     type: typeVoie('type').notNull().default('generale'),
     geom: ligne('geom').notNull(),
+    /** Dessin de la voie (place posée à la main, courbe de la rue) ; seul le calque le lit. */
+    trace: ligne('trace'),
   },
   (t) => [unique().on(t.brancheId, t.sens, t.rang)],
 );
@@ -368,6 +370,11 @@ export const noeud = pgTable(
     geom: geometry('geom', { type: 'point', mode: 'xy', srid: 4326 }).notNull(),
     /** Liaisons voie à voie saisies à ce nœud ; null : celles proposées par défaut. */
     liaisons: jsonb('liaisons').$type<Liaison[]>(),
+    /**
+     * Places visuelles des bouts de voies à ce nœud (`<tronçon>:avant:0` → recul, décalage) ;
+     * null : toutes à leur place automatique. Seul le dessin les suit (docs/voies-position-visuelle.md).
+     */
+    placementsVoies: jsonb('placements_voies').$type<Record<string, PlacementVoie>>(),
     /** Ligne d'arrêt à feux des véhicules : feu OSM `highway=traffic_signals` sur la voie, ou saisi. */
     feux: boolean('feux').notNull().default(false),
     /** Passage piéton sur le nœud ; null : aucun. */

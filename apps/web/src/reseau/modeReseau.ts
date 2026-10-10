@@ -6,7 +6,17 @@
  * Les modifications de la session s'annulent et se refont (docs/pipeline-donnees.md, étape 2).
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { boutsAuNoeud, cleEmprise, liaisonsRetenues, sensDuCote, typesVoies, type Liaison, type LonLat } from '@voirie/engine'
+import {
+  boutsAuNoeud,
+  cleEmprise,
+  liaisonsRetenues,
+  lireClePlacement,
+  sensDuCote,
+  typesVoies,
+  type Liaison,
+  type LonLat,
+  type PlacementVoie,
+} from '@voirie/engine'
 import type {
   Bbox,
   CoupeTroncon,
@@ -15,6 +25,7 @@ import type {
   ModificationTroncon,
   NouveauPassage,
   NouveauTroncon,
+  PlacementsVoies,
   ReseauGeoJson,
   SensTroncon,
 } from '@voirie/schema'
@@ -51,6 +62,28 @@ interface Options {
   carrefourOuvert: { id: string; nom: string } | null
   /** Nom d'un carrefour de la carte (pour les messages). */
   nomCarrefour: (id: string) => string
+}
+
+/** Bout de voie choisi avec l'outil Placer : son nœud et la clé de son placement (`<tronçon>:avant:0`). */
+export interface VoiePlacee {
+  noeud: string
+  cle: string
+}
+
+/** Nouvelle place d'un bout de voie ; null : sa place automatique. */
+export type ChangementPlacement = VoiePlacee & { placement: PlacementVoie | null }
+
+const memeBout = (a: VoiePlacee) => (b: VoiePlacee) => a.noeud === b.noeud && a.cle === b.cle
+
+/** Change les propriétés d'un nœud dans les données en cache, avant la réponse de l'API. */
+function changerNoeudDansLeCache(reseau: ReseauGeoJson, noeud: string, proprietes: Partial<Noeud['properties']>): ReseauGeoJson {
+  return {
+    ...reseau,
+    noeuds: {
+      ...reseau.noeuds,
+      features: reseau.noeuds.features.map((n) => (n.id === noeud ? { ...n, properties: { ...n.properties, ...proprietes } } : n)),
+    },
+  }
 }
 
 /** Place un nœud et les bouts de ses tronçons dans les données en cache, avant la réponse de l'API. */
@@ -112,6 +145,7 @@ function libelleModification(m: ModificationTroncon): string {
 }
 
 function libelleNoeud(m: ModificationNoeud): string {
+  if (m.placements_voies !== undefined) return 'Voie placée'
   if (m.position) return 'Nœud déplacé'
   if (m.feux !== undefined) return m.feux ? 'Ligne d’arrêt posée' : 'Ligne d’arrêt retirée'
   if (m.pieton !== undefined) return m.pieton ? 'Passage piéton posé' : 'Passage piéton retiré'
@@ -153,6 +187,24 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
   }
   /** Outil Embranchements : nœud dont la popup est ouverte. */
   const [embranchement, setEmbranchement] = useState<{ id: string; position: LonLat } | null>(null)
+  /**
+   * Outil Placer : bouts de voies choisis (Maj + clic en ajoute ou en retire), dont les réglages
+   * s'affichent ; oubliés en ouvrant ou fermant un carrefour.
+   */
+  const [voiesPlacees, setVoiesPlacees] = useState<VoiePlacee[]>([])
+  const [carrefourDuChoix, setCarrefourDuChoix] = useState(carrefourOuvert?.id ?? null)
+  if ((carrefourOuvert?.id ?? null) !== carrefourDuChoix) {
+    setCarrefourDuChoix(carrefourOuvert?.id ?? null)
+    setVoiesPlacees([])
+  }
+  /** Choisit un bout de voie (null : aucun) ; `ajouter` : l'ajoute aux bouts choisis, ou l'en retire. */
+  const choisirVoiePlacee = (voie: VoiePlacee | null, ajouter = false) => {
+    if (!voie) return setVoiesPlacees([])
+    setVoiesPlacees((actuelles) => {
+      if (!ajouter) return [voie]
+      return actuelles.some(memeBout(voie)) ? actuelles.filter((v) => !memeBout(voie)(v)) : [...actuelles, voie]
+    })
+  }
   const historique = useHistorique()
 
   const visible = actif && bbox !== undefined && zoom >= ZOOM_MIN_RESEAU
@@ -234,10 +286,13 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
   })
   const modificationNoeud = useMutation({
     mutationFn: ({ id, modification }: { id: string; modification: ModificationNoeud }) => api.modifierNoeud(id, modification),
-    // Un nœud déplacé l'est tout de suite sur la carte ; la réponse de l'API le confirme.
+    // Un nœud déplacé, une voie placée le sont tout de suite sur la carte ; la réponse de l'API le confirme.
     onMutate: ({ id, modification }) => {
-      const position = modification.position
+      const { position, placements_voies } = modification
       if (position) queryClient.setQueriesData<ReseauGeoJson>({ queryKey: ['reseau'] }, (r) => r && deplacerDansLeCache(r, id, position))
+      if (placements_voies !== undefined) {
+        queryClient.setQueriesData<ReseauGeoJson>({ queryKey: ['reseau'] }, (r) => r && changerNoeudDansLeCache(r, id, { placements_voies }))
+      }
     },
     onSuccess: rafraichir,
     onError: echec('Nœud non modifié'),
@@ -375,6 +430,7 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
             ...(m.feux !== undefined && { feux: p.feux }),
             ...(m.pieton !== undefined && { pieton: p.pieton }),
             ...(m.carrefour_id !== undefined && { carrefour_id: p.carrefour_id }),
+            ...(m.placements_voies !== undefined && { placements_voies: p.placements_voies }),
           }
           historique.enregistrer({
             libelle: libelleNoeud(m),
@@ -474,6 +530,59 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     enregistrerLiaisons(noeud, actuelles.some(meme) ? actuelles.filter((l) => !meme(l)) : [...actuelles, liaison])
   }
 
+  /** Enregistre les places de bouts de voies, nœud par nœud ; un seul geste à annuler. */
+  const placements = useMutation({
+    mutationFn: async (parNoeud: Map<string, PlacementsVoies>) => {
+      for (const [noeud, suivants] of parNoeud) await api.modifierNoeud(noeud, { placements_voies: suivants })
+    },
+    // Affichées tout de suite ; la réponse de l'API les confirme.
+    onMutate: (parNoeud) => {
+      for (const [noeud, placements_voies] of parNoeud) {
+        queryClient.setQueriesData<ReseauGeoJson>({ queryKey: ['reseau'] }, (r) => r && changerNoeudDansLeCache(r, noeud, { placements_voies }))
+      }
+    },
+    onSuccess: rafraichir,
+    onError: echec('Voies non placées'),
+  })
+
+  /**
+   * Outil Placer (docs/voies-position-visuelle.md) : pose des bouts de voies, ou les remet à leur
+   * place automatique (placement null). Les places qui ne visent plus une voie du nœud sont
+   * oubliées au passage.
+   */
+  const placerVoies = (changements: readonly ChangementPlacement[]) => {
+    const troncons = new Map(enCache().flatMap((r) => r.troncons.features).map((t) => [t.id, t.properties]))
+    const existe = (noeud: string) => (c: string) => {
+      const lue = lireClePlacement(c)
+      const t = lue && troncons.get(lue.troncon)
+      if (!lue) return false
+      // Hors de la vue : le serveur dira s'il existe encore.
+      if (!t) return true
+      return (t.noeud_de === noeud || t.noeud_vers === noeud) && lue.rang < (lue.sens === 'avant' ? t.voies_avant : t.voies_arriere)
+    }
+    const avant = new Map<string, PlacementsVoies>()
+    const apres = new Map<string, PlacementsVoies>()
+    for (const { noeud, cle, placement } of changements) {
+      const n = noeudEnCache(noeud)
+      if (!n) continue
+      if (!avant.has(noeud)) avant.set(noeud, n.properties.placements_voies ?? null)
+      const actuels = (apres.has(noeud) ? apres.get(noeud) : n.properties.placements_voies) ?? {}
+      const autres = Object.fromEntries(Object.entries(actuels).filter(([c]) => c !== cle && existe(noeud)(c)))
+      const vide = !placement || (placement.recul === 0 && placement.decalage === 0 && !placement.decalage_loin)
+      const suivants = vide ? autres : { ...autres, [cle]: placement }
+      apres.set(noeud, Object.keys(suivants).length > 0 ? suivants : null)
+    }
+    if (apres.size === 0) return
+    placements.mutate(apres, {
+      onSuccess: () =>
+        historique.enregistrer({
+          libelle: changements.length > 1 ? 'Voies placées' : 'Voie placée',
+          annuler: () => rejouer(Promise.all([...avant].map(([noeud, p]) => api.modifierNoeud(noeud, { placements_voies: p })))),
+          refaire: () => rejouer(Promise.all([...apres].map(([noeud, p]) => api.modifierNoeud(noeud, { placements_voies: p })))),
+        }),
+    })
+  }
+
   /** Outil Nœuds : met le nœud dans le carrefour ouvert, ou l'en retire. */
   const basculerNoeud = (id: string) => {
     const noeud = donnees.data?.noeuds.features.find((n) => n.id === id)
@@ -569,7 +678,8 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
 
   /** Clic sur la carte ou sur une voie ; `outilActif` : celui du carrefour ouvert, s'il y en a un. */
   const clic = (position: LonLat, cible: Cible, memePoint: (a: LonLat, b: LonLat) => boolean, outilActif: OutilReseau | 'autre' = outil) => {
-    if (outilActif === 'connecter' || outilActif === 'autre') return
+    // Liaison et Placer se jouent au glisser, dans la couche des voies.
+    if (outilActif === 'connecter' || outilActif === 'placer' || outilActif === 'autre') return
     if (outilActif === 'selection') {
       modification.reset()
       modificationNoeud.reset()
@@ -610,6 +720,7 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     changerForme(null)
     setEmbranchement(null)
     changerPassage(null)
+    setVoiesPlacees([])
   }
 
   /** Outil Forme : retire le sommet sélectionné (les bouts restent sur leurs nœuds). */
@@ -673,6 +784,7 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     if (toucheGeste(e)) return true
     if (e.key === 'Escape') {
       if (embranchement) return (setEmbranchement(null), true)
+      if (voiesPlacees.length > 0) return (setVoiesPlacees([]), true)
       if (selection) return (setSelection(null), true)
       if (outil !== 'selection') return (choisirOutil('selection'), true)
       return false
@@ -688,6 +800,7 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     if (formeActuelle.current) return (changerForme(null), true)
     if (passageActuel.current) return (changerPassage(null), true)
     if (embranchement) return (setEmbranchement(null), true)
+    if (voiesPlacees.length > 0) return (setVoiesPlacees([]), true)
     if (empriseActuelle.current) return (changerEmprise(null), true)
     if (traceActuel.current.length > 0) return (changerTrace([]), true)
     if (selection) return (setSelection(null), true)
@@ -735,6 +848,13 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
       troncons: donnees.data?.troncons.features.filter((t) => t.properties.noeud_de === embranchement.id || t.properties.noeud_vers === embranchement.id) ?? [],
     },
     fermerEmbranchements: () => setEmbranchement(null),
+    placerVoies,
+    /** Outil Placer : les bouts choisis, et la place enregistrée de chacun (null : automatique). */
+    voiesPlacees: voiesPlacees.map((v) => ({
+      ...v,
+      placement: donnees.data?.noeuds.features.find((n) => n.id === v.noeud)?.properties.placements_voies?.[v.cle] ?? null,
+    })),
+    choisirVoiePlacee,
     enregistrerLiaisons,
     geste,
     toucheGeste,
@@ -771,4 +891,5 @@ export const RACCOURCIS_RESEAU: Record<string, OutilReseau> = {
   e: 'emprise',
   d: 'forme',
   j: 'embranchements',
+  b: 'placer',
 }

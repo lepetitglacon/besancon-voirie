@@ -27,6 +27,12 @@ export const Voie = z.object({
   rang: z.number().int().min(0).max(9),
   type: TypeVoie.default('generale'),
   geom: SegmentGeo,
+  /**
+   * Carrefour bâti sur le réseau : dessin de la voie depuis son bout côté carrefour, qui suit la
+   * rue et la place posée à la main (docs/voies-position-visuelle.md). Seul le calque le lit ;
+   * `geom` reste la voie à sa place automatique, celle des mouvements et des conflits.
+   */
+  trace: CoordonneesLigne.optional(),
 });
 export type Voie = z.infer<typeof Voie>;
 
