@@ -433,6 +433,7 @@ export function CarteCarrefours(props: Props) {
           onClic={props.onClicCalque}
           selection={configuration.selection}
           cadrePhoto={configuration.cadreIa}
+          branchesCliquables={configuration.graphe}
         />
       )}
       {configuration?.ancre && (

@@ -47,6 +47,11 @@ export function EnTeteReseau({ outil, visible, nbTroncons, tronque, bbox, genera
             segment) pour en créer un, cliquez un sommet puis <Kbd>Suppr</Kbd> pour le retirer. Les bouts suivent leurs
             nœuds (outil Sélection).
           </>
+        ) : outil === 'embranchements' ? (
+          <>
+            Cliquez un nœud : pour chaque rue qui y arrive, cochez les rues où elle peut aller (à la TM:PE). Le détail
+            voie par voie se règle ensuite avec l’outil Liaison (<Kbd>C</Kbd>).
+          </>
         ) : outil === 'voie' ? (
           <>Cliquez une rue du côté du sens voulu : une voie s’y ajoute, ou s’en retire, selon les réglages.</>
         ) : outil === 'passage' ? (

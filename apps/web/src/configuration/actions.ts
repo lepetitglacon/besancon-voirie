@@ -19,6 +19,7 @@ export type OutilCarte =
   | 'passage'
   | 'emprise'
   | 'forme'
+  | 'embranchements'
 
 /** Actions de la configuration, partagées par la barre d'outils, le clavier et le menu contextuel. */
 export type ActionConfiguration = OutilCarte | 'osm' | 'ia' | 'json' | 'plan' | 'enregistrer' | 'fermer'
@@ -39,8 +40,9 @@ export const RACCOURCIS: Record<string, ActionConfiguration> = { v: 'selection',
  * Outils de l'éditeur des voies (docs/pipeline-donnees.md, étapes 1, 3 et 8) : corriger le tracé
  * d'un tronçon, ajouter ou retirer une voie, poser un passage piéton, dessiner l'emprise d'une voie.
  */
-export const OUTILS_VOIES: Array<{ outil: 'forme' | 'voie' | 'passage' | 'emprise'; glyphe: string; libelle: string; raccourci: string }> = [
+export const OUTILS_VOIES: Array<{ outil: 'forme' | 'voie' | 'passage' | 'emprise' | 'embranchements'; glyphe: string; libelle: string; raccourci: string }> = [
   { outil: 'forme', glyphe: '◇', libelle: 'Forme', raccourci: 'D' },
+  { outil: 'embranchements', glyphe: '⑂', libelle: 'Embranch.', raccourci: 'J' },
   { outil: 'voie', glyphe: '≡', libelle: 'Voie', raccourci: 'L' },
   { outil: 'passage', glyphe: '▦', libelle: 'Passage', raccourci: 'P' },
   { outil: 'emprise', glyphe: '▱', libelle: 'Emprise', raccourci: 'E' },
@@ -65,6 +67,7 @@ export const RACCOURCIS_GRAPHE: Record<string, ActionConfiguration> = {
   p: 'passage',
   e: 'emprise',
   d: 'forme',
+  j: 'embranchements',
   c: 'connecter',
   n: 'noeuds',
   f: 'feux',
@@ -74,7 +77,7 @@ export const RACCOURCIS_GRAPHE: Record<string, ActionConfiguration> = {
  * Outils qui agissent sur le réseau (les autres sont propres au carrefour). La liaison relie les
  * voies du carrefour, d'une branche à l'autre, pas celles de ses nœuds : il est une boîte noire.
  */
-export const OUTILS_RESEAU = ['selection', 'tracer', 'couper', 'noeuds', 'voie', 'passage', 'emprise', 'forme'] as const
+export const OUTILS_RESEAU = ['selection', 'tracer', 'couper', 'noeuds', 'voie', 'passage', 'emprise', 'forme', 'embranchements'] as const
 
 /** Entrées du menu contextuel de la carte pendant la configuration. */
 export const MENU_CONFIGURATION: EntreeMenu[] = [

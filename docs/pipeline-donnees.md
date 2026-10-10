@@ -182,7 +182,7 @@ sommet le retire. Les bouts restent sur leurs nœuds : pour les déplacer, on gl
 > 💡 Un clic sur un sommet le sélectionne (il grossit) ; `Suppr` ou `⌫` le retire ; `Échap`
 > désélectionne, puis quitte le tronçon. Il faut viser une voie dessinée (zoom 16 et plus).
 
-### Étape 9 — Régler les embranchements d'un nœud, à la TM:PE
+### Étape 9 — Régler les embranchements d'un nœud, à la TM:PE ✅
 
 Outil **⑂ Embranchements (J)**, à la manière des « junction restrictions » de TM:PE : un clic
 sur un nœud ouvre, pour chaque rue qui y arrive, la liste des rues où elle peut aller. Décocher
@@ -196,6 +196,10 @@ enregistrer).
 
 **Résultat attendu** : « à ce nœud, la rue A peut aller vers B et C, pas vers D » se dit en
 trois clics.
+
+> 💡 Les cases restent actives au clavier : `Ctrl Z` annule depuis la popup. Sur un carrefour à
+> branches internes (R1, R2…), « Depuis SO » ne mène souvent qu'à R3 : c'est le cas où fusionner
+> les nœuds (étape 10) simplifie le réglage.
 
 ### Étape 10 — Fusionner les nœuds d'un carrefour en un seul
 

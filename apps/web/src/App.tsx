@@ -7,6 +7,7 @@ import { useMap } from 'react-map-gl/maplibre'
 import { api } from './api'
 import { abandonnerBrouillons, useBrouillons, type BrouillonsCarrefour } from './configuration/brouillons'
 import { CarteSuivi } from './configuration/CarteSuivi'
+import { dansUnChamp } from './configuration/clavier'
 import { MENU_CONFIGURATION, MENU_GRAPHE, OUTILS_VOIES, type ActionConfiguration } from './configuration/actions'
 import {
   ConfigurationCarrefour,
@@ -55,6 +56,7 @@ import { CoucheForme } from './reseau/CoucheForme'
 import { CoucheReseau } from './reseau/CoucheReseau'
 import { EnTeteReseau } from './reseau/EnTeteReseau'
 import { useModeReseau, ZOOM_VOIES } from './reseau/modeReseau'
+import { PopupEmbranchements } from './reseau/PopupEmbranchements'
 import { PopupNoeud } from './reseau/PopupNoeud'
 import { PopupTroncon } from './reseau/PopupTroncon'
 import { TableauMaturite } from './maturite/TableauMaturite'
@@ -423,7 +425,7 @@ function App() {
   // Raccourcis hors configuration (la configuration gère les siens).
   const touche = useEffectEvent((e: KeyboardEvent) => {
     if (tempsReel || configuration || e.ctrlKey || e.metaKey || e.altKey) return
-    if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+    if (dansUnChamp(e.target)) return
     const lettre = e.key.toLowerCase()
     if (modeReseau) {
       if (!reseau.clavier(e) && e.key === 'Escape') setModeReseau(false)
@@ -447,7 +449,7 @@ function App() {
   // Éditeur des voies : Ctrl Z / Ctrl Maj Z annulent et refont, Suppr retire la sélection.
   const toucheTrace = useEffectEvent((e: KeyboardEvent) => {
     if (!editeur) return
-    if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+    if (dansUnChamp(e.target)) return
     const lettre = e.key.toLowerCase()
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (lettre === 'z' || lettre === 'y')) {
       e.preventDefault()
@@ -472,7 +474,7 @@ function App() {
   // Mesure de distance : Échap la ferme, Retour arrière retire le dernier point.
   const toucheMesure = useEffectEvent((e: KeyboardEvent) => {
     if (!mesure) return
-    if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+    if (dansUnChamp(e.target)) return
     if (e.key === 'Escape') {
       e.stopImmediatePropagation()
       mesures.fermer()
@@ -630,7 +632,20 @@ function App() {
               emprise={reseau.emprise?.points ?? null}
               onClic={(position, cible, memePoint) => reseau.clic(position, cible, memePoint, outilEditeur ?? 'autre')}
               popup={
-                outilEditeur !== 'selection' || !reseau.selection
+                outilEditeur === 'embranchements' && reseau.embranchement?.noeud
+                  ? {
+                      position: reseau.embranchement.position,
+                      contenu: (
+                        <PopupEmbranchements
+                          key={reseau.embranchement.noeud.id}
+                          noeud={reseau.embranchement.noeud}
+                          troncons={reseau.embranchement.troncons}
+                          onChanger={(liaisons) => reseau.enregistrerLiaisons(reseau.embranchement!.noeud!.id, liaisons)}
+                          onFermer={reseau.fermerEmbranchements}
+                        />
+                      ),
+                    }
+                  : outilEditeur !== 'selection' || !reseau.selection
                   ? null
                   : reseau.troncon
                     ? {

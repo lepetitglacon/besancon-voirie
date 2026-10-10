@@ -85,6 +85,8 @@ interface Props {
   selection?: string | null
   /** Cadre de la photo envoyée à l'IA, montré avant de lancer l'analyse. */
   cadrePhoto?: { emprise: EmpriseIa; libelle: string } | null
+  /** Codes des branches cliquables quel que soit l'outil (carrefour bâti sur le réseau : ses embranchements). */
+  branchesCliquables?: boolean
 }
 
 /** Part de la largeur réelle d'une voie (3,25 m, 1,5 m pour une voie vélo) occupée par son dessin. */
@@ -131,6 +133,7 @@ export function CalqueCarrefour(props: Props) {
     onClic,
     selection,
     cadrePhoto,
+    branchesCliquables = false,
   } = props
   const projection = useProjection()
   const { current: carte } = useMap()
@@ -520,9 +523,11 @@ export function CalqueCarrefour(props: Props) {
               key={`code-${b.code}`}
               classe={b.troncon ? 'calque-code troncon' : 'calque-code'}
               position={px(bout)}
-              titre={b.troncon ? `Tronçon d’anneau ${b.code}` : cliquable ? `${b.code} · ${b.nom ?? 'branche'}` : undefined}
+              titre={b.troncon ? `Tronçon d’anneau ${b.code}` : cliquable || branchesCliquables ? `${b.code} · ${b.nom ?? 'branche'}` : undefined}
               onClic={
-                cliquable && onClic && !b.troncon ? (e) => onClic({ type: 'branche', code: b.code, position: positionClic(e) }) : undefined
+                (cliquable || branchesCliquables) && onClic && !b.troncon
+                  ? (e) => onClic({ type: 'branche', code: b.code, position: positionClic(e) })
+                  : undefined
               }
             >
               {b.code}

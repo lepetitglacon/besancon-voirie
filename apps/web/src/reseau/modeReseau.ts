@@ -133,6 +133,8 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     formeActuelle.current = suivante
     setForme(suivante)
   }
+  /** Outil Embranchements : nœud dont la popup est ouverte. */
+  const [embranchement, setEmbranchement] = useState<{ id: string; position: LonLat } | null>(null)
   const historique = useHistorique()
 
   const visible = actif && bbox !== undefined && zoom >= ZOOM_MIN_RESEAU
@@ -476,6 +478,7 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
       return
     }
     if (outilActif === 'passage') return poserPassage(cible, position)
+    if (outilActif === 'embranchements') return setEmbranchement(cible?.type === 'noeud' ? { id: cible.id, position } : null)
     if (outilActif === 'forme') {
       // Un clic sur un sommet du tronçon en cours vise aussi ce tronçon : la sélection du sommet reste.
       if (cible?.type === 'troncon' && cible.id !== formeActuelle.current?.troncon) changerForme({ troncon: cible.id, sommet: null })
@@ -494,6 +497,7 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     changerTrace([])
     changerEmprise(null)
     changerForme(null)
+    setEmbranchement(null)
   }
 
   /** Outil Forme : retire le sommet sélectionné (les bouts restent sur leurs nœuds). */
@@ -554,6 +558,7 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
   const clavier = (e: KeyboardEvent): boolean => {
     if (toucheGeste(e)) return true
     if (e.key === 'Escape') {
+      if (embranchement) return (setEmbranchement(null), true)
       if (selection) return (setSelection(null), true)
       if (outil !== 'selection') return (choisirOutil('selection'), true)
       return false
@@ -567,6 +572,7 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
   /** Échap dans un carrefour ouvert : annule le geste, puis ferme la popup ; false s'il n'y avait rien. */
   const echap = (): boolean => {
     if (formeActuelle.current) return (changerForme(null), true)
+    if (embranchement) return (setEmbranchement(null), true)
     if (empriseActuelle.current) return (changerEmprise(null), true)
     if (traceActuel.current.length > 0) return (changerTrace([]), true)
     if (selection) return (setSelection(null), true)
@@ -601,6 +607,14 @@ export function useModeReseau({ actif, bbox, zoom, carrefourOuvert, nomCarrefour
     /** Tronçon en cours de modification avec l'outil Forme. */
     tronconForme: forme ? donnees.data?.troncons.features.find((t) => t.id === forme.troncon) : undefined,
     choisirSommet: (sommet: number | null) => forme && changerForme({ ...forme, sommet }),
+    /** Outil Embranchements : le nœud visé, où ancrer sa popup, et les tronçons qui le touchent. */
+    embranchement: embranchement && {
+      position: embranchement.position,
+      noeud: donnees.data?.noeuds.features.find((n) => n.id === embranchement.id),
+      troncons: donnees.data?.troncons.features.filter((t) => t.properties.noeud_de === embranchement.id || t.properties.noeud_vers === embranchement.id) ?? [],
+    },
+    fermerEmbranchements: () => setEmbranchement(null),
+    enregistrerLiaisons,
     geste,
     toucheGeste,
     clic,
@@ -634,4 +648,5 @@ export const RACCOURCIS_RESEAU: Record<string, OutilReseau> = {
   p: 'passage',
   e: 'emprise',
   d: 'forme',
+  j: 'embranchements',
 }

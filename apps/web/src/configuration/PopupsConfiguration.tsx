@@ -5,6 +5,8 @@
 import { Badge, Button, HStack, Input, Stack, Text } from '@chakra-ui/react'
 import {
   cleVoie,
+  connexionsMouvement,
+  directionMouvement,
   flechesParVoie,
   lireCleVoie,
   matriceConflits,
@@ -487,6 +489,72 @@ const SOURCES: Record<SourceBranche, { couleur: string; libelle: string }> = {
   ia: { couleur: 'purple', libelle: 'Lu sur la photo par l’IA' },
 }
 const CONFIANCES: Record<ConfianceIa, string> = { haute: 'green', moyenne: 'orange', basse: 'red' }
+
+// ── Embranchements d'une branche (carrefour bâti sur le réseau) ──
+
+interface PropsMouvements {
+  code: string
+  brouillon: Brouillon
+  onChanger: (brouillon: Brouillon) => void
+  onFermer: () => void
+}
+
+const symboles = new Map(FLECHES.map((f) => [f.direction, f.symbole]))
+
+/**
+ * « Depuis N, on peut aller vers… » (docs/pipeline-donnees.md, étape 9) : chaque case ajoute ou
+ * retire toutes les connexions de la branche vers une autre ; le détail voie à voie se règle avec
+ * l'outil Liaison. À enregistrer.
+ */
+export function PopupMouvements({ code, brouillon, onChanger, onFermer }: PropsMouvements) {
+  const origine = brouillon.branches.find((b) => b.code === code)
+  if (!origine) return null
+  const entrantes = voiesDe(origine, 'entrante').length
+  const destinations = brouillon.branches.filter((b) => voiesDe(b, 'sortante').length > 0)
+  const basculer = (destination: Brouillon['branches'][number], autorise: boolean) => {
+    const autres = brouillon.connexions.filter((c) => !(c.de.startsWith(`${code}:`) && c.vers.startsWith(`${destination.code}:`)))
+    const ajout = autorise
+      ? connexionsMouvement(
+          { code, azimut: origine.azimut, entrantes },
+          { code: destination.code, azimut: destination.azimut, sortantes: voiesDe(destination, 'sortante').length },
+        )
+      : []
+    onChanger({ ...brouillon, connexions: [...autres, ...ajout] })
+  }
+
+  return (
+    <PopupCarte titre={`Depuis ${code}`} soustitre={`${origine.nom ?? 'Rue sans nom'} · où peut-on aller ?`} onFermer={onFermer}>
+      {entrantes === 0 ? (
+        <Aide>Aucune voie n’entre par cette branche.</Aide>
+      ) : (
+        <Stack gap="1">
+          {destinations.map((d) => {
+            const nombre = brouillon.connexions.filter((c) => c.de.startsWith(`${code}:`) && c.vers.startsWith(`${d.code}:`)).length
+            const direction = directionMouvement(origine.azimut, d.azimut, d.code === code)
+            return (
+              <Case key={d.code} coche={nombre > 0} onChange={(coche) => basculer(d, coche)}>
+                <HStack as="span" gap="1.5">
+                  <Text as="span" w="4" textAlign="center" title={DIRECTIONS[direction]}>
+                    {symboles.get(direction)}
+                  </Text>
+                  <Text as="span">
+                    {d.code === code ? 'Demi-tour' : `${d.code} · ${d.nom ?? 'sans nom'}`}
+                  </Text>
+                  {nombre > 0 && (
+                    <Text as="span" color="fg.muted" textStyle="xs">
+                      {nombre} connexion{nombre > 1 ? 's' : ''}
+                    </Text>
+                  )}
+                </HStack>
+              </Case>
+            )
+          })}
+          <Aide>Voie par voie : outil Liaison (C). Puis Enregistrer.</Aide>
+        </Stack>
+      )}
+    </PopupCarte>
+  )
+}
 
 // ── Anneau d'un giratoire (carte d'en-tête) ──
 

@@ -43,12 +43,13 @@ import type { ClicCalque, ModeEdition } from './calque/CalqueCarrefour'
 import type { EtatFeu } from './calque/elements'
 import { basculerConnexion, basculerTraversee, deplacerPoignee, poserNoeud, type Brouillon, type Poignee, voiesDe } from './modele'
 import { NiveauxCarrefour } from '../maturite/NiveauxCarrefour'
+import { dansUnChamp } from './clavier'
 import { OngletGraphe, type Scenario } from './OngletGraphe'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
 import { OngletProgramme } from './OngletProgramme'
 import { OUTILS, OUTILS_GRAPHE, OUTILS_RESEAU, RACCOURCIS, RACCOURCIS_GRAPHE, type ActionConfiguration, type OutilCarte } from './actions'
 import type { OutilVoies } from '../reseau/couchesVoies'
-import { PopupBranche, PopupFeu, PopupLiaison, PopupNoeud, PopupVoie, ReglageAnneau } from './PopupsConfiguration'
+import { PopupBranche, PopupFeu, PopupLiaison, PopupMouvements, PopupNoeud, PopupVoie, ReglageAnneau } from './PopupsConfiguration'
 import { feuxDesLignes, geometrieEnregistree, lignesPourMoteur, plansSaisis } from './programme'
 
 /** Références stables : un `[]` littéral relancerait les effets de synchronisation à chaque rendu. */
@@ -117,6 +118,10 @@ const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>>
   forme: {
     titre: 'Tracé d’une rue',
     aides: ['Clic sur une rue : ses sommets', 'Glisser un sommet, ou un milieu pour en créer un', 'Clic sur un sommet puis Suppr : le retirer'],
+  },
+  embranchements: {
+    titre: 'Embranchements',
+    aides: ['Clic sur un nœud : depuis chaque rue, cocher les rues où l’on peut aller'],
   },
   voie: { titre: 'Voies', aides: ['Clic sur une rue, du côté du sens voulu : ajouter ou retirer une voie (réglages)'] },
   passage: { titre: 'Passages piétons', aides: ['Clic sur une rue : poser un passage', 'Clic sur un nœud : poser ou retirer son passage'] },
@@ -198,10 +203,6 @@ interface Props {
   /** Réglages de l'outil actif de l'éditeur des voies (carrefour bâti sur le réseau). */
   reglagesVoies?: ReactNode
 }
-
-/** Le focus est dans un champ : les raccourcis d'une lettre ne doivent pas s'y déclencher. */
-const dansUnChamp = (cible: EventTarget | null) =>
-  cible instanceof HTMLElement && (cible.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(cible.tagName))
 
 /** Tab n'ouvre le panneau que si le focus n'est sur aucun contrôle (sinon il garde son rôle de navigation). */
 const focusLibre = () => {
@@ -686,7 +687,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
     },
     clicCalque: (clic) => {
       // Sur le réseau, voies et branches se modifient avec l'éditeur des voies : seules les liaisons ont une popup.
-      if (graphe && clic.type !== 'connexion') return
+      if (graphe && clic.type !== 'connexion' && clic.type !== 'branche') return
       if (outil !== 'pieton') return setPopup(clic)
       const code = clic.type === 'voie' ? clic.cle.split(':')[0] : clic.type === 'branche' ? clic.code : undefined
       if (code) setBrouillonBranches(basculerTraversee(configuration, code, centre))
@@ -742,6 +743,8 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       />
     ) : popup?.type === 'noeud' ? (
       <PopupNoeud code={popup.code} brouillon={configuration} onChanger={setBrouillonBranches} onOutil={choisirOutil} onFermer={fermerPopup} />
+    ) : popup?.type === 'branche' && graphe ? (
+      <PopupMouvements code={popup.code} brouillon={configuration} onChanger={setBrouillonBranches} onFermer={fermerPopup} />
     ) : popup?.type === 'branche' ? (
       <PopupBranche
         code={popup.code}

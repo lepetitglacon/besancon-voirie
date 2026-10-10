@@ -29,7 +29,7 @@ export function couchesInteractivesVoies(outil: OutilVoies | null): string[] {
   if (outil === 'selection' || outil === 'couper' || outil === 'passage') return [ZONES.noeuds, 'reseau-voies']
   if (outil === 'voie' || outil === 'emprise') return ['reseau-voies']
   if (outil === 'forme') return ['reseau-voies', ZONES_FORME.sommets, ZONES_FORME.milieux]
-  if (outil === 'noeuds') return [ZONES.noeuds]
+  if (outil === 'noeuds' || outil === 'embranchements') return [ZONES.noeuds]
   if (outil === 'connecter') return [ZONES.arrivees, ZONES.liaisons]
   return []
 }

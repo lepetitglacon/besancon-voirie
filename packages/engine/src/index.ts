@@ -14,6 +14,7 @@ export * from './polyligne.js';
 export * from './tram.js';
 export * from './reseau.js';
 export * from './editionVoies.js';
+export * from './embranchements.js';
 export * from './controles.js';
 export * from './sumo.js';
 export * from './sumoCarrefours.js';
