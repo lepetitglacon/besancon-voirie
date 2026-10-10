@@ -341,6 +341,7 @@ function ComposantsProjet() {
   const [outil, setOutil] = useState('Route')
   const [etat, setEtat] = useState<EtatLampe>('vert')
   const [choix, setChoix] = useState<string | null>(null)
+  const [pointMenu, setPointMenu] = useState<{ x: number; y: number } | null>(null)
 
   return (
     <Bloc titre="Composants du projet">
@@ -406,8 +407,10 @@ function ComposantsProjet() {
 
         <Exemple nom="Menu contextuel (clic droit dans la zone)">
           <MenuContextuel
+            point={pointMenu}
             entete="47.2447 N · 6.0212 E"
             onChoisir={setChoix}
+            onFermer={() => setPointMenu(null)}
             entrees={[
               { valeur: 'route', glyphe: '╱', libelle: 'Nouvelle route ici', raccourci: 'R' },
               { valeur: 'feu', glyphe: '⚑', libelle: 'Poser un feu', raccourci: 'F' },
@@ -417,11 +420,20 @@ function ComposantsProjet() {
               { type: 'separateur' },
               { valeur: 'supprimer', glyphe: '✕', libelle: 'Supprimer', raccourci: 'Suppr', danger: true },
             ]}
+          />
+          <Flex
+            h="28"
+            align="center"
+            justify="center"
+            bg="bg.muted"
+            borderRadius="l2"
+            borderWidth="1px"
+            borderStyle="dashed"
+            borderColor="border"
+            onContextMenu={(e) => (e.preventDefault(), setPointMenu({ x: e.clientX, y: e.clientY }))}
           >
-            <Flex h="28" align="center" justify="center" bg="bg.muted" borderRadius="l2" borderWidth="1px" borderStyle="dashed" borderColor="border">
-              <Aide>{choix ? `Choisi : ${choix}` : 'Clic droit ici'}</Aide>
-            </Flex>
-          </MenuContextuel>
+            <Aide>{choix ? `Choisi : ${choix}` : 'Clic droit ici'}</Aide>
+          </Flex>
         </Exemple>
       </Grid>
 

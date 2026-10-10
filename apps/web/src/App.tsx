@@ -34,6 +34,7 @@ import { useAnalysesIa, useNotificationsIa } from './configuration/analysesIa'
 import { PanneauEdition, type Edition } from './edition/PanneauEdition'
 import { CarteCarrefours } from './map/CarteCarrefours'
 import { CouchePertes } from './map/CouchePertes'
+import { PanneauMesure } from './map/PanneauMesure'
 import { CoucheFeuxTempsReel } from './map/CoucheFeuxTempsReel'
 import { CoucheTrams, type CouchesTram } from './map/CoucheTrams'
 import type { OptionsFond } from './map/FondDeCarte'
@@ -156,6 +157,9 @@ function App() {
   })
   const [ciblePopup, setCiblePopup] = useState<HTMLElement | null>(null)
   const [pointMenu, setPointMenu] = useState<LonLat | null>(null)
+  // Point de l'écran où le menu est ouvert ; pointMenu reste lu après la fermeture.
+  const [ecranMenu, setEcranMenu] = useState<{ x: number; y: number } | null>(null)
+  const [mesure, setMesure] = useState<LonLat[] | null>(null)
   const { carte } = useMap()
   const panneauConfiguration = useRef<ConfigurationCarrefourHandle>(null)
   // Relais stables des gestes de la carte vers la configuration.
@@ -388,6 +392,21 @@ function App() {
     return () => window.removeEventListener('keydown', touche)
   }, [])
 
+  // Mesure de distance : Échap la ferme, Retour arrière retire le dernier point.
+  const toucheMesure = useEffectEvent((e: KeyboardEvent) => {
+    if (!mesure) return
+    if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+    if (e.key === 'Escape') {
+      e.stopImmediatePropagation()
+      setMesure(null)
+    } else if (e.key === 'Backspace') setMesure(mesure.slice(0, -1))
+  })
+  useEffect(() => {
+    // En capture : Échap ferme la mesure avant de quitter l'édition ou la configuration.
+    window.addEventListener('keydown', toucheMesure, true)
+    return () => window.removeEventListener('keydown', toucheMesure, true)
+  }, [])
+
   const entreesMenu: EntreeMenu[] = [
     ...(tempsReel
       ? []
@@ -395,10 +414,12 @@ function App() {
         ? MENU_CONFIGURATION
         : [{ valeur: 'composer', glyphe: '⌖', libelle: 'Composer un carrefour', raccourci: 'N' }, { type: 'separateur' as const }]),
     { type: 'separateur' },
+    { valeur: 'mesurer', glyphe: '↔', libelle: 'Mesurer une distance' },
     { valeur: 'centrer', glyphe: '✥', libelle: 'Centrer la carte ici' },
     { valeur: 'copier', glyphe: '⎘', libelle: 'Copier les coordonnées' },
   ]
   const choisirMenu = (valeur: string) => {
+    if (valeur === 'mesurer' && pointMenu) return setMesure([pointMenu])
     if (valeur === 'centrer' && pointMenu) return carte?.flyTo({ center: pointMenu })
     if (valeur === 'copier' && pointMenu) return void navigator.clipboard?.writeText(`${pointMenu[1].toFixed(6)}, ${pointMenu[0].toFixed(6)}`)
     if (valeur === 'composer') return composer()
@@ -408,68 +429,88 @@ function App() {
   return (
     <>
       <MenuContextuel
+        point={ecranMenu}
         entete={pointMenu && `${pointMenu[1].toFixed(4)} N · ${pointMenu[0].toFixed(4)} E`}
         entrees={entreesMenu.filter((entree, i, liste) => entree.type !== 'separateur' || (i > 0 && liste[i - 1]!.type !== 'separateur'))}
         onChoisir={choisirMenu}
-      >
-        <Box position="fixed" inset="0">
-          <CarteCarrefours
-            carrefours={carrefours.data}
-            afficherCarrefours={sumo ? false : mode !== 'brut' || brut.carrefours || edition !== null || configuration !== null}
-            // SUMO : lecture seule comme le Temps réel, sans fiche de carrefour.
-            tempsReel={tempsReel || sumo}
-            fond={fond}
-            feux={feux.data}
-            edition={
-              edition && {
-                selection: edition.selection,
-                carrefourId: edition.carrefourId,
-                modeRectangle: edition.modeRectangle,
-              }
+        onFermer={() => setEcranMenu(null)}
+      />
+      <Box position="fixed" inset="0">
+        <CarteCarrefours
+          carrefours={carrefours.data}
+          afficherCarrefours={sumo ? false : mode !== 'brut' || brut.carrefours || edition !== null || configuration !== null}
+          // SUMO : lecture seule comme le Temps réel, sans fiche de carrefour.
+          tempsReel={tempsReel || sumo}
+          fond={fond}
+          feux={feux.data}
+          edition={
+            edition && {
+              selection: edition.selection,
+              carrefourId: edition.carrefourId,
+              modeRectangle: edition.modeRectangle,
             }
-            onEmprise={setBbox}
-            onBasculerFeu={basculerFeu}
-            onAjouterFeux={ajouterFeux}
-            onComposerDepuis={(feu) =>
-              demarrer({
-                carrefourId: null,
-                selection: [feu.id],
-                nature: feu.type === 'pieton' ? 'traversee_pietonne' : 'carrefour',
-                nomSaisi: null,
-                modeRectangle: false,
-              })
+          }
+          onEmprise={setBbox}
+          onBasculerFeu={basculerFeu}
+          onAjouterFeux={ajouterFeux}
+          onComposerDepuis={(feu) =>
+            demarrer({
+              carrefourId: null,
+              selection: [feu.id],
+              nature: feu.type === 'pieton' ? 'traversee_pietonne' : 'carrefour',
+              nomSaisi: null,
+              modeRectangle: false,
+            })
+          }
+          onOuvrir={sumo ? () => {} : tempsReel ? setFicheTempsReel : configurer}
+          configuration={
+            configuration && {
+              carrefourId: configuration.carrefour.id,
+              position: configuration.position,
+              ...affichageConfiguration,
             }
-            onOuvrir={sumo ? () => {} : tempsReel ? setFicheTempsReel : configurer}
-            configuration={
-              configuration && {
-                carrefourId: configuration.carrefour.id,
-                position: configuration.position,
-                ...affichageConfiguration,
-              }
-            }
-            onClicFeuConfiguration={(feu, position) => panneauConfiguration.current?.clicFeu(feu, position)}
-            onClicCarteConfiguration={(position) => panneauConfiguration.current?.clicCarte(position)}
-            onClicCalque={(clic) => panneauConfiguration.current?.clicCalque(clic)}
-            onCiblePopup={setCiblePopup}
-            onMenuContextuel={setPointMenu}
-            onDeplacerPoignee={deplacerPoignee}
-            onConnecter={connecter}
-            onDessinerZoneIa={dessinerZoneIa}
-            onPlacerFeu={placerFeu}
-          >
-            {sumo && <CoucheSumo />}
-            {sumo && <CoucheVehicules />}
-            {sumo && <CoucheFlux />}
-            {pertes && reseauTram.data && historique.data && (
-              <CouchePertes reseau={reseauTram.data} historique={historique.data} />
-            )}
-            {tempsReel && feuxTempsReel.data && <CoucheFeuxTempsReel tempsReel={feuxTempsReel.data} tram={contexteTram} />}
-            {tramAffiche && reseauTram.data && (
-              <CoucheTrams reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
-            )}
-          </CarteCarrefours>
-        </Box>
-      </MenuContextuel>
+          }
+          onClicFeuConfiguration={(feu, position) => panneauConfiguration.current?.clicFeu(feu, position)}
+          onClicCarteConfiguration={(position) => panneauConfiguration.current?.clicCarte(position)}
+          onClicCalque={(clic) => panneauConfiguration.current?.clicCalque(clic)}
+          onCiblePopup={setCiblePopup}
+          onMenuContextuel={(position, point) => {
+            setPointMenu(position)
+            setEcranMenu(point)
+          }}
+          mesure={mesure}
+          onPointMesure={(position) => setMesure((points) => points && [...points, position])}
+          onDeplacerPoignee={deplacerPoignee}
+          onConnecter={connecter}
+          onDessinerZoneIa={dessinerZoneIa}
+          onPlacerFeu={placerFeu}
+        >
+          {sumo && <CoucheSumo />}
+          {sumo && <CoucheVehicules />}
+          {sumo && <CoucheFlux />}
+          {pertes && reseauTram.data && historique.data && (
+            <CouchePertes reseau={reseauTram.data} historique={historique.data} />
+          )}
+          {tempsReel && feuxTempsReel.data && <CoucheFeuxTempsReel tempsReel={feuxTempsReel.data} tram={contexteTram} />}
+          {tramAffiche && reseauTram.data && (
+            <CoucheTrams reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
+          )}
+        </CarteCarrefours>
+      </Box>
+
+      {mesure && (
+        <PanneauMesure
+          position="fixed"
+          left="50%"
+          transform="translateX(-50%)"
+          // Au-dessus de la barre d'outils centrale, quand elle est affichée.
+          bottom={configuration || sumo || tempsReel ? '22px' : '96px'}
+          zIndex="3"
+          points={mesure}
+          onRetirerDernier={() => setMesure(mesure.slice(0, -1))}
+          onFermer={() => setMesure(null)}
+        />
+      )}
 
       {configuration ? (
         <ConfigurationCarrefour

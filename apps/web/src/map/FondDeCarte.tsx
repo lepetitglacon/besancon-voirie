@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Layer, NavigationControl, Source, useMap } from 'react-map-gl/maplibre'
+import { MNT_TERRARIUM } from './altitude'
 import { aujourdhuiA, clarte, melanger, positionSoleil } from './soleil'
 
 export type Fond = 'satellite' | 'plan'
@@ -25,8 +26,6 @@ const ORTHO_IGN =
   '&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}'
 const ATTRIBUTION_IGN = 'Photos : <a href="https://geoservices.ign.fr/">IGN</a> (Licence Ouverte)'
 
-/** Altitudes Terrarium (Mapzen, AWS Open Data), sans clé, ~30 m de précision en France. */
-const MNT_TERRARIUM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 const ATTRIBUTION_MNT = 'Relief : <a href="https://github.com/tilezen/joerd">Mapzen Terrarium</a>'
 const SOURCE_MNT = 'mnt'
 /** Le relief bisontin (collines de 100 à 200 m) se lit mieux un peu accentué. */
