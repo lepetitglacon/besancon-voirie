@@ -5,7 +5,9 @@ import type { BrouillonLignes } from './OngletLignes'
 
 /**
  * Modifications non enregistrées d'un carrefour. Elles vivent hors de la configuration :
- * on peut quitter un carrefour, en ouvrir un autre, puis revenir les enregistrer.
+ * on peut quitter un carrefour, en ouvrir un autre, puis revenir les enregistrer. Elles sont
+ * gardées dans le navigateur : un rechargement de la page ne les perd pas
+ * (docs/pipeline-donnees.md, étape 7).
  */
 export interface BrouillonsCarrefour {
   carrefour: CarrefourResume
@@ -20,11 +22,28 @@ export interface BrouillonsCarrefour {
 
 export type ModificationsBrouillons = Partial<Omit<BrouillonsCarrefour, 'carrefour' | 'position'>>
 
-let brouillons: ReadonlyMap<string, BrouillonsCarrefour> = new Map()
+const CLE_STOCKAGE = 'voirie.brouillons'
+
+/** Brouillons gardés au dernier passage ; aucun si le stockage est vide, illisible ou bloqué. */
+function relire(): ReadonlyMap<string, BrouillonsCarrefour> {
+  try {
+    const lus = JSON.parse(localStorage.getItem(CLE_STOCKAGE) ?? '[]') as BrouillonsCarrefour[]
+    return new Map(lus.filter((b) => b?.carrefour?.id).map((b) => [b.carrefour.id, b]))
+  } catch {
+    return new Map()
+  }
+}
+
+let brouillons: ReadonlyMap<string, BrouillonsCarrefour> = relire()
 const abonnes = new Set<() => void>()
 
 function publier(suivants: ReadonlyMap<string, BrouillonsCarrefour>) {
   brouillons = suivants
+  try {
+    localStorage.setItem(CLE_STOCKAGE, JSON.stringify([...suivants.values()]))
+  } catch {
+    // Stockage plein ou bloqué : les brouillons restent en mémoire pour la session.
+  }
   for (const abonne of abonnes) abonne()
 }
 

@@ -163,7 +163,11 @@ carrefour programmé et entièrement dans l'emprise.
 ### Étape 7 — Garder les brouillons au rechargement
 
 Les brouillons (connexions, lignes, programme) sont gardés dans le navigateur
-(`localStorage`) : un rechargement ne les perd plus.
+(`localStorage`, clé `voirie.brouillons`) : un rechargement ne les perd plus, et la page ne
+demande plus confirmation avant de se fermer. Ils restent propres à ce navigateur.
+
+**Résultat attendu** : après un rechargement, la carte de suivi (en bas à droite) liste le
+carrefour modifié, avec « Reprendre ».
 
 ### Étape 8 — Suites (hors de ce chantier)
 
@@ -224,4 +228,4 @@ Les brouillons (connexions, lignes, programme) sont gardés dans le navigateur
 - 2026-10-10 — création : niveaux N0 à N4, plan en 8 étapes, refonte de l'éditeur.
 - 2026-10-10 — réécrit sur `reseau-voies` (réseau d'abord) ; emprise de voie ; pas de table
   `suggestion` ; panneaux existants gardés.
-- 2026-10-10 — étapes 1 à 6 faites ; export SUMO par cœur de carrefour (sans `<join>`), S4 révisée.
+- 2026-10-10 — étapes 1 à 7 faites ; export SUMO par cœur de carrefour (sans `<join>`), S4 révisée.

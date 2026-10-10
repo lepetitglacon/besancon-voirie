@@ -411,14 +411,8 @@ function App() {
 
   useNotificationsIa(analysesIa.data, ouvrirAnalyseIa)
 
-  // Modifications non enregistrées : le navigateur demande confirmation avant de quitter la page.
-  const brouillonsEnCours = brouillons.size > 0
-  useEffect(() => {
-    if (!brouillonsEnCours) return
-    const retenir = (e: BeforeUnloadEvent) => e.preventDefault()
-    window.addEventListener('beforeunload', retenir)
-    return () => window.removeEventListener('beforeunload', retenir)
-  }, [brouillonsEnCours])
+  // Les modifications non enregistrées sont gardées dans le navigateur (brouillons.ts) : quitter
+  // ou recharger la page ne les perd pas, inutile de demander confirmation.
 
   const composer = () => {
     setModeReseau(false)
