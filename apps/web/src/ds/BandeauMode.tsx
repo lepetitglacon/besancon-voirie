@@ -2,6 +2,9 @@ import { createSlotRecipeContext, type HTMLChakraProps } from '@chakra-ui/react'
 import type { ReactNode } from 'react'
 import { bandeauMode } from '../theme/recettes-projet'
 
+/** Sous la barre des modes de l'application, en haut au centre. */
+export const HAUT_BANDEAU = '84px'
+
 const { withProvider, withContext } = createSlotRecipeContext({ recipe: bandeauMode })
 
 const Racine = withProvider<HTMLDivElement, HTMLChakraProps<'div'>>('div', 'root', { defaultProps: { role: 'status' } })

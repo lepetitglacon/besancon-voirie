@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { LonLat } from '@voirie/engine'
 import type { AnalyseIa, Bbox, CarrefourResume, FeuResume, TypeJour } from '@voirie/schema'
-import { Badge, Box, Button, HStack, IconButton, Kbd, Popover, Portal, Stack, Tabs, Text } from '@chakra-ui/react'
+import { Badge, Box, Button, HStack, IconButton, Kbd, Popover, Portal, Stack, Text } from '@chakra-ui/react'
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { useMap } from 'react-map-gl/maplibre'
 import { api } from './api'
@@ -17,6 +17,7 @@ import {
 import {
   Aide,
   BandeauMode,
+  HAUT_BANDEAU,
   BarreOutils,
   Bascule,
   CarteEnTete,
@@ -64,6 +65,13 @@ const RAFRAICHISSEMENT_FEUX_MS = 60_000
  * couches, une par une. « SUMO » : les essais de simulation de la ville, en lecture seule.
  */
 type Mode = 'temps_reel' | 'edition' | 'brut' | 'sumo'
+
+const MODES: Array<{ valeur: Mode; glyphe: string; libelle: string }> = [
+  { valeur: 'temps_reel', glyphe: '◷', libelle: 'Temps réel' },
+  { valeur: 'edition', glyphe: '✎', libelle: 'Édition' },
+  { valeur: 'brut', glyphe: '⊞', libelle: 'Données brutes' },
+  { valeur: 'sumo', glyphe: '⇶', libelle: 'SUMO' },
+]
 
 interface CouchesBrutes extends CouchesTram {
   carrefours: boolean
@@ -532,6 +540,24 @@ function App() {
         </CarteCarrefours>
       </Box>
 
+      {/* Modes de l'application, toujours visibles en haut au centre. */}
+      <BarreOutils.Root position="fixed" left="50%" transform="translateX(-50%)" top="3" zIndex="3" aria-label="Mode de l'application">
+        {MODES.map((m) => (
+          <BarreOutils.Outil
+            key={m.valeur}
+            // Libellés plus longs que ceux des outils : sur une ligne, la carte s'élargit.
+            w="auto"
+            minW="66px"
+            px="2.5"
+            whiteSpace="nowrap"
+            glyphe={m.glyphe}
+            libelle={m.libelle}
+            actif={mode === m.valeur}
+            onClick={() => changerMode(m.valeur)}
+          />
+        ))}
+      </BarreOutils.Root>
+
       <PanneauMesure
         position="fixed"
         left="50%"
@@ -635,7 +661,7 @@ function App() {
           {edition && (
             <BandeauMode
               position="fixed"
-              top="3"
+              top={HAUT_BANDEAU}
               left="50%"
               transform="translateX(-50%)"
               zIndex="2"
@@ -739,14 +765,6 @@ function App() {
                     </Text>
                     <ModeCouleur />
                   </HStack>
-                  <Tabs.Root value={mode} onValueChange={(e) => changerMode(e.value as Mode)}>
-                    <Tabs.List>
-                      <Tabs.Trigger value="temps_reel">Temps réel</Tabs.Trigger>
-                      <Tabs.Trigger value="edition">Édition</Tabs.Trigger>
-                      <Tabs.Trigger value="brut">Données brutes</Tabs.Trigger>
-                      <Tabs.Trigger value="sumo">SUMO</Tabs.Trigger>
-                    </Tabs.List>
-                  </Tabs.Root>
                   {tempsReel && (
                     <Stack gap="1.5">
                       <Text textStyle="xs" fontWeight="semibold">

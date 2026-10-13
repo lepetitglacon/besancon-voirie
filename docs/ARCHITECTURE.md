@@ -687,6 +687,9 @@ du temps, ni la fiabilité réelle des estimations. L'API enregistre donc chaque
 
 ### 8.3 Modes d'affichage et fond de carte
 
+Les modes se choisissent dans la barre centrée en haut de l'écran ; le bouton ◧ (à droite)
+règle les couches du mode et le fond de carte.
+
 - **Temps réel** (par défaut) : la vue grand public, en lecture seule. Les feux des carrefours
   programmés sont rejoués sur l'heure légale (§6.1), avec les trams. Chaque ligne est dessinée
   sur ses feux physiques ; à défaut, au bout des voies entrantes qu'elle commande, ou au milieu

@@ -35,7 +35,7 @@ import { useMap } from 'react-map-gl/maplibre'
 import { api } from '../api'
 import { NATURES } from '../carrefour/libelles'
 import { ResumeCarrefour } from '../carrefour/ResumeCarrefour'
-import { Aide, BandeauMode, BarreOutils, CarteEnTete, Chiffre, Indice, Message, notifications, PanneauBas, Valeur, type EtatLampe } from '../ds'
+import { Aide, BandeauMode, BarreOutils, HAUT_BANDEAU, CarteEnTete, Chiffre, Indice, Message, notifications, PanneauBas, Valeur, type EtatLampe } from '../ds'
 import { demanderNotificationsSysteme, enFile, useAnalysesIa } from './analysesIa'
 import { lireBrouillons, modifierBrouillons, useBrouillonsCarrefour, type ModificationsBrouillons } from './brouillons'
 import { Chrono } from './FileIa'
@@ -840,7 +840,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       {consigne && (
         <BandeauMode
           position="fixed"
-          top="3"
+          top={HAUT_BANDEAU}
           left="50%"
           transform="translateX(-50%)"
           zIndex="2"
