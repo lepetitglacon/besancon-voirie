@@ -17,6 +17,7 @@ import {
   voieAdjacente,
   type LonLat,
   type Segment,
+  type XY,
 } from '@voirie/engine'
 import type { Anneau, Branche, Connexion, PrioriteEntree, SensVoie, TypeVoie } from '@voirie/schema'
 
@@ -84,6 +85,81 @@ export function retirerVoie(brouillon: Brouillon, code: string, sens: SensVoie):
   if (!derniere) return brouillon
   const suivant = surBranche(brouillon, code, (b) => ({ ...b, voies: b.voies.filter((v) => v !== derniere) }))
   return { ...suivant, connexions: sansVoie(suivant.connexions, cleVoie(code, sens, derniere.rang)) }
+}
+
+/** Décale les rangs d'un sens d'une branche (`nouveauRang`, null = voie retirée) et suit les connexions. */
+function renumeroter(brouillon: Brouillon, code: string, sens: SensVoie, nouveauRang: (rang: number) => number | null): Brouillon {
+  const lettre = sens === 'entrante' ? 'e' : 's'
+  const prefixe = `${code}:${lettre}`
+  const cle = (ancienne: string): string | null => {
+    if (!ancienne.startsWith(prefixe)) return ancienne
+    const rang = nouveauRang(Number(ancienne.slice(prefixe.length)))
+    return rang === null ? null : `${prefixe}${rang}`
+  }
+  const branches = brouillon.branches.map((b) =>
+    b.code !== code
+      ? b
+      : {
+          ...b,
+          voies: b.voies.flatMap((v) => {
+            if (v.sens !== sens) return [v]
+            const rang = nouveauRang(v.rang)
+            return rang === null ? [] : [{ ...v, rang }]
+          }),
+        },
+  )
+  const connexions = brouillon.connexions.flatMap((c) => {
+    const de = cle(c.de)
+    const vers = cle(c.vers)
+    return de && vers ? [{ de, vers }] : []
+  })
+  return { ...brouillon, branches, connexions }
+}
+
+/**
+ * Voie tracée sur la carte dans le sens de la circulation : vers le carrefour, une entrante ;
+ * en s'en éloignant, une sortante. Elle rejoint la branche (hors tronçons d'anneau) dont les
+ * voies sont les plus proches de son milieu, à son rang d'après sa position (0 = la plus à
+ * gauche dans son sens) ; les voies à sa droite et leurs connexions sont renumérotées.
+ */
+export function tracerVoie(brouillon: Brouillon, trace: Segment, centre: LonLat): { brouillon: Brouillon; cle: string } | null {
+  const milieu = (s: Segment): LonLat => [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2]
+  const repere = repereLocal(milieu(trace))
+  let proche: { branche: Branche; distance: number } | null = null
+  for (const b of brouillon.branches) {
+    if (b.troncon) continue
+    const points = b.voies.length ? b.voies.map((v) => v.geom[0]) : (b.geom ?? [])
+    for (const p of points) {
+      const d = Math.hypot(...repere.versXY(p))
+      if (!proche || d < proche.distance) proche = { branche: b, distance: d }
+    }
+  }
+  if (!proche) return null
+  const { branche } = proche
+  // Le bout le plus proche du carrefour (ou du nœud d'une rue de giratoire) est le bout côté carrefour.
+  const origine = repereLocal(origineVoies(brouillon, branche, centre).centre)
+  const [a, b] = trace.map((p) => origine.versXY(p)) as [XY, XY]
+  const versCarrefour = Math.hypot(...b) < Math.hypot(...a)
+  const sens: SensVoie = versCarrefour ? 'entrante' : 'sortante'
+  const geom: Segment = versCarrefour ? [trace[1], trace[0]] : [trace[0], trace[1]]
+  // Rang : nombre de voies du même sens plus à gauche, vu dans le sens de la circulation.
+  const direction: XY = [b[0] - a[0], b[1] - a[1]]
+  const gauche = ([x, y]: XY) => -direction[1] * x + direction[0] * y
+  const cote = (s: Segment) => gauche(origine.versXY(milieu(s)))
+  const rang = voiesDe(branche, sens).filter((v) => cote(v.geom) > cote(geom)).length
+  const decale = renumeroter(brouillon, branche.code, sens, (r) => (r >= rang ? r + 1 : r))
+  return {
+    brouillon: surBranche(decale, branche.code, (br) => ({ ...br, voies: [...br.voies, { sens, rang, type: 'generale', geom }] })),
+    cle: cleVoie(branche.code, sens, rang),
+  }
+}
+
+/** Retire une voie (clé « S:e1 ») et ses connexions ; les voies à sa droite prennent son rang. */
+export function enleverVoie(brouillon: Brouillon, cle: string): Brouillon {
+  const [code, voie] = cle.split(':') as [string, string]
+  const sens: SensVoie = voie.startsWith('e') ? 'entrante' : 'sortante'
+  const retire = Number(voie.slice(1))
+  return renumeroter(brouillon, code, sens, (r) => (r === retire ? null : r > retire ? r - 1 : r))
 }
 
 export function changerTypeVoie(brouillon: Brouillon, code: string, sens: SensVoie, rang: number, type: TypeVoie): Brouillon {

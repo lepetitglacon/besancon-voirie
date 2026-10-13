@@ -28,6 +28,7 @@ import {
   type EtatPoignee,
   type FormePoignee,
   type EtatVoie,
+  VoieTracee,
 } from './elements'
 import { useProjection } from './projection'
 
@@ -38,8 +39,11 @@ import { useProjection } from './projection'
  */
 export type ModeEdition = 'selection' | 'ajuster' | 'connecter' | 'feux' | 'pieton' | 'noeud'
 
-/** Outil « pieton » : glisser un passage (ou ses bouts), en tracer un, ou en retirer un d'un clic. */
-export type SousOutilPieton = 'deplacer' | 'tracer' | 'supprimer'
+/**
+ * Sous-outil des outils « ajuster » (voies) et « pieton » (passages) : glisser un élément (ou
+ * ses bouts), en tracer un par un glisser sur la carte, ou en retirer un d'un clic.
+ */
+export type SousOutil = 'deplacer' | 'tracer' | 'supprimer'
 
 /** Élément du calque cliqué, avec la position du clic (pour y ancrer une popup). */
 export type ClicCalque =
@@ -72,8 +76,8 @@ interface Props {
   anneau: Anneau | null
   /** null : dessin seul, sans poignées ni clics. */
   mode: ModeEdition | null
-  /** Sous-outil de l'outil « pieton ». */
-  sousOutilPieton?: SousOutilPieton
+  /** Sous-outil des outils « ajuster » et « pieton ». */
+  sousOutil?: SousOutil
   /** Connexions à mettre en avant (« de>vers »), par exemple celles de la ligne de feux active. */
   surlignees?: ReadonlySet<string>
   /** Lecture d'un programme : couleur du feu de chaque connexion (« de>vers ») et passage piéton. */
@@ -81,8 +85,8 @@ interface Props {
   onDeplacer: (poignee: PoigneeModele, position: LonLat) => void
   /** Ajoute la connexion, ou la retire si elle existe. */
   onConnecter: (de: string, vers: string) => void
-  /** Passage piéton tracé par un glisser sur la carte (sous-outil « tracer »). */
-  onTracerPassage?: (segment: [LonLat, LonLat]) => void
+  /** Voie ou passage piéton tracé par un glisser sur la carte (sous-outil « tracer »). */
+  onTracer?: (segment: [LonLat, LonLat]) => void
   /** Feux physiques du carrefour, à poser sur leur mât en mode « feux ». */
   feuxPlacables: FeuPlacable[]
   /** Pose le feu (ou le remet à sa position OSM : null) ; l'aperçu reste jusqu'à la fin de la promesse. */
@@ -121,11 +125,19 @@ type Glisse =
   /** `enregistrement` : lâché, en attente de l'API (le feu reste affiché à sa nouvelle place). */
   | { type: 'feu'; id: string; depart: LonLat; position: LonLat; enregistrement: boolean }
 
-/** En dessous (m), un tracé de passage piéton est un clic égaré : rien n'est créé. */
-const LONGUEUR_PASSAGE_MIN_M = 2
+/** En dessous (m), un tracé de voie ou de passage piéton est un clic égaré : rien n'est créé. */
+const LONGUEUR_TRACE_MIN_M = 2
 /** En dessous (m), un glisser de feu est un simple clic : rien n'est enregistré. */
 const DEPLACEMENT_FEU_MIN_M = 0.2
 const COULEUR_FEU: Record<TypeFeu, string> = { vehicule: '#e0561e', pieton: '#1f8a4c' }
+
+/**
+ * Éléments qui gardent l'appui au lieu de le relayer à la carte : ce qu'on glisse, et ce qu'un
+ * clic retire (relayé, l'appui lancerait un glisser de la carte qui ne s'arrête plus quand
+ * l'élément disparaît).
+ */
+const ELEMENTS_SANS_RELAIS =
+  '.calque-poignee, .calque-voie.deplacable, .calque-voie.retirable, .calque-passage.deplacable, .calque-passage.retirable, .calque-passage.a-retirer, .calque-zone-trace'
 
 const cleConnexion = (c: Connexion) => `${c.de}>${c.vers}`
 const symboles = new Map(FLECHES.map((f) => [f.direction, f.symbole]))
@@ -136,12 +148,12 @@ export function CalqueCarrefour(props: Props) {
     connexions,
     anneau,
     mode,
-    sousOutilPieton = 'deplacer',
+    sousOutil = 'deplacer',
     surlignees,
     feux,
     onDeplacer,
     onConnecter,
-    onTracerPassage,
+    onTracer,
     feuxPlacables,
     onPlacerFeu,
     onApercuFeu,
@@ -154,14 +166,18 @@ export function CalqueCarrefour(props: Props) {
   const refSvg = useRef<SVGSVGElement>(null)
   const [survol, setSurvol] = useState<Survol>(null)
   const [glisse, setGlisse] = useState<Glisse | null>(null)
-  /** Mode « Voie » : voies choisies (clic, Maj+clic pour en ajouter), qui se glissent ensemble. */
-  const [voiesChoisies, setVoiesChoisies] = useState<ReadonlySet<string>>(new Set())
+  /**
+   * Mode « Voie » : voies choisies (clic, Maj+clic pour en ajouter), qui se glissent ensemble.
+   * Le choix retient son outil : il ne survit pas à un changement d'outil.
+   */
+  const [choix, setChoix] = useState<{ mode: ModeEdition | null; voies: ReadonlySet<string> }>({ mode: null, voies: new Set() })
+  const voiesChoisies: ReadonlySet<string> = choix.mode === mode ? choix.voies : new Set()
+  const setVoiesChoisies = (voies: ReadonlySet<string>) => setChoix({ mode, voies })
 
-  // La sélection de voies ne survit pas au changement d'outil ; un clic sur la carte la vide.
-  useEffect(() => setVoiesChoisies(new Set()), [mode])
+  // Un clic sur la carte vide le choix.
   useEffect(() => {
     if (!carte || mode !== 'ajuster') return
-    const vider = () => setVoiesChoisies(new Set())
+    const vider = () => setChoix({ mode, voies: new Set() })
     carte.on('click', vider)
     return () => {
       carte.off('click', vider)
@@ -176,8 +192,8 @@ export function CalqueCarrefour(props: Props) {
 
   // MapLibre n'écoute la molette et l'appui de la souris que sur son conteneur de canvas : on lui
   // renvoie ceux reçus par les éléments du calque, pour zoomer et déplacer la carte depuis une
-  // voie ou une liaison. Les poignées gardent l'appui (glisser-déposer). La suite du geste
-  // (mousemove, mouseup) est écoutée par MapLibre sur tout le document.
+  // voie ou une liaison. Les poignées gardent l'appui (glisser-déposer). MapLibre suit le
+  // mouvement sur tout le document, mais n'entend le relâché que sur son conteneur : on le relaie aussi.
   useEffect(() => {
     const svg = refSvg.current
     const canvas = carte?.getCanvas()
@@ -189,9 +205,15 @@ export function CalqueCarrefour(props: Props) {
     }
     let appui: XY | null = null
     const relayerAppui = (e: globalThis.MouseEvent) => {
-      if (e.button !== 0 || (e.target as Element).closest('.calque-poignee, .calque-voie.deplacable, .calque-passage.deplacable, .calque-zone-trace')) return
+      if (e.button !== 0 || (e.target as Element).closest(ELEMENTS_SANS_RELAIS)) return
       appui = [e.clientX, e.clientY]
       canvas.dispatchEvent(new globalThis.MouseEvent('mousedown', e))
+      // MapLibre ne termine un glisser qu'au relâché reçu sur son conteneur de canvas : sans ce
+      // relais, la carte suivrait la souris après un clic sur une voie ou une liaison.
+      const relayerRelache = (fin: globalThis.MouseEvent) => {
+        if (fin.target !== canvas) canvas.dispatchEvent(new globalThis.MouseEvent('mouseup', fin))
+      }
+      document.addEventListener('mouseup', relayerRelache, { once: true, capture: true })
     }
     // Un déplacement de la carte ne vaut pas clic sur l'élément où la souris a été relâchée.
     const filtrerClic = (e: globalThis.MouseEvent) => {
@@ -249,8 +271,12 @@ export function CalqueCarrefour(props: Props) {
   }
   const cibleEnCours = glisse?.type === 'connexion' ? glisse.cible : null
 
+  const pieton = mode === 'pieton' ? sousOutil : null
+  const outilVoie = mode === 'ajuster' ? sousOutil : null
+
   const etatVoie = (cle: string, sortante: boolean): EtatVoie => {
     if (glisse?.type === 'connexion' && sortante) return cle === cibleEnCours ? 'cible' : 'cible-possible'
+    if (outilVoie === 'supprimer' && survol?.type === 'voie' && survol.cle === cle) return 'a-retirer'
     if (voiesChoisies.has(cle)) return 'choisie'
     if (selection === cle) return 'survolee'
     if (survol?.type === 'voie' && survol.cle === cle) return 'survolee'
@@ -276,7 +302,6 @@ export function CalqueCarrefour(props: Props) {
   }
 
   const cliquable = mode === 'selection'
-  const pieton = mode === 'pieton' ? sousOutilPieton : null
   const positionClic = (e: MouseEvent<SVGElement>): LonLat => {
     const cadre = (e.currentTarget.ownerSVGElement ?? e.currentTarget).getBoundingClientRect()
     return lonLat(e.clientX - cadre.left, e.clientY - cadre.top)
@@ -328,13 +353,13 @@ export function CalqueCarrefour(props: Props) {
     }
     if (glisse?.type === 'trace') {
       const { depart, position } = glisse
-      if (Math.hypot(...repereLocal(depart).versXY(position)) >= LONGUEUR_PASSAGE_MIN_M) onTracerPassage?.([depart, position])
+      if (Math.hypot(...repereLocal(depart).versXY(position)) >= LONGUEUR_TRACE_MIN_M) onTracer?.([depart, position])
     }
     if (glisse?.type === 'voies') {
       const { cle, poignee, position, retirer } = glisse
       const immobile = Math.hypot(...repereLocal(poignee.depart).versXY(position)) < DEPLACEMENT_NOEUD_MIN_M
       if (!immobile) onDeplacer(poignee, position)
-      else if (retirer) setVoiesChoisies((choisies) => new Set([...choisies].filter((c) => c !== cle)))
+      else if (retirer) setVoiesChoisies(new Set([...voiesChoisies].filter((c) => c !== cle)))
     }
     if (glisse?.type === 'connexion' && glisse.cible) onConnecter(glisse.de, glisse.cible)
     setGlisse(null)
@@ -382,7 +407,7 @@ export function CalqueCarrefour(props: Props) {
     for (const [cle, voie] of voies) {
       const sortante = voie.sens === 'sortante'
       // Les voies d'un tronçon d'anneau suivent ses nœuds : elles se relient, sans se caler.
-      if (mode === 'ajuster' && voie.troncon) continue
+      if (mode === 'ajuster' && (voie.troncon || outilVoie !== 'deplacer')) continue
       for (const extremite of [0, 1] as const) {
         const poignee: PoigneeModele = { role: 'voie', cle, sens: voie.sens, extremite }
         // Comme une prise : rond (mâle) au bout par où la circulation quitte la voie, carré
@@ -555,7 +580,7 @@ export function CalqueCarrefour(props: Props) {
           return <PassagePieton key={cle} {...commun} />
         }),
       )}
-      {glisse?.type === 'trace' && (
+      {glisse?.type === 'trace' && pieton && (
         <PassagePieton segment={[px(glisse.depart), px(glisse.position)]} largeur={largeurPassage} etat="trace" />
       )}
 
@@ -568,15 +593,22 @@ export function CalqueCarrefour(props: Props) {
           sortante={voie.sens === 'sortante'}
           etat={etatVoie(cle, voie.sens === 'sortante')}
           interactive={mode !== null}
-          deplacable={mode === 'ajuster' && !voie.troncon}
+          deplacable={outilVoie === 'deplacer' && !voie.troncon}
+          retirable={outilVoie === 'supprimer' && !voie.troncon}
           titre={
-            mode === 'ajuster' && !voie.troncon
+            outilVoie === 'deplacer' && !voie.troncon
               ? `${cle} : glisser pour déplacer la voie (Maj+clic : en choisir plusieurs)`
-              : `${cle} · voie ${voie.sens} ${voie.rang + 1} (${voie.type})`
+              : outilVoie === 'supprimer' && !voie.troncon
+                ? `${cle} : cliquer pour retirer la voie et ses liaisons`
+                : `${cle} · voie ${voie.sens} ${voie.rang + 1} (${voie.type})`
           }
           onSurvol={(actif) => setSurvol(actif ? { type: 'voie', cle } : null)}
-          onClic={cliquable && onClic ? (e) => onClic({ type: 'voie', cle, position: positionClic(e) }) : undefined}
-          {...(mode === 'ajuster' && !voie.troncon
+          onClic={
+            onClic && (cliquable || (outilVoie === 'supprimer' && !voie.troncon))
+              ? (e) => onClic({ type: 'voie', cle, position: positionClic(e) })
+              : undefined
+          }
+          {...(outilVoie === 'deplacer' && !voie.troncon
             ? { onPointerDown: saisirVoie(cle), onPointerMove: suivre, onPointerUp: terminer, onPointerCancel: () => setGlisse(null) }
             : {})}
         />
@@ -657,7 +689,9 @@ export function CalqueCarrefour(props: Props) {
         )
       })}
 
-      {pieton === 'tracer' && (
+      {glisse?.type === 'trace' && outilVoie && <VoieTracee segment={[px(glisse.depart), px(glisse.position)]} largeur={largeurVoie} />}
+
+      {(pieton === 'tracer' || outilVoie === 'tracer') && (
         <rect
           className="calque-zone-trace"
           x={-1e5}

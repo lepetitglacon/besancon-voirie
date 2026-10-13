@@ -9,7 +9,7 @@ import { cheminConnexion } from './chemins'
 const d = (points: readonly XY[]) => points.map(([x, y], i) => `${i ? 'L' : 'M'}${x},${y}`).join(' ')
 const classes = (...noms: Array<string | false | null | undefined>) => noms.filter(Boolean).join(' ')
 
-export type EtatVoie = 'normale' | 'survolee' | 'liee' | 'estompee' | 'cible-possible' | 'cible' | 'choisie'
+export type EtatVoie = 'normale' | 'survolee' | 'liee' | 'estompee' | 'cible-possible' | 'cible' | 'choisie' | 'a-retirer'
 
 interface PropsVoie {
   segment: [XY, XY]
@@ -20,6 +20,8 @@ interface PropsVoie {
   interactive: boolean
   /** Mode « Voie » : la voie entière se glisse. */
   deplacable?: boolean
+  /** Mode « Voie », sous-outil Retirer : un clic retire la voie. */
+  retirable?: boolean
   titre: string
   onSurvol: (survol: boolean) => void
   onClic?: (e: MouseEvent<SVGElement>) => void
@@ -29,10 +31,10 @@ interface PropsVoie {
   onPointerCancel?: () => void
 }
 
-export function Voie({ segment, largeur, couleur, sortante, etat, interactive, deplacable, titre, onSurvol, onClic, ...pointeur }: PropsVoie) {
+export function Voie({ segment, largeur, couleur, sortante, etat, interactive, deplacable, retirable, titre, onSurvol, onClic, ...pointeur }: PropsVoie) {
   return (
     <path
-      className={classes('calque-voie', sortante && 'sortante', etat, interactive && 'interactive', deplacable && 'deplacable')}
+      className={classes('calque-voie', sortante && 'sortante', etat, interactive && 'interactive', deplacable && 'deplacable', retirable && 'retirable')}
       d={d(segment)}
       stroke={sortante ? undefined : couleur}
       strokeWidth={largeur}
@@ -43,6 +45,21 @@ export function Voie({ segment, largeur, couleur, sortante, etat, interactive, d
     >
       <title>{titre}</title>
     </path>
+  )
+}
+
+/** Voie en cours de tracé, dans le sens de la circulation : la flèche montre où elle va. */
+export function VoieTracee({ segment: [a, b], largeur }: { segment: [XY, XY]; largeur: number }) {
+  const longueur = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+  const [ux, uy] = [(b[0] - a[0]) / longueur, (b[1] - a[1]) / longueur]
+  const pointe = Math.max(8, largeur * 0.9)
+  const base: XY = [b[0] - ux * pointe, b[1] - uy * pointe]
+  const [nx, ny] = [-uy * pointe * 0.7, ux * pointe * 0.7]
+  return (
+    <g className="calque-voie-tracee">
+      <path d={d([a, base])} strokeWidth={largeur} />
+      <path className="pointe" d={`${d([[base[0] + nx, base[1] + ny], b, [base[0] - nx, base[1] - ny]])} Z`} />
+    </g>
   )
 }
 

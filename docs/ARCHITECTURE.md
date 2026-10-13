@@ -687,8 +687,12 @@ du temps, ni la fiabilité réelle des estimations. L'API enregistre donc chaque
 
 ### 8.3 Modes d'affichage et fond de carte
 
-Les modes se choisissent dans la barre centrée en haut de l'écran ; le bouton ◧ (à droite)
-règle les couches du mode et le fond de carte.
+Les modes se choisissent dans la barre centrée en haut de l'écran. À droite, une colonne
+empile le zoom (et « N » pour remettre au nord quand la carte est tournée), puis des boutons à
+icône Lucide (`lucide-react`) : fond de carte et trams (Map), mesures de distance (Ruler) et,
+en mode Données brutes, ses couches (Layers). Les couches ont leur propre panneau, ouvert par
+défaut ; la liste des mesures prend sa place quand elle s'ouvre. Ces panneaux se posent en
+haut à droite, ou sous la barre des modes sur un écran de moins de 1280 px.
 
 - **Temps réel** (par défaut) : la vue grand public, en lecture seule. Les feux des carrefours
   programmés sont rejoués sur l'heure légale (§6.1), avec les trams. Chaque ligne est dessinée
@@ -704,7 +708,12 @@ règle les couches du mode et le fond de carte.
   caler son diagramme sur l'heure réelle, pour comparer sur place.
 - **Données brutes** : toutes les couches, activables une par une (carrefours, lignes, arrêts,
   rames, zones probables, temps perdu par tronçon avec son créneau), plus le volume de
-  l'historique. Le mode et les couches sont mémorisés dans le navigateur (`localStorage`).
+  l'historique. Mode de consultation : un clic sur un carrefour, « Reprendre » un brouillon ou
+  « Ouvrir » une proposition IA passent en mode Édition.
+
+Composer et configurer les carrefours ne se fait qu'en mode Édition : en changer ferme
+l'édition en cours (les brouillons restent), et toute action qui ouvre un carrefour
+(clic, brouillon, proposition IA, feu libre) y ramène. Le mode et les couches sont mémorisés dans le navigateur (`localStorage`).
 - **Fond de carte** : satellite par défaut, avec les orthophotos IGN de la Géoplateforme
   (Licence Ouverte, sans clé, ~20 cm/pixel). On garde par-dessus les libellés du plan OpenFreeMap,
   et on masque ses surfaces et ses routes. Le plan seul reste disponible.

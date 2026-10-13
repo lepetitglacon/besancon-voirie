@@ -233,11 +233,22 @@ Sur la **photo aérienne** (fond de carte « Satellite »), l'éditeur dessine :
 - les connexions en courbes de Bézier, de la couleur de leur voie de départ ;
 - les flèches déduites et le code de chaque branche.
 
-- **✥ Ajuster les voies** (outil Voie, <kbd>L</kbd>) : faire glisser les extrémités des voies
-  pour les caler sur le marquage de la photo. Glisser le corps d'une voie la
-  déplace entière ; <kbd>Maj</kbd>+clic ajoute une voie au choix (ou l'en retire), et glisser
-  l'une des voies choisies les déplace toutes ensemble. Un clic sur la carte vide le choix. Les
-  voies d'un tronçon d'anneau suivent leurs nœuds et ne se déplacent pas ainsi.
+- **≡ Voies** (outil Voie, <kbd>L</kbd>) : comme pour les passages piétons, une barre de
+  sous-outils s'ouvre au-dessus de la barre d'outils.
+  - *Déplacer* : faire glisser les extrémités des voies pour les caler sur le marquage de la
+    photo. Glisser le corps d'une voie la déplace entière ; <kbd>Maj</kbd>+clic ajoute une voie
+    au choix (ou l'en retire), et glisser l'une des voies choisies les déplace toutes ensemble.
+    Un clic sur la carte vide le choix.
+  - *Tracer* : ajouter une voie qu'OSM ne connaît pas, en la glissant **dans le sens de la
+    circulation** : vers le carrefour, une entrante ; en s'en éloignant, une sortante. Elle
+    rejoint la branche dont les voies sont les plus proches de son milieu. Son rang se déduit de
+    sa position (0 = la plus à gauche dans son sens) ; les voies à sa droite et leurs liaisons
+    sont renumérotées (`S:e1` devient `S:e2`…). Elle arrive sans liaison.
+  - *Retirer* : un clic retire la voie et ses liaisons ; les voies à sa droite prennent son
+    rang.
+
+  Les voies d'un tronçon d'anneau suivent leurs nœuds : elles ne se déplacent, ne se tracent ni
+  ne se retirent ainsi.
 - **⤳ Connecter** : glisser du point coloré d'une voie entrante vers le point blanc d'une voie
   sortante. Chaque voie a deux bouts, comme une prise : un rond (mâle) là où la circulation la
   quitte, un carré (femelle) là où elle y entre. Une liaison va donc toujours d'un rond (bout

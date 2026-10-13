@@ -10,11 +10,13 @@ const Bouton = withContext<HTMLButtonElement, HTMLChakraProps<'button'>>('button
 const Separateur = withContext<HTMLDivElement, HTMLChakraProps<'div'>>('div', 'separateur')
 
 /**
- * Zoom et remise au nord, à placer dans la `<Map>`. Le bouton « nord » n'apparaît que
- * lorsque la carte est tournée ou inclinée.
+ * Zoom et remise au nord, dans la `<Map>` ou à côté (sous le MapProvider). Le bouton « nord »
+ * n'apparaît que lorsque la carte est tournée ou inclinée.
  */
 export function ControleZoom(props: HTMLChakraProps<'div'>) {
-  const { current: carte } = useMap()
+  // Dans la <Map> (current) ou à côté, sous le MapProvider (carte d'id « carte »).
+  const cartes = useMap()
+  const carte = cartes.current ?? cartes.carte
   const [oriente, setOriente] = useState(false)
 
   useEffect(() => {

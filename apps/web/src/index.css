@@ -67,6 +67,33 @@ body {
   cursor: move;
 }
 
+.calque-voie.retirable {
+  cursor: pointer;
+}
+
+.calque-voie.a-retirer {
+  opacity: 0.9;
+  stroke: var(--chakra-colors-feu-rouge);
+}
+
+/* Voie en cours de tracé (outil Voie, sous-outil Tracer). */
+.calque-voie-tracee path {
+  fill: none;
+  stroke: #ffffff;
+  stroke-linecap: butt;
+  opacity: 0.75;
+}
+
+.calque-voie-tracee .pointe {
+  fill: #ffffff;
+  stroke: none;
+}
+
+/* Outil Voie : les liaisons, dessinées par-dessus, ne prennent pas les clics des voies. */
+.calque-carrefour.ajuster .calque-courbe .zone-clic {
+  pointer-events: none;
+}
+
 .calque-voie.estompee {
   opacity: 0.2;
 }

@@ -14,7 +14,7 @@ import Map, {
 import { CalqueCarrefour, type ApercuFeu, type ClicCalque, type FeuPlacable } from '../configuration/calque/CalqueCarrefour'
 import type { Poignee } from '../configuration/modele'
 import type { AffichageConfiguration } from '../configuration/ConfigurationCarrefour'
-import { Aide, BarreOutils, ControleZoom, PopupCarte, PopupSurCarte } from '../ds'
+import { Aide, BarreOutils, PopupCarte, PopupSurCarte } from '../ds'
 import { CoucheMesure } from './CoucheMesure'
 import { coucheCarrefours, coucheFeux } from './couches'
 import { FondDeCarte, type OptionsFond } from './FondDeCarte'
@@ -101,7 +101,7 @@ interface Props {
   /** Glisser-déposer dans l'éditeur de configuration. */
   onDeplacerPoignee: (poignee: Poignee, position: LonLat) => void
   onConnecter: (de: string, vers: string) => void
-  onTracerPassage: (segment: [LonLat, LonLat]) => void
+  onTracer: (segment: [LonLat, LonLat]) => void
   /** Zone de la photo IA tracée sur la carte : [ouest, sud, est, nord]. */
   onDessinerZoneIa: (emprise: EmpriseIa) => void
   /** Pose un feu sur son mât, ou le remet à sa position OSM (null). */
@@ -358,7 +358,6 @@ export function CarteCarrefours(props: Props) {
     >
       <Demarrage onEmprise={props.onEmprise} />
       <ClicDroit onMenu={props.onMenuContextuel} />
-      <ControleZoom position="absolute" top="4" right="4" zIndex="1" />
       <FondDeCarte {...fond} />
       {children}
       {rectangle && (
@@ -415,8 +414,8 @@ export function CarteCarrefours(props: Props) {
           feux={configuration.feux}
           onDeplacer={props.onDeplacerPoignee}
           onConnecter={props.onConnecter}
-          onTracerPassage={props.onTracerPassage}
-          sousOutilPieton={configuration.sousOutilPieton}
+          onTracer={props.onTracer}
+          sousOutil={configuration.sousOutil}
           feuxPlacables={feuxPlacables}
           onPlacerFeu={props.onPlacerFeu}
           onApercuFeu={setApercuFeu}

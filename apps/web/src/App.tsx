@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { LonLat } from '@voirie/engine'
 import type { AnalyseIa, Bbox, CarrefourResume, FeuResume, TypeJour } from '@voirie/schema'
-import { Badge, Box, Button, HStack, IconButton, Kbd, Popover, Portal, Stack, Text } from '@chakra-ui/react'
+import { Badge, Box, Button, HStack, Kbd, Popover, Portal, Stack, Text } from '@chakra-ui/react'
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import { Layers, Map as MapIcon, Ruler } from 'lucide-react'
 import { useMap } from 'react-map-gl/maplibre'
 import { api } from './api'
 import { abandonnerBrouillons, useBrouillons, type BrouillonsCarrefour } from './configuration/brouillons'
@@ -20,7 +21,9 @@ import {
   HAUT_BANDEAU,
   BarreOutils,
   Bascule,
+  BoutonCarte,
   CarteEnTete,
+  ControleZoom,
   Curseur,
   MenuContextuel,
   Message,
@@ -137,6 +140,10 @@ function App() {
   const [mode, setMode] = usePreference<Mode>('mode-carte', 'temps_reel')
   const tempsReel = mode === 'temps_reel'
   const sumo = mode === 'sumo'
+  /** Composer et configurer les carrefours : seulement en mode Édition. */
+  const modeEdition = mode === 'edition'
+  /** Panneau des couches du mode Données brutes ; la liste des mesures prend sa place quand elle s'ouvre. */
+  const [panneauBrut, setPanneauBrut] = usePreference<boolean>('panneau-brut', true)
   const [fond, setFond] = usePreference<OptionsFond>('fond', FOND_DEFAUT)
   const [trams, setTrams] = usePreference<boolean>('trams', true)
   const [brut, setBrut] = usePreference<CouchesBrutes>('couches-brutes', COUCHES_BRUTES_DEFAUT)
@@ -158,7 +165,7 @@ function App() {
     connexions: [],
     anneau: null,
     mode: null,
-    sousOutilPieton: 'deplacer',
+    sousOutil: 'deplacer',
     feuxSurlignes: [],
     connexionsSurlignees: [],
     feux: null,
@@ -172,6 +179,7 @@ function App() {
   // Point de l'écran où le menu est ouvert ; pointMenu reste lu après la fermeture.
   const [ecranMenu, setEcranMenu] = useState<{ x: number; y: number } | null>(null)
   const mesures = useMesures()
+  const brutOuvert = mode === 'brut' && panneauBrut && !mesures.liste
   const mesure = mesures.courante
   // Point de la mesure sous le curseur au clic droit : le menu propose de le retirer.
   const [pointMesureMenu, setPointMesureMenu] = useState<number | null>(null)
@@ -186,8 +194,8 @@ function App() {
     (de, vers) => panneauConfiguration.current?.connecter(de, vers),
     [],
   )
-  const tracerPassage = useCallback<ConfigurationCarrefourHandle['tracerPassage']>(
-    (segment) => panneauConfiguration.current?.tracerPassage(segment),
+  const tracer = useCallback<ConfigurationCarrefourHandle['tracer']>(
+    (segment) => panneauConfiguration.current?.tracer(segment),
     [],
   )
   const dessinerZoneIa = useCallback<ConfigurationCarrefourHandle['dessinerZoneIa']>(
@@ -229,13 +237,14 @@ function App() {
     ? (feuxTempsReel.data?.carrefours.find((c) => c.id === ficheTempsReel.carrefour.id) ?? null)
     : null
 
-  /** Le mode Temps réel est en lecture seule : on quitte l'édition en cours (les brouillons restent). */
+  /** Hors du mode Édition, on quitte l'édition en cours (les brouillons restent) ; hors du Temps réel, sa fiche. */
   const changerMode = (suivant: Mode) => {
     setMode(suivant)
-    if (suivant === 'temps_reel' || suivant === 'sumo') {
+    if (suivant !== 'edition') {
       setEdition(null)
       setConfiguration(null)
-    } else setFicheTempsReel(null)
+    }
+    if (suivant !== 'temps_reel') setFicheTempsReel(null)
   }
 
   const placerFeu = useCallback(
@@ -282,8 +291,11 @@ function App() {
     onError: (erreur) => window.alert(erreur.message),
   })
 
+  /** Composer ou modifier un carrefour (clic sur un feu libre, N, « Feux ») passe en mode Édition. */
   const demarrer = (nouvelle: Edition) => {
     enregistrer.reset()
+    setMode('edition')
+    setFicheTempsReel(null)
     setEdition(nouvelle)
   }
 
@@ -321,8 +333,10 @@ function App() {
     ? (carrefours.data?.features.find((f) => f.id === configuration.carrefour.id)?.properties ?? configuration.carrefour)
     : null
 
-  /** Un clic sur un carrefour l'ouvre en édition, à la place de celui qui l'était. */
+  /** Un clic sur un carrefour l'ouvre en édition, à la place de celui qui l'était ; « Reprendre » passe en mode Édition. */
   const configurer = (choix: CarrefourChoisi) => {
+    setMode('edition')
+    setFicheTempsReel(null)
     setEdition(null)
     setConfiguration(choix)
   }
@@ -379,9 +393,12 @@ function App() {
   const analysesIa = useAnalysesIa()
   const ouvrirAnalyseIa = useCallback((analyse: AnalyseIa) => {
     const choix = { carrefour: analyse.carrefour, position: analyse.position }
+    // « Ouvrir » vient d'une notification ou de la carte de suivi, visibles dans tous les modes.
+    setMode('edition')
+    setFicheTempsReel(null)
     setEdition(null)
     setConfiguration({ ...choix, ouvrirAnalyseIa: { id: analyse.id } })
-  }, [])
+  }, [setMode])
 
   useNotificationsIa(analysesIa.data, ouvrirAnalyseIa)
 
@@ -399,7 +416,7 @@ function App() {
 
   // Raccourcis hors configuration (la configuration gère les siens).
   const touche = useEffectEvent((e: KeyboardEvent) => {
-    if (tempsReel || configuration || e.ctrlKey || e.metaKey || e.altKey) return
+    if (!modeEdition || configuration || e.ctrlKey || e.metaKey || e.altKey) return
     if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
     const lettre = e.key.toLowerCase()
     if (!edition) return lettre === 'n' && composer()
@@ -431,7 +448,7 @@ function App() {
   }, [])
 
   const entreesMenu: EntreeMenu[] = [
-    ...(tempsReel
+    ...(!modeEdition
       ? []
       : configuration
         ? MENU_CONFIGURATION
@@ -528,7 +545,7 @@ function App() {
           onDeplacerPointMesure={mesures.deplacer}
           onDeplacerPoignee={deplacerPoignee}
           onConnecter={connecter}
-          onTracerPassage={tracerPassage}
+          onTracer={tracer}
           onDessinerZoneIa={dessinerZoneIa}
           onPlacerFeu={placerFeu}
         >
@@ -569,12 +586,12 @@ function App() {
         left="50%"
         transform="translateX(-50%)"
         // Au-dessus de la barre d'outils centrale, quand elle est affichée.
-        bottom={configuration || sumo || tempsReel ? '22px' : '96px'}
+        bottom={modeEdition && !configuration ? '96px' : '22px'}
         zIndex="3"
         mesures={mesures}
         onCentrer={centrerSur}
       />
-      <ListeMesures position="fixed" top="3" right="60px" zIndex="3" mesures={mesures} onCentrer={centrerSur} />
+      <ListeMesures position="fixed" top={{ base: HAUT_BANDEAU, xl: '3' }} right="60px" zIndex="3" mesures={mesures} onCentrer={centrerSur} />
 
       {configuration ? (
         <ConfigurationCarrefour
@@ -681,7 +698,7 @@ function App() {
             />
           )}
 
-          <BarreOutils.Root position="fixed" left="50%" transform="translateX(-50%)" bottom="22px" zIndex="3">
+          {modeEdition && <BarreOutils.Root position="fixed" left="50%" transform="translateX(-50%)" bottom="22px" zIndex="3">
             {edition ? (
               <>
                 <BarreOutils.Outil
@@ -705,7 +722,7 @@ function App() {
                 <BarreOutils.Outil glyphe="⌖" libelle="Carrefour" raccourci="N" onClick={composer} />
               </>
             )}
-          </BarreOutils.Root>
+          </BarreOutils.Root>}
         </>
       )}
 
@@ -721,212 +738,226 @@ function App() {
         onOuvrirAnalyse={ouvrirAnalyseIa}
       />}
 
-      <IconButton
-        position="fixed"
-        top="148px"
-        right="4"
-        zIndex="2"
-        w="9"
-        h="9"
-        bg={mesures.liste ? 'brand.solid' : 'bg.panel'}
-        color={mesures.liste ? 'brand.contrast' : 'fg'}
-        borderWidth="0"
-        borderRadius="10px"
-        boxShadow="carte"
-        aria-label="Mesures de distance"
-        aria-pressed={mesures.liste}
-        title="Mesures de distance"
-        onClick={mesures.liste ? mesures.fermerListe : mesures.ouvrirListe}
-      >
-        ↔
-      </IconButton>
-
-      <Popover.Root positioning={{ placement: 'left-start', gutter: 10 }}>
-        <Popover.Trigger asChild>
-          <IconButton
-            position="fixed"
-            top="100px"
-            right="4"
-            zIndex="2"
-            w="9"
-            h="9"
-            bg="bg.panel"
-            borderWidth="0"
-            borderRadius="10px"
-            boxShadow="carte"
-            aria-label="Calques et fond de carte"
-            title="Calques et fond de carte"
+      {brutOuvert && (
+        // En haut à droite ; sous la barre des modes sur un écran étroit, où il la chevaucherait.
+        <Box position="fixed" top={{ base: HAUT_BANDEAU, xl: '3' }} right="60px" zIndex="3">
+          <CarteEnTete
+            w="320px"
+            maxW="calc(100vw - 24px)"
+            maxH={{ base: `calc(100vh - ${HAUT_BANDEAU} - 12px)`, xl: 'calc(100vh - 24px)' }}
+            surtitre="Données brutes"
+            titre={
+              <HStack gap="1.5">
+                <Text>Couches</Text>
+                <Button size="2xs" variant="ghost" ms="auto" onClick={() => setPanneauBrut(false)}>
+                  Fermer
+                </Button>
+              </HStack>
+            }
           >
-            ◧
-          </IconButton>
-        </Popover.Trigger>
-        <Portal>
-          <Popover.Positioner>
-            <Popover.Content w="320px">
-              <Popover.Body p="14px">
-                <Stack gap="3">
-                  <HStack justify="space-between">
-                    <Text textStyle="md" fontWeight="semibold">
-                      Calques
-                    </Text>
-                    <ModeCouleur />
-                  </HStack>
-                  {tempsReel && (
-                    <Stack gap="1.5">
-                      <Text textStyle="xs" fontWeight="semibold">
-                        Feux
-                      </Text>
-                      <HStack as="ul" rowGap="1" columnGap="2.5" wrap="wrap" listStyleType="none" textStyle="xs">
-                        {Object.values(FIABILITES).map((f) => (
-                          <HStack as="li" key={f.libelle} gap="1" title={f.aide}>
-                            <Badge size="xs" colorPalette={f.couleur}>
-                              {f.libelle}
-                            </Badge>
-                          </HStack>
+            <Box mt="2" minH="0" overflowY="auto">
+              <Stack gap="2">
+                <Bascule coche={brut.carrefours} onChange={basculer('carrefours')}>
+                  Carrefours à feux{carrefours.data && ` (${carrefours.data.features.length} dans la vue)`}
+                </Bascule>
+                <Bascule coche={brut.lignes} onChange={basculer('lignes')}>
+                  Tram : lignes (GTFS)
+                </Bascule>
+                <Bascule coche={brut.arrets} onChange={basculer('arrets')}>
+                  Tram : arrêts
+                </Bascule>
+                <Bascule coche={brut.rames} onChange={basculer('rames')}>
+                  Tram : rames, position estimée{enLigne !== undefined && ` (${enLigne} en ligne)`}
+                </Bascule>
+                <Bascule coche={brut.zones} onChange={basculer('zones')}>
+                  Tram : zones probables
+                </Bascule>
+                <Bascule coche={brut.pertes} onChange={basculer('pertes')}>
+                  Tram : temps perdu par tronçon
+                </Bascule>
+                {brut.pertes && (
+                  <Stack gap="2" ps="11">
+                    <HStack gap="1.5">
+                      <Selecteur
+                        size="xs"
+                        aria-label="Type de jour"
+                        valeur={creneau.typeJour}
+                        onChange={(valeur) => setCreneau((c) => ({ ...c, typeJour: valeur as TypeJour }))}
+                      >
+                        <option value="semaine">Semaine</option>
+                        <option value="samedi">Samedi</option>
+                        <option value="dimanche">Dimanche</option>
+                      </Selecteur>
+                      <Selecteur
+                        size="xs"
+                        aria-label="Heure"
+                        valeur={creneau.heure ?? ''}
+                        onChange={(valeur) => setCreneau((c) => ({ ...c, heure: valeur === '' ? null : Number(valeur) }))}
+                      >
+                        <option value="">Toute la journée</option>
+                        {Array.from({ length: 24 }, (_, h) => (
+                          <option key={h} value={h}>
+                            {h} h – {h + 1} h
+                          </option>
                         ))}
-                      </HStack>
-                      <Aide>Cycle calé sur l'heure légale (base de temps à 3 h), d'après les tops relevés au carrefour.</Aide>
-                    </Stack>
-                  )}
-                  {sumo ? (
-                    <Aide>Essais, indicateurs et lecture : dans les cartes du mode SUMO.</Aide>
-                  ) : mode !== 'brut' ? (
-                    <Stack gap="2.5">
-                      <Bascule coche={trams} onChange={setTrams}>
-                        Trams en temps réel
-                      </Bascule>
-                      {trams && enLigne !== undefined && (
-                        <Aide>{enLigne} rame(s) en ligne · position estimée d'après les temps d'attente Ginko</Aide>
-                      )}
-                    </Stack>
-                  ) : (
-                    <Stack gap="2">
-                      <Bascule coche={brut.carrefours} onChange={basculer('carrefours')}>
-                        Carrefours à feux{carrefours.data && ` (${carrefours.data.features.length} dans la vue)`}
-                      </Bascule>
-                      <Bascule coche={brut.lignes} onChange={basculer('lignes')}>
-                        Tram : lignes (GTFS)
-                      </Bascule>
-                      <Bascule coche={brut.arrets} onChange={basculer('arrets')}>
-                        Tram : arrêts
-                      </Bascule>
-                      <Bascule coche={brut.rames} onChange={basculer('rames')}>
-                        Tram : rames, position estimée{enLigne !== undefined && ` (${enLigne} en ligne)`}
-                      </Bascule>
-                      <Bascule coche={brut.zones} onChange={basculer('zones')}>
-                        Tram : zones probables
-                      </Bascule>
-                      <Bascule coche={brut.pertes} onChange={basculer('pertes')}>
-                        Tram : temps perdu par tronçon
-                      </Bascule>
-                      {brut.pertes && (
-                        <Stack gap="2" ps="11">
-                          <HStack gap="1.5">
-                            <Selecteur
-                              size="xs"
-                              aria-label="Type de jour"
-                              valeur={creneau.typeJour}
-                              onChange={(valeur) => setCreneau((c) => ({ ...c, typeJour: valeur as TypeJour }))}
-                            >
-                              <option value="semaine">Semaine</option>
-                              <option value="samedi">Samedi</option>
-                              <option value="dimanche">Dimanche</option>
-                            </Selecteur>
-                            <Selecteur
-                              size="xs"
-                              aria-label="Heure"
-                              valeur={creneau.heure ?? ''}
-                              onChange={(valeur) => setCreneau((c) => ({ ...c, heure: valeur === '' ? null : Number(valeur) }))}
-                            >
-                              <option value="">Toute la journée</option>
-                              {Array.from({ length: 24 }, (_, h) => (
-                                <option key={h} value={h}>
-                                  {h} h – {h + 1} h
-                                </option>
-                              ))}
-                            </Selecteur>
-                          </HStack>
-                          <HStack as="ul" rowGap="1" columnGap="2.5" wrap="wrap" listStyleType="none" textStyle="xs">
-                            {PALIERS_PERTE.map((palier) => (
-                              <HStack as="li" key={palier.libelle} gap="1">
-                                <Pastille forme="trait" couleur={palier.couleur} />
-                                {palier.libelle}
-                              </HStack>
-                            ))}
-                          </HStack>
-                          <Aide>
-                            Durée habituelle moins durée quand ça roule bien.
-                            {historique.data && ` ${historique.data.troncons.length} tronçon(s) observé(s).`}
-                          </Aide>
-                        </Stack>
-                      )}
-                      {etatHistorique.data && (
-                        <Aide>
-                          Historique : {etatHistorique.data.passages.toLocaleString('fr-FR')} passage(s)
-                          {etatHistorique.data.premier &&
-                            ` depuis le ${new Date(etatHistorique.data.premier).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`}
-                          {!etatHistorique.data.collecteActive && ' · collecte arrêtée (TRAM_COLLECTE)'}
-                        </Aide>
-                      )}
-                    </Stack>
-                  )}
-
-                  {(reseauTram.isError || tramsTempsReel.isError) && (
-                    <Message ton="erreur">
-                      Trams indisponibles : {(reseauTram.error ?? tramsTempsReel.error)?.message}
-                    </Message>
-                  )}
-                  <Section libelle="Fond de carte" pt="2.5" borderTopWidth="1px" borderColor="border.muted">
-                    <Segments
-                      fitted
-                      aria-label="Fond de carte"
-                      valeur={fond.fond}
-                      onChange={(choix) => setFond((options) => ({ ...options, fond: choix }))}
-                      options={[
-                        { valeur: 'satellite', libelle: 'Satellite' },
-                        { valeur: 'plan', libelle: 'Plan' },
-                      ]}
-                    />
-                    <Bascule coche={fond.batiments} onChange={(batiments) => setFond((options) => ({ ...options, batiments }))}>
-                      Bâtiments
-                    </Bascule>
-                    <Bascule coche={fond.affichage3d} onChange={(affichage3d) => setFond((options) => ({ ...options, affichage3d }))}>
-                      Affichage 3D (gourmand)
-                    </Bascule>
-                    {fond.affichage3d && (
-                      <Stack gap="2" ps="6">
-                        <Bascule
-                          size="sm"
-                          coche={fond.batiments3d}
-                          disabled={!fond.batiments}
-                          onChange={(batiments3d) => setFond((options) => ({ ...options, batiments3d }))}
-                        >
-                          Bâtiments en volume
-                        </Bascule>
-                        <Bascule
-                          size="sm"
-                          coche={fond.elevation}
-                          onChange={(elevation) => setFond((options) => ({ ...options, elevation }))}
-                        >
-                          Relief du terrain
-                        </Bascule>
-                        <Bascule size="sm" coche={fond.soleil} onChange={(soleil) => setFond((options) => ({ ...options, soleil }))}>
-                          Soleil et luminosité
-                        </Bascule>
-                        {fond.soleil && <ReglageHeure heure={fond.heure} onChange={(heure) => setFond((options) => ({ ...options, heure }))} />}
+                      </Selecteur>
+                    </HStack>
+                    <HStack as="ul" rowGap="1" columnGap="2.5" wrap="wrap" listStyleType="none" textStyle="xs">
+                      {PALIERS_PERTE.map((palier) => (
+                        <HStack as="li" key={palier.libelle} gap="1">
+                          <Pastille forme="trait" couleur={palier.couleur} />
+                          {palier.libelle}
+                        </HStack>
+                      ))}
+                    </HStack>
+                    <Aide>
+                      Durée habituelle moins durée quand ça roule bien.
+                      {historique.data && ` ${historique.data.troncons.length} tronçon(s) observé(s).`}
+                    </Aide>
+                  </Stack>
+                )}
+                {etatHistorique.data && (
+                  <Aide>
+                    Historique : {etatHistorique.data.passages.toLocaleString('fr-FR')} passage(s)
+                    {etatHistorique.data.premier &&
+                      ` depuis le ${new Date(etatHistorique.data.premier).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`}
+                    {!etatHistorique.data.collecteActive && ' · collecte arrêtée (TRAM_COLLECTE)'}
+                  </Aide>
+                )}
+              </Stack>
+            </Box>
+          </CarteEnTete>
+        </Box>
+      )}
+      {/* Colonne de droite : zoom (plus « nord » quand la carte est tournée), puis les panneaux. */}
+      <Stack position="fixed" top="4" right="4" zIndex="2" gap="3" align="flex-end">
+        <ControleZoom />
+        <Popover.Root positioning={{ placement: 'left-start', gutter: 10 }}>
+          <Popover.Trigger asChild>
+            <BoutonCarte libelle="Fond de carte et calques">
+              <MapIcon />
+            </BoutonCarte>
+          </Popover.Trigger>
+          <Portal>
+            <Popover.Positioner>
+              <Popover.Content w="320px">
+                <Popover.Body p="14px">
+                  <Stack gap="3">
+                    <HStack justify="space-between">
+                      <Text textStyle="md" fontWeight="semibold">
+                        Calques
+                      </Text>
+                      <ModeCouleur />
+                    </HStack>
+                    {tempsReel && (
+                      <Stack gap="1.5">
+                        <Text textStyle="xs" fontWeight="semibold">
+                          Feux
+                        </Text>
+                        <HStack as="ul" rowGap="1" columnGap="2.5" wrap="wrap" listStyleType="none" textStyle="xs">
+                          {Object.values(FIABILITES).map((f) => (
+                            <HStack as="li" key={f.libelle} gap="1" title={f.aide}>
+                              <Badge size="xs" colorPalette={f.couleur}>
+                                {f.libelle}
+                              </Badge>
+                            </HStack>
+                          ))}
+                        </HStack>
+                        <Aide>Cycle calé sur l'heure légale (base de temps à 3 h), d'après les tops relevés au carrefour.</Aide>
                       </Stack>
                     )}
-                  </Section>
+                    {sumo ? (
+                      <Aide>Essais, indicateurs et lecture : dans les cartes du mode SUMO.</Aide>
+                    ) : mode !== 'brut' ? (
+                      <Stack gap="2.5">
+                        <Bascule coche={trams} onChange={setTrams}>
+                          Trams en temps réel
+                        </Bascule>
+                        {trams && enLigne !== undefined && (
+                          <Aide>{enLigne} rame(s) en ligne · position estimée d'après les temps d'attente Ginko</Aide>
+                        )}
+                      </Stack>
+                    ) : (
+                      <Aide>Couches : dans le panneau ⊞ Données brutes, à droite.</Aide>
+                    )}
 
-                  <Text textStyle="2xs" color="fg.muted">
-                    Outil citoyen indépendant, sans lien avec la Ville ou la Métropole. Données indicatives.
-                  </Text>
-                </Stack>
-              </Popover.Body>
-            </Popover.Content>
-          </Popover.Positioner>
-        </Portal>
-      </Popover.Root>
+                    {(reseauTram.isError || tramsTempsReel.isError) && (
+                      <Message ton="erreur">
+                        Trams indisponibles : {(reseauTram.error ?? tramsTempsReel.error)?.message}
+                      </Message>
+                    )}
+                    <Section libelle="Fond de carte" pt="2.5" borderTopWidth="1px" borderColor="border.muted">
+                      <Segments
+                        fitted
+                        aria-label="Fond de carte"
+                        valeur={fond.fond}
+                        onChange={(choix) => setFond((options) => ({ ...options, fond: choix }))}
+                        options={[
+                          { valeur: 'satellite', libelle: 'Satellite' },
+                          { valeur: 'plan', libelle: 'Plan' },
+                        ]}
+                      />
+                      <Bascule coche={fond.batiments} onChange={(batiments) => setFond((options) => ({ ...options, batiments }))}>
+                        Bâtiments
+                      </Bascule>
+                      <Bascule coche={fond.affichage3d} onChange={(affichage3d) => setFond((options) => ({ ...options, affichage3d }))}>
+                        Affichage 3D (gourmand)
+                      </Bascule>
+                      {fond.affichage3d && (
+                        <Stack gap="2" ps="6">
+                          <Bascule
+                            size="sm"
+                            coche={fond.batiments3d}
+                            disabled={!fond.batiments}
+                            onChange={(batiments3d) => setFond((options) => ({ ...options, batiments3d }))}
+                          >
+                            Bâtiments en volume
+                          </Bascule>
+                          <Bascule
+                            size="sm"
+                            coche={fond.elevation}
+                            onChange={(elevation) => setFond((options) => ({ ...options, elevation }))}
+                          >
+                            Relief du terrain
+                          </Bascule>
+                          <Bascule size="sm" coche={fond.soleil} onChange={(soleil) => setFond((options) => ({ ...options, soleil }))}>
+                            Soleil et luminosité
+                          </Bascule>
+                          {fond.soleil && <ReglageHeure heure={fond.heure} onChange={(heure) => setFond((options) => ({ ...options, heure }))} />}
+                        </Stack>
+                      )}
+                    </Section>
+
+                    <Text textStyle="2xs" color="fg.muted">
+                      Outil citoyen indépendant, sans lien avec la Ville ou la Métropole. Données indicatives.
+                    </Text>
+                  </Stack>
+                </Popover.Body>
+              </Popover.Content>
+            </Popover.Positioner>
+          </Portal>
+        </Popover.Root>
+        <BoutonCarte
+          libelle="Mesures de distance"
+          actif={mesures.liste}
+          onClick={mesures.liste ? mesures.fermerListe : mesures.ouvrirListe}
+        >
+          <Ruler />
+        </BoutonCarte>
+        {mode === 'brut' && (
+          <BoutonCarte
+            libelle="Couches des données brutes"
+            actif={brutOuvert}
+            onClick={() => {
+              if (brutOuvert) return setPanneauBrut(false)
+              mesures.fermerListe()
+              setPanneauBrut(true)
+            }}
+          >
+            <Layers />
+          </BoutonCarte>
+        )}
+      </Stack>
     </>
   )
 }
