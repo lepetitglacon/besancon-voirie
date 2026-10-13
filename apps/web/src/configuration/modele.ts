@@ -31,6 +31,8 @@ export type Poignee =
   | { role: 'voie'; cle: string; sens: SensVoie; extremite: 0 | 1 }
   | { role: 'traversee'; branche: string; extremite: 0 | 1 }
   | { role: 'noeud'; code: string }
+  /** Voies entières, translatées ensemble du point de départ du geste à la position. */
+  | { role: 'voies'; cles: string[]; depart: LonLat }
 
 /**
  * Où générer les voies d'une branche : depuis le centre du carrefour, ligne d'arrêt à 15 m ;
@@ -122,6 +124,25 @@ export function deplacerPoignee(brouillon: Brouillon, poignee: Poignee, position
     const { anneau } = brouillon
     if (!anneau) return brouillon
     return appliquerAnneau(brouillon, { noeuds: anneau.noeuds.map((n) => (n.code === poignee.code ? { ...n, position } : n)) })
+  }
+  if (poignee.role === 'voies') {
+    const dLon = position[0] - poignee.depart[0]
+    const dLat = position[1] - poignee.depart[1]
+    const decaler = ([lon, lat]: LonLat): LonLat => [lon + dLon, lat + dLat]
+    const cles = new Set(poignee.cles)
+    return {
+      ...brouillon,
+      branches: brouillon.branches.map((b) =>
+        b.voies.some((v) => cles.has(cleVoie(b.code, v.sens, v.rang)))
+          ? {
+              ...b,
+              voies: b.voies.map((v) =>
+                cles.has(cleVoie(b.code, v.sens, v.rang)) ? { ...v, geom: [decaler(v.geom[0]), decaler(v.geom[1])] } : v,
+              ),
+            }
+          : b,
+      ),
+    }
   }
   const remplacer = (segment: Segment): Segment =>
     poignee.extremite === 0 ? [position, segment[1]] : [segment[0], position]

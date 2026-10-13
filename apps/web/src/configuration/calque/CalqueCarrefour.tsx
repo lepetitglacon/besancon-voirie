@@ -105,6 +105,8 @@ type Survol = { type: 'voie'; cle: string } | { type: 'connexion'; cle: string }
 
 type Glisse =
   | { type: 'poignee'; poignee: PoigneeModele; depart: LonLat; position: LonLat }
+  /** Voies choisies glissées par leur corps ; `retirer` : Maj+clic sans bouger retire `cle` du choix. */
+  | { type: 'voies'; cle: string; poignee: PoigneeModele & { role: 'voies' }; position: LonLat; retirer: boolean }
   | { type: 'connexion'; de: string; position: LonLat; cible: string | null }
   /** `enregistrement` : lâché, en attente de l'API (le feu reste affiché à sa nouvelle place). */
   | { type: 'feu'; id: string; depart: LonLat; position: LonLat; enregistrement: boolean }
@@ -138,6 +140,19 @@ export function CalqueCarrefour(props: Props) {
   const refSvg = useRef<SVGSVGElement>(null)
   const [survol, setSurvol] = useState<Survol>(null)
   const [glisse, setGlisse] = useState<Glisse | null>(null)
+  /** Mode « Voie » : voies choisies (clic, Maj+clic pour en ajouter), qui se glissent ensemble. */
+  const [voiesChoisies, setVoiesChoisies] = useState<ReadonlySet<string>>(new Set())
+
+  // La sélection de voies ne survit pas au changement d'outil ; un clic sur la carte la vide.
+  useEffect(() => setVoiesChoisies(new Set()), [mode])
+  useEffect(() => {
+    if (!carte || mode !== 'ajuster') return
+    const vider = () => setVoiesChoisies(new Set())
+    carte.on('click', vider)
+    return () => {
+      carte.off('click', vider)
+    }
+  }, [carte, mode])
 
   const apercuFeu = useMemo<ApercuFeu | null>(
     () => (glisse?.type === 'feu' ? { id: glisse.id, position: glisse.position } : null),
@@ -160,7 +175,7 @@ export function CalqueCarrefour(props: Props) {
     }
     let appui: XY | null = null
     const relayerAppui = (e: globalThis.MouseEvent) => {
-      if (e.button !== 0 || (e.target as Element).closest('.calque-poignee')) return
+      if (e.button !== 0 || (e.target as Element).closest('.calque-poignee, .calque-voie.deplacable')) return
       appui = [e.clientX, e.clientY]
       canvas.dispatchEvent(new globalThis.MouseEvent('mousedown', e))
     }
@@ -183,7 +198,7 @@ export function CalqueCarrefour(props: Props) {
   // et leurs connexions suivent le pointeur en direct.
   const apercu = useMemo(
     () =>
-      glisse?.type === 'poignee'
+      glisse?.type === 'poignee' || glisse?.type === 'voies'
         ? deplacerPoignee({ branches, connexions, anneau }, glisse.poignee, glisse.position)
         : { branches, connexions, anneau },
     [branches, connexions, anneau, glisse],
@@ -222,6 +237,7 @@ export function CalqueCarrefour(props: Props) {
 
   const etatVoie = (cle: string, sortante: boolean): EtatVoie => {
     if (glisse?.type === 'connexion' && sortante) return cle === cibleEnCours ? 'cible' : 'cible-possible'
+    if (voiesChoisies.has(cle)) return 'choisie'
     if (selection === cle) return 'survolee'
     if (survol?.type === 'voie' && survol.cle === cle) return 'survolee'
     if (voiesLiees.has(cle)) return 'liee'
@@ -295,8 +311,34 @@ export function CalqueCarrefour(props: Props) {
       if (poignee.role === 'noeud' && immobile) onClic?.({ type: 'noeud', code: poignee.code, position })
       else onDeplacer(poignee, position)
     }
+    if (glisse?.type === 'voies') {
+      const { cle, poignee, position, retirer } = glisse
+      const immobile = Math.hypot(...repereLocal(poignee.depart).versXY(position)) < DEPLACEMENT_NOEUD_MIN_M
+      if (!immobile) onDeplacer(poignee, position)
+      else if (retirer) setVoiesChoisies((choisies) => new Set([...choisies].filter((c) => c !== cle)))
+    }
     if (glisse?.type === 'connexion' && glisse.cible) onConnecter(glisse.de, glisse.cible)
     setGlisse(null)
+  }
+
+  // Mode « Voie » : appui sur le corps d'une voie. Sans Maj, la voie rejoint le geste seule, sauf
+  // si elle est déjà choisie (tout le choix suit) ; avec Maj, elle s'ajoute au choix, ou s'en
+  // retire si on relâche sans bouger.
+  const saisirVoie = (cle: string) => (e: PointerEvent<SVGElement>) => {
+    if (e.button !== 0 || glisse) return
+    e.stopPropagation()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    const dejaChoisie = voiesChoisies.has(cle)
+    const choisies = e.shiftKey ? new Set(voiesChoisies).add(cle) : dejaChoisie ? voiesChoisies : new Set([cle])
+    setVoiesChoisies(choisies)
+    const depart = positionPointeur(e)
+    setGlisse({
+      type: 'voies',
+      cle,
+      poignee: { role: 'voies', cles: [...choisies], depart },
+      position: depart,
+      retirer: e.shiftKey && dejaChoisie,
+    })
   }
 
   const gestes = (poignee: PoigneeModele, depart: LonLat) => ({
@@ -460,9 +502,17 @@ export function CalqueCarrefour(props: Props) {
           sortante={voie.sens === 'sortante'}
           etat={etatVoie(cle, voie.sens === 'sortante')}
           interactive={mode !== null}
-          titre={`${cle} · voie ${voie.sens} ${voie.rang + 1} (${voie.type})`}
+          deplacable={mode === 'ajuster' && !voie.troncon}
+          titre={
+            mode === 'ajuster' && !voie.troncon
+              ? `${cle} : glisser pour déplacer la voie (Maj+clic : en choisir plusieurs)`
+              : `${cle} · voie ${voie.sens} ${voie.rang + 1} (${voie.type})`
+          }
           onSurvol={(actif) => setSurvol(actif ? { type: 'voie', cle } : null)}
           onClic={cliquable && onClic ? (e) => onClic({ type: 'voie', cle, position: positionClic(e) }) : undefined}
+          {...(mode === 'ajuster' && !voie.troncon
+            ? { onPointerDown: saisirVoie(cle), onPointerMove: suivre, onPointerUp: terminer, onPointerCancel: () => setGlisse(null) }
+            : {})}
         />
       ))}
 

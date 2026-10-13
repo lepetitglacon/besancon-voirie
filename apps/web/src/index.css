@@ -58,6 +58,15 @@ body {
   opacity: 0.8;
 }
 
+.calque-voie.choisie {
+  opacity: 0.95;
+  filter: drop-shadow(0 0 2px #ffffff) drop-shadow(0 0 1px #ffffff);
+}
+
+.calque-carrefour.ajuster .calque-voie.deplacable {
+  cursor: move;
+}
+
 .calque-voie.estompee {
   opacity: 0.2;
 }

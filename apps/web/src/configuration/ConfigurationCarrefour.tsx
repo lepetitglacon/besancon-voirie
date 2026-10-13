@@ -100,7 +100,13 @@ type Popup =
   | { type: 'feu'; feu: FeuResume; position: LonLat }
 
 const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>> = {
-  ajuster: { titre: 'Caler les voies', aides: ['Glisser les extrémités des voies et des passages sur le marquage de la photo'] },
+  ajuster: {
+    titre: 'Caler les voies',
+    aides: [
+      'Glisser les extrémités des voies et des passages sur le marquage de la photo',
+      'Glisser une voie pour la déplacer ; Maj+clic pour en déplacer plusieurs',
+    ],
+  },
   connecter: { titre: 'Relier les voies', aides: ['Glisser d’une voie entrante vers une voie sortante', 'Clic sur une liaison : la retirer'] },
   feux: { titre: 'Poser les feux', aides: ['Glisser chaque feu jusqu’à son mât', 'Clic sur le point creux : position OSM'] },
   pieton: { titre: 'Passages piétons', aides: ['Clic sur une voie ou un code de branche : ajouter ou retirer son passage'] },

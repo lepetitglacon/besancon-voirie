@@ -9,7 +9,7 @@ import { cheminConnexion } from './chemins'
 const d = (points: readonly XY[]) => points.map(([x, y], i) => `${i ? 'L' : 'M'}${x},${y}`).join(' ')
 const classes = (...noms: Array<string | false | null | undefined>) => noms.filter(Boolean).join(' ')
 
-export type EtatVoie = 'normale' | 'survolee' | 'liee' | 'estompee' | 'cible-possible' | 'cible'
+export type EtatVoie = 'normale' | 'survolee' | 'liee' | 'estompee' | 'cible-possible' | 'cible' | 'choisie'
 
 interface PropsVoie {
   segment: [XY, XY]
@@ -18,21 +18,28 @@ interface PropsVoie {
   sortante: boolean
   etat: EtatVoie
   interactive: boolean
+  /** Mode « Voie » : la voie entière se glisse. */
+  deplacable?: boolean
   titre: string
   onSurvol: (survol: boolean) => void
   onClic?: (e: MouseEvent<SVGElement>) => void
+  onPointerDown?: (e: PointerEvent<SVGElement>) => void
+  onPointerMove?: (e: PointerEvent<SVGElement>) => void
+  onPointerUp?: (e: PointerEvent<SVGElement>) => void
+  onPointerCancel?: () => void
 }
 
-export function Voie({ segment, largeur, couleur, sortante, etat, interactive, titre, onSurvol, onClic }: PropsVoie) {
+export function Voie({ segment, largeur, couleur, sortante, etat, interactive, deplacable, titre, onSurvol, onClic, ...pointeur }: PropsVoie) {
   return (
     <path
-      className={classes('calque-voie', sortante && 'sortante', etat, interactive && 'interactive')}
+      className={classes('calque-voie', sortante && 'sortante', etat, interactive && 'interactive', deplacable && 'deplacable')}
       d={d(segment)}
       stroke={sortante ? undefined : couleur}
       strokeWidth={largeur}
       onPointerEnter={() => onSurvol(true)}
       onPointerLeave={() => onSurvol(false)}
       onClick={onClic}
+      {...pointeur}
     >
       <title>{titre}</title>
     </path>
