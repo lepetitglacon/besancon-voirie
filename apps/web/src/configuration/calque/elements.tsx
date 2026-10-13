@@ -131,32 +131,46 @@ export function Elastique({ depart, arrivee, valide }: { depart: XY; arrivee: XY
 
 export type EtatPoignee = 'normale' | 'survolee' | 'active' | 'cible-possible' | 'cible' | 'inactive'
 
+/**
+ * Bouts d'une voie, comme une prise : rond (mâle) là où la circulation quitte la voie, carré
+ * (femelle) là où elle y entre. Feux et passages piétons : rond.
+ */
+export type FormePoignee = 'rond' | 'carre'
+
 interface PropsPoignee {
   centre: XY
   rayon: number
+  forme?: FormePoignee
   couleur: string
   vide: boolean
   etat: EtatPoignee
   titre: string
-  onPointerDown?: (e: PointerEvent<SVGCircleElement>) => void
-  onPointerMove?: (e: PointerEvent<SVGCircleElement>) => void
-  onPointerUp?: (e: PointerEvent<SVGCircleElement>) => void
+  onPointerDown?: (e: PointerEvent<SVGElement>) => void
+  onPointerMove?: (e: PointerEvent<SVGElement>) => void
+  onPointerUp?: (e: PointerEvent<SVGElement>) => void
   onPointerCancel?: () => void
   onSurvol?: (survol: boolean) => void
 }
 
-export function Poignee({ centre, rayon, couleur, vide, etat, titre, onSurvol, ...pointeur }: PropsPoignee) {
+export function Poignee({ centre, rayon, forme = 'rond', couleur, vide, etat, titre, onSurvol, ...pointeur }: PropsPoignee) {
+  const communs = {
+    className: classes('calque-poignee', forme === 'carre' && 'carre', vide && 'vide', etat),
+    fill: vide ? undefined : couleur,
+    onPointerEnter: () => onSurvol?.(true),
+    onPointerLeave: () => onSurvol?.(false),
+    ...pointeur,
+  }
+  if (forme === 'carre') {
+    // Côté un peu plus petit que le diamètre : même surface apparente qu'un rond.
+    const demi = rayon * 0.9
+    return (
+      <rect x={centre[0] - demi} y={centre[1] - demi} width={2 * demi} height={2 * demi} rx={1.5} {...communs}>
+        <title>{titre}</title>
+      </rect>
+    )
+  }
   return (
-    <circle
-      className={classes('calque-poignee', vide && 'vide', etat)}
-      cx={centre[0]}
-      cy={centre[1]}
-      r={rayon}
-      fill={vide ? undefined : couleur}
-      onPointerEnter={() => onSurvol?.(true)}
-      onPointerLeave={() => onSurvol?.(false)}
-      {...pointeur}
-    >
+    <circle cx={centre[0]} cy={centre[1]} r={rayon} {...communs}>
       <title>{titre}</title>
     </circle>
   )

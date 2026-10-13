@@ -26,6 +26,7 @@ import {
   type EtatCourbe,
   type EtatFeu,
   type EtatPoignee,
+  type FormePoignee,
   type EtatVoie,
 } from './elements'
 import { useProjection } from './projection'
@@ -262,7 +263,7 @@ export function CalqueCarrefour(props: Props) {
     return meilleure?.cle ?? null
   }
 
-  const commencer = (poignee: PoigneeModele, depart: LonLat) => (e: PointerEvent<SVGCircleElement>) => {
+  const commencer = (poignee: PoigneeModele, depart: LonLat) => (e: PointerEvent<SVGElement>) => {
     e.stopPropagation()
     e.currentTarget.setPointerCapture(e.pointerId)
     if (mode === 'connecter' && poignee.role === 'voie') {
@@ -306,24 +307,30 @@ export function CalqueCarrefour(props: Props) {
   })
 
   // ── Poignées selon le mode ──
-  const poignees: Array<{ cle: string; centre: XY; rayon: number; couleur: string; vide: boolean; etat: EtatPoignee; titre: string; gestes?: ReturnType<typeof gestes> }> = []
+  const poignees: Array<{ cle: string; centre: XY; rayon: number; forme?: FormePoignee; couleur: string; vide: boolean; etat: EtatPoignee; titre: string; gestes?: ReturnType<typeof gestes> }> = []
   if (mode === 'ajuster' || mode === 'connecter') {
     for (const [cle, voie] of voies) {
       const sortante = voie.sens === 'sortante'
       // Les voies d'un tronçon d'anneau suivent ses nœuds : elles se relient, sans se caler.
       if (mode === 'ajuster' && voie.troncon) continue
       for (const extremite of [0, 1] as const) {
-        if (mode === 'connecter' && extremite === 1) continue
         const poignee: PoigneeModele = { role: 'voie', cle, sens: voie.sens, extremite }
+        // Comme une prise : rond (mâle) au bout par où la circulation quitte la voie, carré
+        // (femelle) au bout par où elle y entre. Une liaison va toujours d'un rond à un carré.
+        const sortie = sortante ? extremite === 1 : extremite === 0
+        // En mode connexion, seul le bout côté carrefour se relie ; l'autre bout montre le sens.
+        const bornee = mode === 'connecter' && extremite === 1
         const etat: EtatPoignee =
           glisse?.type === 'connexion'
-            ? sortante
-              ? cle === cibleEnCours
-                ? 'cible'
-                : 'cible-possible'
-              : cle === glisse.de
-                ? 'active'
-                : 'inactive'
+            ? bornee
+              ? 'inactive'
+              : sortante
+                ? cle === cibleEnCours
+                  ? 'cible'
+                  : 'cible-possible'
+                : cle === glisse.de
+                  ? 'active'
+                  : 'inactive'
             : glisse?.type === 'poignee' && glisse.poignee.role === 'voie' && glisse.poignee.cle === cle && glisse.poignee.extremite === extremite
               ? 'active'
               : 'normale'
@@ -331,17 +338,20 @@ export function CalqueCarrefour(props: Props) {
           cle: `${cle}:${extremite}`,
           centre: px(voie.geom[extremite]),
           rayon: extremite === 0 ? 7 : 5,
+          forme: sortie ? 'rond' : 'carre',
           couleur: couleurs.get(cle) ?? GRIS_SORTANTE,
           vide: sortante,
           etat,
-          titre:
-            mode === 'connecter'
+          titre: bornee
+            ? `${cle} : ${sortante ? 'sortie de la voie' : 'entrée dans la voie'}`
+            : mode === 'connecter'
               ? sortante
                 ? `${cle} : lâcher ici pour connecter`
                 : `${cle} : glisser vers une voie sortante`
               : `${cle} : glisser pour caler ${extremite === 0 ? 'la ligne d’arrêt' : 'l’autre bout'}`,
-          // En mode connexion, seules les voies entrantes se tirent ; les sortantes sont des cibles.
-          gestes: mode === 'connecter' && sortante ? undefined : gestes(poignee, voie.geom[extremite]),
+          // En mode connexion, seules les voies entrantes se tirent, par le bout côté carrefour ;
+          // les sortantes sont des cibles.
+          gestes: mode === 'connecter' && (sortante || bornee) ? undefined : gestes(poignee, voie.geom[extremite]),
         })
       }
     }

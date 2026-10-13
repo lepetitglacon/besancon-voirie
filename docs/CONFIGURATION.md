@@ -234,7 +234,9 @@ Sur la **photo aérienne** (fond de carte « Satellite »), l'éditeur dessine :
 - **✥ Ajuster les voies** : faire glisser les extrémités des voies et des passages piétons pour
   les caler sur le marquage de la photo.
 - **⤳ Connecter** : glisser du point coloré d'une voie entrante vers le point blanc d'une voie
-  sortante. Pendant le geste, les voies sortantes s'allument et la plus proche est accrochée
+  sortante. Chaque voie a deux bouts, comme une prise : un rond (mâle) là où la circulation la
+  quitte, un carré (femelle) là où elle y entre. Une liaison va donc toujours d'un rond (bout
+  côté carrefour d'une entrante) à un carré (bout côté carrefour d'une sortante). Les poignées gardent ces formes en mode « Ajuster ». Pendant le geste, les voies sortantes s'allument et la plus proche est accrochée
   (élastique vert). Refaire le même geste, ou cliquer sur une courbe, retire la connexion.
 - Survoler une voie met en avant ses connexions. Pendant un ajustement, les voies et courbes
   suivent le pointeur en direct.
