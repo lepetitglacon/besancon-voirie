@@ -47,7 +47,8 @@ const BrancheLue = z.object({
   entrantes: z.array(VoieLue),
   /** Rang 0 = la plus à gauche du conducteur qui quitte le carrefour. */
   sortantes: z.array(VoieLue),
-  traversee: z.object({ debut: PointPx, fin: PointPx }).nullable(),
+  /** Passages piétons de la branche ; plusieurs quand un terre-plein ou un décalage les sépare. */
+  passages: z.array(z.object({ debut: PointPx, fin: PointPx })),
   /** Giratoire : numéro du nœud où la rue touche l'anneau ; null pour le tram qui traverse l'îlot. */
   noeud: z.number().int().nullable().optional(),
   confiance: ConfianceIa,
@@ -158,7 +159,7 @@ export function propositionEnPixels(cadre: CadrePhoto, detection: DetectionBranc
         azimut: Math.round(b.azimut),
         entrantes: voies('entrante'),
         sortantes: voies('sortante'),
-        traversee: b.traversee ? { debut: px(cadre, b.traversee[0]), fin: px(cadre, b.traversee[1]) } : null,
+        passages: b.passages.map(([debut, fin]) => ({ debut: px(cadre, debut), fin: px(cadre, fin) })),
         ...(noeuds.length ? { noeud: numero(b.noeud) } : {}),
         confiance: 'basse',
         remarques: `source OSM : ${detection.sources[b.code] === 'osm' ? 'flèches turn:lanes' : 'règles par défaut'}`,
@@ -223,7 +224,7 @@ La proposition corrigée d'après la photo, au même format :
 - Circulation à droite. Voies entrantes : rang 0 = la plus à gauche du conducteur qui arrive. Voies sortantes : rang 0 = la plus à gauche du conducteur qui repart. L'ordre du tableau donne le rang.
 - Chaque voie est un segment [debut, fin] tracé au milieu de la voie : debut = bout côté carrefour (ligne d'arrêt pour une entrante, sortie du carrefour après le passage piéton pour une sortante), fin = 20 à 25 m plus loin, le long de la voie. Place-les sur le marquage réel, au pixel près si possible.
 - type : generale, bus, velo (piste ou bande cyclable séparée par une ligne) ou tram.
-- traversee : le passage piéton qui coupe la branche, d'un trottoir à l'autre (null s'il n'y en a pas).
+- passages : les passages piétons qui coupent la branche, chacun [debut, fin] d'un trottoir (ou d'un terre-plein) à l'autre, sur les bandes blanches ; plusieurs quand un terre-plein ou un îlot coupe la traversée, ou quand les passages sont décalés ; [] s'il n'y en a pas.
 - azimut : du centre du carrefour vers la branche, en degrés depuis le nord, sens horaire (0 = haut de l'image, 90 = droite).
 - connexions : { de: "BRANCHE:e<rang>", vers: "BRANCHE:s<rang>" } pour chaque mouvement autorisé, d'après les flèches au sol, sinon d'après les tags turn:lanes, sinon d'après ce qui est plausible (pas de tourne-à-gauche depuis une voie de droite).
 - feux : pour chaque feu OSM (F1, F2…) que tu sais situer sur la photo, ce qu'il commande. Feu véhicules d'une entrée : { feu, branche: code de la branche dont il arrête les voies entrantes, noeud: null }.${contexte.giratoire ? " Feu sur l'anneau : { feu, branche: null, noeud: numéro du nœud devant lequel il arrête la circulation de l'anneau }." : ''} Feu piéton : { feu, branche: code de la branche dont il protège le passage piéton, noeud: null }. Feu du tram ou d'un bus en site propre : { feu, branche: sa branche, noeud: null }. N'invente rien : omets un feu que tu ne sais pas situer.
@@ -279,7 +280,7 @@ export function configurationDepuisLecture(
       osm_way_id: b.osm_way_id !== null && Number.isInteger(b.osm_way_id) ? b.osm_way_id : null,
       geom: axesOsm.get(code) ?? (loin ? [detection.centre, loin] : null),
       voies: toutes,
-      traversee: b.traversee ? [ll(b.traversee.debut), ll(b.traversee.fin)] : null,
+      passages: b.passages.map((p): [LonLat, LonLat] => [ll(p.debut), ll(p.fin)]),
       priorite_entree: null,
       noeud: null,
       troncon: false,
@@ -413,7 +414,7 @@ export function lignesDepuisLecture(
     const code = lu.branche?.trim().toUpperCase() ?? null;
     const branche = code ? branches.find((b) => b.code === code && !b.troncon) : undefined;
     if (feu.type === 'pieton') {
-      if (!branche?.traversee) {
+      if (!branche?.passages.length) {
         ignores.push(`${lu.feu} : pas de passage piéton sur la branche ${code ?? '?'}`);
         continue;
       }

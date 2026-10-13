@@ -59,26 +59,26 @@ export function degagementsCalcules(
   const vitesse = (l: LigneDegagement) =>
     l.vitesse_ms ?? (l.type === 'pieton' ? parametres.vitessePietons : parametres.vitesseVehicules);
   const courbes = (l: LigneDegagement) => l.mouvements.flatMap((m) => parMouvement.get(m) ?? []);
-  const traversee = (l: LigneDegagement): XY[] | null => {
-    const segment = l.traverse ? geometrie.traversees.get(l.traverse) : undefined;
-    return segment ? segment.map(repere.versXY) : null;
-  };
+  const passages = (l: LigneDegagement): XY[][] =>
+    (l.traverse ? (geometrie.traversees.get(l.traverse) ?? []) : []).map((segment) => segment.map(repere.versXY));
 
   /** Couples (trajet de l'usager qui dégage, trajet de celui qui arrive) jusqu'aux points de conflit. */
   const pointsDeConflit = (sortant: LigneDegagement, entrant: LigneDegagement): Array<{ sortant: number; entrant: number }> => {
     if (sortant.type === 'pieton' || entrant.type === 'pieton') {
       const pieton = sortant.type === 'pieton' ? sortant : entrant;
       const vehicule = sortant.type === 'pieton' ? entrant : sortant;
-      const passage = traversee(pieton);
-      if (!passage) return [];
-      const longueur = longueurPolyligne(passage);
-      return courbes(vehicule).flatMap((t) =>
-        intersectionsPolylignes(passage, t.courbe).map(({ da, db }) =>
-          pieton === sortant
-            ? { sortant: Math.max(da, longueur - da), entrant: db }
-            : { sortant: db, entrant: Math.min(da, longueur - da) },
-        ),
-      );
+      // Chaque passage va d'un trottoir (ou d'un terre-plein) à l'autre : le piéton qui dégage
+      // part du bord le plus éloigné du point de conflit, celui qui arrive du plus proche.
+      return passages(pieton).flatMap((passage) => {
+        const longueur = longueurPolyligne(passage);
+        return courbes(vehicule).flatMap((t) =>
+          intersectionsPolylignes(passage, t.courbe).map(({ da, db }) =>
+            pieton === sortant
+              ? { sortant: Math.max(da, longueur - da), entrant: db }
+              : { sortant: db, entrant: Math.min(da, longueur - da) },
+          ),
+        );
+      });
     }
     return courbes(sortant).flatMap((ts) =>
       courbes(entrant).flatMap((te) => {

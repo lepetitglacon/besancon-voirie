@@ -30,10 +30,11 @@ export interface Brouillon {
 /** Poignée déplaçable sur la carte : extrémité d'une voie ou d'un passage piéton, nœud d'anneau. */
 export type Poignee =
   | { role: 'voie'; cle: string; sens: SensVoie; extremite: 0 | 1 }
-  | { role: 'traversee'; branche: string; extremite: 0 | 1 }
+  /** Bout d'un passage piéton : `index` dans les passages de la branche. */
+  | { role: 'traversee'; branche: string; index: number; extremite: 0 | 1 }
   | { role: 'noeud'; code: string }
   /** Passage piéton entier, translaté du point de départ du geste à la position. */
-  | { role: 'passage'; branche: string; depart: LonLat }
+  | { role: 'passage'; branche: string; index: number; depart: LonLat }
   /** Voies entières, translatées ensemble du point de départ du geste à la position. */
   | { role: 'voies'; cles: string[]; depart: LonLat }
 
@@ -131,11 +132,7 @@ export function deplacerPoignee(brouillon: Brouillon, poignee: Poignee, position
   if (poignee.role === 'passage') {
     const dLon = position[0] - poignee.depart[0]
     const dLat = position[1] - poignee.depart[1]
-    return surBranche(brouillon, poignee.branche, (b) =>
-      b.traversee
-        ? { ...b, traversee: b.traversee.map(([lon, lat]) => [lon + dLon, lat + dLat] as LonLat) as Segment }
-        : b,
-    )
+    return surPassage(brouillon, poignee.branche, poignee.index, (p) => p.map(([lon, lat]) => [lon + dLon, lat + dLat]) as Segment)
   }
   if (poignee.role === 'voies') {
     const dLon = position[0] - poignee.depart[0]
@@ -159,7 +156,7 @@ export function deplacerPoignee(brouillon: Brouillon, poignee: Poignee, position
   const remplacer = (segment: Segment): Segment =>
     poignee.extremite === 0 ? [position, segment[1]] : [segment[0], position]
   if (poignee.role === 'traversee') {
-    return surBranche(brouillon, poignee.branche, (b) => (b.traversee ? { ...b, traversee: remplacer(b.traversee) } : b))
+    return surPassage(brouillon, poignee.branche, poignee.index, remplacer)
   }
   const [code] = poignee.cle.split(':')
   return surBranche(brouillon, code!, (b) => ({
@@ -168,12 +165,16 @@ export function deplacerPoignee(brouillon: Brouillon, poignee: Poignee, position
   }))
 }
 
+function surPassage(brouillon: Brouillon, code: string, index: number, modifier: (p: Segment) => Segment): Brouillon {
+  return surBranche(brouillon, code, (b) => ({ ...b, passages: b.passages.map((p, i) => (i === index ? modifier(p) : p)) }))
+}
+
 /**
- * Passage piéton tracé sur la carte : il revient à la branche la plus proche de son milieu
- * (bout côté carrefour de ses voies, à défaut son axe), et remplace son passage s'il en avait un.
- * null : aucune branche (hors tronçons d'anneau) à qui le donner.
+ * Passage piéton tracé sur la carte : il rejoint les passages de la branche la plus proche de
+ * son milieu (bout côté carrefour de ses voies, à défaut son axe). null : aucune branche (hors
+ * tronçons d'anneau) à qui le donner.
  */
-export function poserTraversee(brouillon: Brouillon, segment: Segment): { brouillon: Brouillon; branche: string; remplace: boolean } | null {
+export function poserTraversee(brouillon: Brouillon, segment: Segment): { brouillon: Brouillon; branche: string } | null {
   const milieu: LonLat = [(segment[0][0] + segment[1][0]) / 2, (segment[0][1] + segment[1][1]) / 2]
   const repere = repereLocal(milieu)
   const distance = (p: LonLat) => Math.hypot(...repere.versXY(p))
@@ -189,31 +190,30 @@ export function poserTraversee(brouillon: Brouillon, segment: Segment): { brouil
   if (!proche) return null
   const { branche } = proche
   return {
-    brouillon: surBranche(brouillon, branche.code, (b) => ({ ...b, traversee: segment })),
+    brouillon: surBranche(brouillon, branche.code, (b) => ({ ...b, passages: [...b.passages, segment] })),
     branche: branche.code,
-    remplace: branche.traversee != null,
   }
 }
 
-export function retirerTraversee(brouillon: Brouillon, code: string): Brouillon {
-  return surBranche(brouillon, code, (b) => ({ ...b, traversee: null }))
+export function retirerTraversee(brouillon: Brouillon, code: string, index: number): Brouillon {
+  return surBranche(brouillon, code, (b) => ({ ...b, passages: b.passages.filter((_, i) => i !== index) }))
 }
 
-/** Ajoute un passage piéton proposé en travers de la branche, ou le retire. */
+/** Ajoute un passage piéton proposé en travers de la branche, ou retire tous ses passages. */
 export function basculerTraversee(brouillon: Brouillon, code: string, centre: LonLat): Brouillon {
   return surBranche(brouillon, code, (b) => {
     if (b.troncon) return b
     const origine = origineVoies(brouillon, b, centre)
     return {
       ...b,
-      traversee: b.traversee
-        ? null
-        : genererVoies(origine.centre, origine.azimut, nombre(b, 'entrante'), nombre(b, 'sortante'), origine.distanceArret).traversee,
+      passages: b.passages.length
+        ? []
+        : [genererVoies(origine.centre, origine.azimut, nombre(b, 'entrante'), nombre(b, 'sortante'), origine.distanceArret).traversee],
     }
   })
 }
 
-/** Replace les voies (et le passage piéton) de la branche à leur position proposée. */
+/** Replace les voies de la branche à leur position proposée ; ses passages piétons deviennent le passage proposé. */
 export function regenererVoies(brouillon: Brouillon, code: string, centre: LonLat): Brouillon {
   return surBranche(brouillon, code, (b) => {
     if (b.troncon) return b
@@ -222,7 +222,7 @@ export function regenererVoies(brouillon: Brouillon, code: string, centre: LonLa
     return {
       ...b,
       voies: b.voies.map((v) => ({ ...v, geom: (v.sens === 'entrante' ? generees.entrantes : generees.sortantes)[v.rang]! })),
-      traversee: b.traversee ? generees.traversee : null,
+      passages: b.passages.length ? [generees.traversee] : [],
     }
   })
 }

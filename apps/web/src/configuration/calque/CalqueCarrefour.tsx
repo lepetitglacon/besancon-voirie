@@ -47,7 +47,7 @@ export type ClicCalque =
   | { type: 'connexion'; de: string; vers: string; position: LonLat }
   | { type: 'branche'; code: string; position: LonLat }
   | { type: 'noeud'; code: string; position: LonLat }
-  | { type: 'passage'; branche: string; position: LonLat }
+  | { type: 'passage'; branche: string; index: number; position: LonLat }
 
 /** Feu du carrefour, déplaçable en mode « feux » pour le poser sur son mât. */
 export interface FeuPlacable {
@@ -109,7 +109,7 @@ const COULEUR_NOEUD = '#38bdf8'
 const DEPLACEMENT_NOEUD_MIN_M = 0.3
 const VIOLET_PASSAGE = '#7d3cb4'
 
-type Survol = { type: 'voie'; cle: string } | { type: 'connexion'; cle: string } | { type: 'passage'; branche: string } | null
+type Survol = { type: 'voie'; cle: string } | { type: 'connexion'; cle: string } | { type: 'passage'; branche: string; index: number } | null
 
 type Glisse =
   | { type: 'poignee'; poignee: PoigneeModele; depart: LonLat; position: LonLat }
@@ -428,23 +428,27 @@ export function CalqueCarrefour(props: Props) {
   }
   if (pieton === 'deplacer') {
     for (const b of apercu.branches) {
-      if (!b.traversee) continue
-      for (const extremite of [0, 1] as const) {
-        const poignee: PoigneeModele = { role: 'traversee', branche: b.code, extremite }
-        poignees.push({
-          cle: `passage-${b.code}:${extremite}`,
-          centre: px(b.traversee[extremite]),
-          rayon: 6,
-          couleur: VIOLET_PASSAGE,
-          vide: false,
-          etat:
-            glisse?.type === 'poignee' && glisse.poignee.role === 'traversee' && glisse.poignee.branche === b.code && glisse.poignee.extremite === extremite
-              ? 'active'
-              : 'normale',
-          titre: `Passage piéton ${b.code} : glisser ce bout jusqu’au trottoir`,
-          gestes: gestes(poignee, b.traversee[extremite]),
-        })
-      }
+      b.passages.forEach((passage, index) => {
+        for (const extremite of [0, 1] as const) {
+          const poignee: PoigneeModele = { role: 'traversee', branche: b.code, index, extremite }
+          const enCours =
+            glisse?.type === 'poignee' &&
+            glisse.poignee.role === 'traversee' &&
+            glisse.poignee.branche === b.code &&
+            glisse.poignee.index === index &&
+            glisse.poignee.extremite === extremite
+          poignees.push({
+            cle: `passage-${b.code}-${index}:${extremite}`,
+            centre: px(passage[extremite]),
+            rayon: 6,
+            couleur: VIOLET_PASSAGE,
+            vide: false,
+            etat: enCours ? 'active' : 'normale',
+            titre: `Passage piéton ${b.code} : glisser ce bout jusqu’au trottoir (ou au terre-plein)`,
+            gestes: gestes(poignee, passage[extremite]),
+          })
+        }
+      })
     }
   }
 
@@ -513,42 +517,44 @@ export function CalqueCarrefour(props: Props) {
           ),
       )}
 
-      {apercu.branches.map((b) => {
-        if (!b.traversee) return null
-        const depart = b.traversee
-        const commun = { segment: segmentPx(depart), largeur: largeurPassage, feu: feux ? (feux.traversees.get(b.code) ?? 'libre') : undefined }
-        if (pieton === 'deplacer') {
-          return (
-            <PassagePieton
-              key={`passage-${b.code}`}
-              {...commun}
-              etat="deplacable"
-              titre={`Passage piéton ${b.code} : glisser pour le déplacer`}
-              onPointerDown={(e) => {
-                if (e.button !== 0) return
-                const position = positionPointeur(e)
-                commencer({ role: 'passage', branche: b.code, depart: position }, position)(e)
-              }}
-              onPointerMove={suivre}
-              onPointerUp={terminer}
-              onPointerCancel={() => setGlisse(null)}
-            />
-          )
-        }
-        if (pieton === 'supprimer') {
-          return (
-            <PassagePieton
-              key={`passage-${b.code}`}
-              {...commun}
-              etat={survol?.type === 'passage' && survol.branche === b.code ? 'a-retirer' : 'retirable'}
-              titre={`Passage piéton ${b.code} : cliquer pour le retirer`}
-              onSurvol={(actif) => setSurvol(actif ? { type: 'passage', branche: b.code } : null)}
-              onClic={(e) => onClic?.({ type: 'passage', branche: b.code, position: positionClic(e) })}
-            />
-          )
-        }
-        return <PassagePieton key={`passage-${b.code}`} {...commun} />
-      })}
+      {apercu.branches.flatMap((b) =>
+        b.passages.map((passage, index) => {
+          const cle = `passage-${b.code}-${index}`
+          const groupe = b.passages.length > 1 ? ` (${index + 1}/${b.passages.length})` : ''
+          const commun = { segment: segmentPx(passage), largeur: largeurPassage, feu: feux ? (feux.traversees.get(b.code) ?? 'libre') : undefined }
+          if (pieton === 'deplacer') {
+            return (
+              <PassagePieton
+                key={cle}
+                {...commun}
+                etat="deplacable"
+                titre={`Passage piéton ${b.code}${groupe} : glisser pour le déplacer`}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return
+                  const position = positionPointeur(e)
+                  commencer({ role: 'passage', branche: b.code, index, depart: position }, position)(e)
+                }}
+                onPointerMove={suivre}
+                onPointerUp={terminer}
+                onPointerCancel={() => setGlisse(null)}
+              />
+            )
+          }
+          if (pieton === 'supprimer') {
+            return (
+              <PassagePieton
+                key={cle}
+                {...commun}
+                etat={survol?.type === 'passage' && survol.branche === b.code && survol.index === index ? 'a-retirer' : 'retirable'}
+                titre={`Passage piéton ${b.code}${groupe} : cliquer pour le retirer`}
+                onSurvol={(actif) => setSurvol(actif ? { type: 'passage', branche: b.code, index } : null)}
+                onClic={(e) => onClic?.({ type: 'passage', branche: b.code, index, position: positionClic(e) })}
+              />
+            )
+          }
+          return <PassagePieton key={cle} {...commun} />
+        }),
+      )}
       {glisse?.type === 'trace' && (
         <PassagePieton segment={[px(glisse.depart), px(glisse.position)]} largeur={largeurPassage} etat="trace" />
       )}

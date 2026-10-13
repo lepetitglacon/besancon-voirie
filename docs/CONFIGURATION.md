@@ -59,8 +59,9 @@ manuelle**. Les détections depuis OSM ne sont que des propositions que l'on cor
 ### Modèle
 
 ```sql
--- branche : code, nom, azimut, axe (geom), sens déduit des voies, passage piéton (traversee)
-ALTER TABLE branche ADD COLUMN traversee geometry(LineString, 4326);
+-- branche : code, nom, azimut, axe (geom), sens déduit des voies, passages piétons (traversee)
+-- Un ou plusieurs passages (de part et d'autre d'un terre-plein, décalés…) : `passages` dans l'API.
+ALTER TABLE branche ADD COLUMN traversee geometry(MultiLineString, 4326);
 
 CREATE TABLE voie (
   id          uuid PRIMARY KEY,
@@ -197,7 +198,8 @@ de part et d'autre de l'îlot, sortie sud à 2 voies), branche nord-est notée �
 car sous les arbres.
 
 **⇪ JSON** (barre d'outils ou menu contextuel) charge dans l'éditeur un fichier `{ branches, connexions }` (le corps d'un
-`PUT /branches`), validé par le même schéma.
+`PUT /branches`), validé par le même schéma. Un ancien fichier, avec un seul passage par
+branche (`traversee`), est accepté : il devient `passages`.
 
 ### API
 
@@ -245,11 +247,16 @@ Sur la **photo aérienne** (fond de carte « Satellite »), l'éditeur dessine :
   s'ouvre au-dessus de la barre d'outils.
   - *Déplacer* : glisser un passage le déplace entier, glisser l'un de ses bouts l'étire
     jusqu'au trottoir.
-  - *Tracer* : glisser sur la carte d'un trottoir à l'autre. Le passage revient à la branche
-    dont les voies (bout côté carrefour) sont les plus proches de son milieu, et remplace son
-    passage si elle en avait un : une branche n'a qu'un passage piéton. Un tracé de moins de
-    2 m est ignoré.
-  - *Retirer* : un clic sur un passage le retire.
+  - *Tracer* : glisser sur la carte d'un trottoir (ou d'un terre-plein) à l'autre. Le passage
+    rejoint les passages de la branche dont les voies (bout côté carrefour) sont les plus
+    proches de son milieu. Un tracé de moins de 2 m est ignoré.
+  - *Retirer* : un clic sur un passage retire ce passage seul.
+
+  Une branche peut avoir **plusieurs passages** : de part et d'autre d'un terre-plein ou d'un
+  îlot, ou décalés. Ils forment un groupe, que la ligne piétonne de la branche (R12) commande
+  ensemble. Les conflits et les rouges de dégagement se calculent passage par passage : le
+  piéton qui dégage part du bord (trottoir ou terre-plein) le plus éloigné du point de conflit.
+  Le vert piéton se contrôle sur la somme des longueurs du groupe, traversé d'une traite.
 
   Dans cet outil, les voies et les liaisons ne prennent plus les clics : le passage est
   toujours atteignable, même sous une courbe. La popup d'une branche (outil Sélection) garde la
@@ -293,7 +300,7 @@ CREATE TABLE ligne_feux_feu (            -- feux physiques qui affichent une lig
 ALTER TABLE carrefour ADD COLUMN conflits_admis jsonb NOT NULL DEFAULT '[]';  -- [["F1","P1"], …]
 ```
 
-Règles (validées par l'API) : une ligne piétonne (R12) emprunte le passage piéton d'une branche et ne commande
+Règles (validées par l'API) : une ligne piétonne (R12) emprunte les passages piétons d'une branche et ne commande
 aucun mouvement ; les autres commandent au moins un mouvement ; un mouvement n'est commandé
 que par une seule ligne ; les mouvements, branches et feux doivent appartenir au carrefour.
 

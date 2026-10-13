@@ -34,7 +34,7 @@ function branche(code: string, azimut: number, entrantes: number, sortantes: num
       ...g.entrantes.map((geom, rang) => ({ sens: 'entrante' as const, rang, type: 'generale' as const, geom })),
       ...g.sortantes.map((geom, rang) => ({ sens: 'sortante' as const, rang, type: 'generale' as const, geom })),
     ],
-    traversee: g.traversee,
+    passages: [g.traversee],
     priorite_entree: null,
     noeud: null,
     troncon: false,
@@ -91,14 +91,14 @@ describe('opérations du brouillon', () => {
     const cible: LonLat = [6.0301, 47.2499]
     const voie = deplacerPoignee(depart, { role: 'voie', cle: 'S:e0', sens: 'entrante', extremite: 0 }, cible)
     expect(voiesDe(voie.branches[0]!, 'entrante')[0]!.geom[0]).toEqual(cible)
-    const passage = deplacerPoignee(depart, { role: 'traversee', branche: 'N', extremite: 1 }, cible)
-    expect(passage.branches[1]!.traversee![1]).toEqual(cible)
+    const passage = deplacerPoignee(depart, { role: 'traversee', branche: 'N', index: 0, extremite: 1 }, cible)
+    expect(passage.branches[1]!.passages[0]![1]).toEqual(cible)
   })
 
   it('retire puis remet un passage piéton', () => {
     const sans = basculerTraversee(depart, 'S', centre)
-    expect(sans.branches[0]!.traversee).toBeNull()
-    expect(basculerTraversee(sans, 'S', centre).branches[0]!.traversee).toHaveLength(2)
+    expect(sans.branches[0]!.passages).toEqual([])
+    expect(basculerTraversee(sans, 'S', centre).branches[0]!.passages).toHaveLength(1)
   })
 })
 

@@ -36,7 +36,7 @@ export function OngletLignes({ configuration, brouillon, onChanger, ligneActive,
   const { branches, mouvements } = configuration
   const { lignes, conflits_admis } = brouillon
   const geometrie = useMemo(() => geometrieEnregistree(configuration), [configuration])
-  const avecTraversee = branches.filter((b) => b.traversee)
+  const avecTraversee = branches.filter((b) => b.passages.length > 0)
   const pourConflits = lignes.map((l) => ({ ...l, type: typeLigne(l.signal) }))
   const conflits = matriceConflits(pourConflits, geometrie, conflits_admis)
   // Giratoire : une entrée sans feux cède le passage ; seules comptent les entrées dont un mouvement a des feux.

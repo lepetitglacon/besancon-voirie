@@ -462,8 +462,8 @@ export function PopupBranche({ code, brouillon, centre, source, ia, onChanger, o
         </Section>
       )}
       <HStack justify="space-between" pt="2.5" borderTopWidth="1px" borderColor="border.muted">
-        <Text>Passage piéton</Text>
-        <Bascule coche={branche.traversee !== null} onChange={() => onChanger(basculerTraversee(brouillon, code, centre))} />
+        <Text>{branche.passages.length > 1 ? `Passages piétons (${branche.passages.length})` : 'Passage piéton'}</Text>
+        <Bascule coche={branche.passages.length > 0} onChange={() => onChanger(basculerTraversee(brouillon, code, centre))} />
       </HStack>
       {source && (
         <HStack gap="1.5" wrap="wrap">

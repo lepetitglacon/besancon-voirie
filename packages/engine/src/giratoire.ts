@@ -207,7 +207,7 @@ export function branchesTroncons(anneau: Anneau, voies: ReadonlyMap<string, numb
         ...t.sortantes.map((geom, rang): VoieTroncon => ({ sens: 'sortante', rang, type: 'generale', geom })),
         ...t.entrantes.map((geom, rang): VoieTroncon => ({ sens: 'entrante', rang, type: 'generale', geom })),
       ],
-      traversee: null,
+      passages: [],
       priorite_entree: null,
       noeud: t.de,
       troncon: true,

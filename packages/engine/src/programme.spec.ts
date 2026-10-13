@@ -22,12 +22,12 @@ const branches = [
   { code: 'O', azimut: 270 },
 ];
 const voies = new Map<string, Segment>();
-const traversees = new Map<string, Segment>();
+const traversees = new Map<string, Segment[]>();
 for (const b of branches) {
   const g = genererVoies(centre, b.azimut, 1, 1);
   voies.set(cleVoie(b.code, 'entrante', 0), g.entrantes[0]!);
   voies.set(cleVoie(b.code, 'sortante', 0), g.sortantes[0]!);
-  traversees.set(b.code, g.traversee);
+  traversees.set(b.code, [g.traversee]);
 }
 const connexions: Connexion[] = branches.flatMap((o) =>
   branches.filter((d) => d.code !== o.code).map((d) => ({ de: `${o.code}:e0`, vers: `${d.code}:s0` })),

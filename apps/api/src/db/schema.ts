@@ -33,6 +33,11 @@ const ligne = customType<{ data: string; driverData: string }>({
   dataType: () => 'geometry(LineString, 4326)',
 });
 
+/** Plusieurs lignes : les passages piétons d'une branche. */
+const lignes = customType<{ data: string; driverData: string }>({
+  dataType: () => 'geometry(MultiLineString, 4326)',
+});
+
 const creeLe = () => timestamp('cree_le', { withTimezone: true }).notNull().defaultNow();
 
 export const statutCarrefour = pgEnum('statut_carrefour', [
@@ -122,8 +127,8 @@ export const branche = pgTable(
     sens: sensBranche('sens').notNull().default('double'),
     /** Du centre du carrefour vers la branche. */
     geom: ligne('geom'),
-    /** Passage piéton en travers de la branche, d'un trottoir à l'autre. */
-    traversee: ligne('traversee'),
+    /** Passages piétons en travers de la branche (un ou plusieurs), chacun d'un trottoir à l'autre. */
+    traversee: lignes('traversee'),
     prioriteEntree: prioriteEntree('priorite_entree'),
     /** Giratoire : nœud où la rue se raccorde à l'anneau ; pour un tronçon, son nœud de départ. */
     noeud: text('noeud'),

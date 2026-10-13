@@ -47,7 +47,7 @@ export function geometrieEnregistree(configuration: {
     voies: new Map(
       configuration.branches.flatMap((b) => b.voies.map((v) => [cleVoie(b.code, v.sens, v.rang), v.geom] as const)),
     ),
-    traversees: new Map(configuration.branches.flatMap((b) => (b.traversee ? [[b.code, b.traversee] as const] : []))),
+    traversees: new Map(configuration.branches.flatMap((b) => (b.passages.length ? [[b.code, b.passages] as const] : []))),
     troncons: new Set(configuration.branches.filter((b) => b.troncon).map((b) => b.code)),
   }
 }

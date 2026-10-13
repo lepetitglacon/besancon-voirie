@@ -55,7 +55,14 @@ export type Anneau = z.infer<typeof Anneau>;
 
 const CodeBranche = z.string().trim().regex(/^[A-Z0-9]{1,4}$/, 'Code en majuscules, 4 caractères au plus (N, NE, S2…)');
 
-export const Branche = z
+/** Ancien format (un seul passage, `traversee`) : converti en `passages`, pour les JSON déjà exportés. */
+const passagesDepuisTraversee = (valeur: unknown) => {
+  if (!valeur || typeof valeur !== 'object' || !('traversee' in valeur) || 'passages' in valeur) return valeur;
+  const { traversee, ...reste } = valeur as { traversee: unknown };
+  return { ...reste, passages: traversee ? [traversee] : [] };
+};
+
+const BrancheObjet = z
   .object({
     code: CodeBranche,
     nom: z.string().trim().max(200).nullable().default(null),
@@ -65,8 +72,11 @@ export const Branche = z
     /** Axe de la branche, du centre du carrefour vers la rue, en [lon, lat]. */
     geom: CoordonneesLigne.nullable().default(null),
     voies: z.array(Voie).max(16),
-    /** Passage piéton en travers de la branche, d'un trottoir à l'autre. */
-    traversee: SegmentGeo.nullable().default(null),
+    /**
+     * Passages piétons en travers de la branche, chacun d'un trottoir (ou d'un terre-plein) à
+     * l'autre. Ils forment un groupe : la ligne piétonne qui traverse la branche les commande tous.
+     */
+    passages: z.array(SegmentGeo).max(8).default([]),
     /** Giratoire : régime de l'entrée hors feux ; null = cédez-le-passage. */
     priorite_entree: PrioriteEntree.nullable().default(null),
     /** Giratoire : nœud où la rue se raccorde à l'anneau ; pour un tronçon, son nœud de départ. */
@@ -82,6 +92,7 @@ export const Branche = z
       }
     }
   });
+export const Branche = z.preprocess(passagesDepuisTraversee, BrancheObjet);
 export type Branche = z.infer<typeof Branche>;
 
 /** Clé de voie : branche, e (entrante) ou s (sortante), rang. Exemple : S:e0. */

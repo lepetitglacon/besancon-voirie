@@ -21,7 +21,7 @@ const detection: DetectionBranches = {
         { sens: 'entrante', rang: 0, type: 'generale', geom: [[6.02357, 47.24493], [6.02364, 47.24471]] },
         { sens: 'sortante', rang: 0, type: 'generale', geom: [[6.02352, 47.24493], [6.02358, 47.24471]] },
       ],
-      traversee: null,
+      passages: [],
       priorite_entree: null,
       noeud: null,
       troncon: false,
@@ -46,7 +46,7 @@ const lecture = (surcharge: Partial<LectureIa> = {}): LectureIa => ({
       azimut: 530,
       entrantes: [voie(560, 600), voie(590, 600)],
       sortantes: [voie(500, 600)],
-      traversee: { debut: { x: 480, y: 580 }, fin: { x: 620, y: 580 } },
+      passages: [{ debut: { x: 480, y: 580 }, fin: { x: 620, y: 580 } }],
       confiance: 'moyenne',
       remarques: 'voie de droite dans l’ombre',
     },
@@ -57,7 +57,7 @@ const lecture = (surcharge: Partial<LectureIa> = {}): LectureIa => ({
       azimut: 260,
       entrantes: [voie(300, 540)],
       sortantes: [voie(300, 480)],
-      traversee: null,
+      passages: [],
       confiance: 'haute',
       remarques: '',
     },
@@ -82,7 +82,7 @@ describe('configurationDepuisLecture', () => {
     expect(retour.x).toBeCloseTo(560, 1);
     expect(retour.y).toBeCloseTo(600, 1);
     expect(s.voies.filter((v) => v.sens === 'entrante').map((v) => v.rang)).toEqual([0, 1]);
-    expect(s.traversee).not.toBeNull();
+    expect(s.passages).toHaveLength(1);
   });
 
   it('should normalise codes and azimuts, and keep the OSM axis of a known branch', () => {
@@ -173,7 +173,7 @@ describe('giratoire : nœuds lus sur la photo', () => {
     azimut,
     entrantes: [voieVers(azimut, 'entrante')],
     sortantes: [voieVers(azimut, 'sortante')],
-    traversee: null,
+    passages: [],
     noeud,
     confiance: 'haute' as const,
     remarques: '',

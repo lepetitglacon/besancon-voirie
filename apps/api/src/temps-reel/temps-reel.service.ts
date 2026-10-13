@@ -155,7 +155,8 @@ export class TempsReelService {
       SELECT l.carrefour_id, l.code, 'voie', ST_X(p.point), ST_Y(p.point)
       FROM ligne_feux l
       JOIN branche b ON b.carrefour_id = l.carrefour_id AND b.code = l.traverse
-      CROSS JOIN LATERAL (SELECT ST_LineInterpolatePoint(b.traversee, 0.5) AS point) p
+      -- Un point au milieu de chacun des passages de la branche.
+      CROSS JOIN LATERAL (SELECT ST_LineInterpolatePoint((ST_Dump(b.traversee)).geom, 0.5) AS point) p
       WHERE l.carrefour_id = ANY (${uuids(carrefours)}) AND b.traversee IS NOT NULL
     `);
     const parLigne = new Map<string, { feu: Array<[number, number]>; voie: Array<[number, number]> }>();

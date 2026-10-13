@@ -19,12 +19,12 @@ const branches = [
   { code: 'O', azimut: 270 },
 ];
 const voies = new Map<string, Segment>();
-const traversees = new Map<string, Segment>();
+const traversees = new Map<string, Segment[]>();
 for (const b of branches) {
   const g = genererVoies(centre, b.azimut, 1, 1);
   voies.set(cleVoie(b.code, 'entrante', 0), g.entrantes[0]!);
   voies.set(cleVoie(b.code, 'sortante', 0), g.sortantes[0]!);
-  traversees.set(b.code, g.traversee);
+  traversees.set(b.code, [g.traversee]);
 }
 // Toutes les connexions possibles (sans demi-tour).
 const connexions: Connexion[] = branches.flatMap((o) =>

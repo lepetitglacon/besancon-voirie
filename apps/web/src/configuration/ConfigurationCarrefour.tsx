@@ -130,7 +130,7 @@ const CONSIGNES_PIETON: Record<SousOutilPieton, { titre: string; aides: string[]
   deplacer: { titre: 'Déplacer les passages', aides: ['Glisser un passage pour le déplacer', 'Glisser un bout jusqu’au trottoir'] },
   tracer: {
     titre: 'Tracer un passage',
-    aides: ['Glisser d’un trottoir à l’autre', 'Il revient à la branche la plus proche, et remplace son passage'],
+    aides: ['Glisser d’un trottoir (ou d’un terre-plein) à l’autre', 'Il rejoint les passages de la branche la plus proche'],
   },
   supprimer: { titre: 'Retirer un passage', aides: ['Clic sur un passage : le retirer'] },
 }
@@ -645,7 +645,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       if (outil === 'selection') setPopup({ type: 'feu', feu, position })
     },
     clicCalque: (clic) => {
-      if (clic.type === 'passage') return setBrouillonBranches(retirerTraversee(configuration, clic.branche))
+      if (clic.type === 'passage') return setBrouillonBranches(retirerTraversee(configuration, clic.branche, clic.index))
       setPopup(clic)
     },
     tracerPassage: (segment) => {
@@ -654,8 +654,13 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         return notifications.create({ type: 'warning', title: 'Aucune branche', description: 'Ajoutez d’abord les branches du carrefour.' })
       }
       setBrouillonBranches(pose.brouillon)
-      if (pose.remplace) {
-        notifications.create({ type: 'info', title: `Passage de ${pose.branche} remplacé`, description: 'Une branche n’a qu’un passage piéton.' })
+      const nombre = pose.brouillon.branches.find((b) => b.code === pose.branche)?.passages.length ?? 1
+      if (nombre > 1) {
+        notifications.create({
+          type: 'info',
+          title: `${nombre} passages sur ${pose.branche}`,
+          description: 'Ils forment un groupe : la ligne piétonne de la branche les commande ensemble.',
+        })
       }
     },
     clicCarte: (position) => {

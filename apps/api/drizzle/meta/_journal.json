@@ -134,6 +134,20 @@
       "when": 1791576360106,
       "tag": "20261009200600_essais_ia",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791928167129,
+      "tag": "20261013214927_passages_pietons",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791928205000,
+      "tag": "20261013215005_passages_pietons_ia",
+      "breakpoints": true
     }
   ]
 }

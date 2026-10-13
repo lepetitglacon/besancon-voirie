@@ -72,7 +72,7 @@ export class LignesService {
     const conflitsAdmis = rows[0]?.conflits_admis ?? [];
 
     const cles = new Set(mouvements.map((m) => `${m.origine}>${m.destination}`));
-    const traversees = new Set(branches.filter((b) => b.traversee).map((b) => b.code));
+    const traversees = new Set(branches.filter((b) => b.passages.length > 0).map((b) => b.code));
     const alertes = lignes.flatMap((l) => referencesInvalides(l, cles, traversees, 'lecture'));
 
     return {
@@ -90,7 +90,7 @@ export class LignesService {
     const configuration = await this.branches.lire(carrefourId);
     const { branches, mouvements } = configuration;
     const cles = new Set(mouvements.map((m) => `${m.origine}>${m.destination}`));
-    const traversees = new Set(branches.filter((b) => b.traversee).map((b) => b.code));
+    const traversees = new Set(branches.filter((b) => b.passages.length > 0).map((b) => b.code));
     const codesLignes = new Set(lignes.map((l) => l.code));
     const feux = [...new Set(lignes.flatMap((l) => l.feux))];
 

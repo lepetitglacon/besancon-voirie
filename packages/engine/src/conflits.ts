@@ -42,8 +42,11 @@ export interface GeometrieCarrefour {
   /** Clé de voie (« S:e0 ») → segment [bout côté carrefour, bout éloigné]. */
   voies: ReadonlyMap<string, Segment>;
   connexions: readonly Connexion[];
-  /** Code de branche → passage piéton. */
-  traversees: ReadonlyMap<string, Segment>;
+  /**
+   * Code de branche → ses passages piétons : un ou plusieurs segments (de part et d'autre d'un
+   * terre-plein, décalés…), commandés ensemble par la ligne piétonne qui traverse la branche.
+   */
+  traversees: ReadonlyMap<string, readonly Segment[]>;
   /** Giratoire : codes des tronçons d'anneau (R1, R2…). */
   troncons?: ReadonlySet<string>;
 }
@@ -102,10 +105,8 @@ export function matriceConflits(
   const repere = repereLocal(geometrie.centre);
   const parMouvement = trajectoiresParMouvement(geometrie);
   const trajectoires = (ligne: LigneConflits) => ligne.mouvements.flatMap((m) => parMouvement.get(m) ?? []);
-  const traversee = (ligne: LigneConflits): XY[] | null => {
-    const segment = ligne.traverse ? geometrie.traversees.get(ligne.traverse) : undefined;
-    return segment ? segment.map(repere.versXY) : null;
-  };
+  const passages = (ligne: LigneConflits): XY[][] =>
+    (ligne.traverse ? (geometrie.traversees.get(ligne.traverse) ?? []) : []).map((segment) => segment.map(repere.versXY));
   const tolerees = new Set(admis.map(([a, b]) => clePaire(a, b)));
   const troncons = geometrie.troncons ?? new Set<string>();
 
@@ -113,8 +114,8 @@ export function matriceConflits(
     if (a.type === 'pieton' && b.type === 'pieton') return null;
     if (a.type === 'pieton' || b.type === 'pieton') {
       const [pieton, vehicule] = a.type === 'pieton' ? [a, b] : [b, a];
-      const passage = traversee(pieton);
-      const coupee = passage && trajectoires(vehicule).find((t) => polylignesSeCoupent(passage, t.courbe));
+      const deLaLigne = passages(pieton);
+      const coupee = trajectoires(vehicule).find((t) => deLaLigne.some((passage) => polylignesSeCoupent(passage, t.courbe)));
       if (!coupee) return null;
       const cause: [string, string] = [`traversée ${pieton.traverse}`, coupee.cle];
       return { a: a.code, b: b.code, nature: 'pieton', cause: a.type === 'pieton' ? cause : [cause[1], cause[0]] };

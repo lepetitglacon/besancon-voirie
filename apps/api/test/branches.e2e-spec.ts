@@ -51,7 +51,8 @@ describe('Branches, voies et connexions (e2e)', () => {
     expect(sud).toMatchObject({ nom: 'Avenue B', sens: 'double' });
     expect(sud.voies.map((v) => `${v.sens}${v.rang}`)).toEqual(['entrante0', 'entrante1', 'sortante0']);
     expect(sud.voies[0]!.geom).toHaveLength(2);
-    expect(sud.traversee).toHaveLength(2);
+    expect(sud.passages).toHaveLength(1);
+    expect(sud.passages[0]).toHaveLength(2);
 
     expect(body.connexions).toEqual(
       expect.arrayContaining([

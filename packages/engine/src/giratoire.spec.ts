@@ -44,7 +44,7 @@ const rues = RUES.map((r) => {
       { sens: 'entrante' as const, rang: 0, geom: g.entrantes[0]! },
       { sens: 'sortante' as const, rang: 0, geom: g.sortantes[0]! },
     ],
-    traversee: g.traversee,
+    passages: [g.traversee],
   };
 });
 const troncons = branchesTroncons(anneau);
@@ -143,7 +143,7 @@ describe('conflits d’un giratoire par nœuds', () => {
           { sens: 'entrante' as const, rang: 0, geom: g.entrantes[0]! },
           { sens: 'sortante' as const, rang: 0, geom: g.sortantes[0]! },
         ],
-        traversee: g.traversee,
+        passages: [g.traversee],
       };
     });
     const toutes = [...rues, ...tronconsTram, ...tram];

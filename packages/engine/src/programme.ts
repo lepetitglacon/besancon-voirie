@@ -403,8 +403,11 @@ export function contexteProgramme(
   const repere = repereLocal(geometrie.centre);
   const longueursTraversees = new Map<string, number>();
   for (const ligne of lignes) {
-    const passage = ligne.type === 'pieton' && ligne.traverse ? geometrie.traversees.get(ligne.traverse) : undefined;
-    if (passage) longueursTraversees.set(ligne.code, longueurPolyligne(passage.map(repere.versXY)));
+    // Un seul vert pour tout le groupe : le piéton franchit tous ses passages d'une traite.
+    const passages = ligne.type === 'pieton' && ligne.traverse ? (geometrie.traversees.get(ligne.traverse) ?? []) : [];
+    if (passages.length) {
+      longueursTraversees.set(ligne.code, passages.reduce((total, p) => total + longueurPolyligne(p.map(repere.versXY)), 0));
+    }
   }
   return {
     lignes: lignes.map((l) => ({ code: l.code, type: l.type })),

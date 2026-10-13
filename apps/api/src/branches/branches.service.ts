@@ -109,7 +109,7 @@ export class BranchesService {
     const { rows: branches } = await this.db.execute<Branche>(sql`
       SELECT b.code, b.nom, b.azimut_deg AS azimut, b.osm_way_id::float8 AS osm_way_id,
              (ST_AsGeoJSON(b.geom)::json)->'coordinates' AS geom,
-             (ST_AsGeoJSON(b.traversee)::json)->'coordinates' AS traversee,
+             coalesce((ST_AsGeoJSON(b.traversee)::json)->'coordinates', '[]'::json) AS passages,
              b.priorite_entree, b.noeud, b.troncon,
              coalesce(
                (SELECT json_agg(json_build_object(
@@ -167,7 +167,7 @@ export class BranchesService {
         return {
           ...brancheProposee(p),
           voies: [...segments('entrante', voies.entrantes), ...segments('sortante', voies.sortantes)],
-          traversee: voies.traversee,
+          passages: [voies.traversee],
           noeud: null,
         };
       });
@@ -191,7 +191,7 @@ export class BranchesService {
       return {
         ...brancheProposee(p),
         voies: [...segments('entrante', voies.entrantes), ...segments('sortante', voies.sortantes)],
-        traversee: voies.traversee,
+        passages: [voies.traversee],
         noeud: noeud.code,
       };
     });
@@ -218,11 +218,12 @@ export class BranchesService {
       const idsVoies = new Map<string, string>();
       for (const b of branches) {
         const ligne = (coords: unknown) => (coords ? JSON.stringify({ type: 'LineString', coordinates: coords }) : null);
+        const passages = b.passages.length ? JSON.stringify({ type: 'MultiLineString', coordinates: b.passages }) : null;
         const { rows } = await tx.execute<{ id: string }>(sql`
           INSERT INTO branche (carrefour_id, code, nom, azimut_deg, sens, osm_way_id, geom, traversee, priorite_entree, noeud, troncon)
           VALUES (${carrefourId}, ${b.code}, ${b.nom}, ${b.azimut}, ${sensDe(b)}, ${b.osm_way_id},
                   ST_SetSRID(ST_GeomFromGeoJSON(${ligne(b.geom)}), 4326),
-                  ST_SetSRID(ST_GeomFromGeoJSON(${ligne(b.traversee)}), 4326),
+                  ST_SetSRID(ST_GeomFromGeoJSON(${passages}), 4326),
                   ${b.priorite_entree}::priorite_entree, ${b.noeud}, ${b.troncon})
           RETURNING id
         `);
@@ -366,7 +367,7 @@ export function geometrieDe(config: BranchesCarrefour) {
     voies: new Map(
       config.branches.flatMap((b) => b.voies.map((v) => [cleVoie(b.code, v.sens, v.rang), v.geom] as const)),
     ),
-    traversees: new Map(config.branches.flatMap((b) => (b.traversee ? [[b.code, b.traversee] as const] : []))),
+    traversees: new Map(config.branches.flatMap((b) => (b.passages.length ? [[b.code, b.passages] as const] : []))),
     troncons: new Set(config.branches.filter((b) => b.troncon).map((b) => b.code)),
   };
 }
