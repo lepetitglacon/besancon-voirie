@@ -24,7 +24,7 @@ pnpm install
 pnpm db:up          # PostgreSQL 17 + PostGIS 3.5 + pgRouting 4.0 (port 5433)
 pnpm db:prepare     # bases voirie + voirie_test, extensions, migrations
 pnpm build:packages # compile @voirie/schema et @voirie/engine, requis par osm:import
-pnpm osm:import     # feux, voies et tram depuis OpenStreetMap (Overpass, mis en cache)
+pnpm osm:import     # feux depuis OpenStreetMap (Overpass) ; les voies se chargent à la demande
 pnpm dev            # packages en watch + API :3000 + web :5173
 ```
 
@@ -32,9 +32,10 @@ Résultat attendu :
 
 - `pnpm db:prepare` se termine par `migrations applied successfully!` ; `pnpm db:verifier`
   indique alors `0 en attente`. La base `voirie_test` est créée vide, les tests e2e la migrent.
-- `pnpm osm:import` affiche le décompte des signaux, voies, trams et feux importés, et écrit
-  le cache `data/osm/besancon.json` (hors git). Les imports suivants relisent ce cache
-  (`--refresh` pour retélécharger) ; le manager le copie dans chaque nouveau worktree.
+- `pnpm osm:import` télécharge les feux de la zone d'import (une requête légère) et affiche le
+  décompte des feux importés. Les voies se chargent ensuite à la demande, autour des
+  carrefours qu'on détecte ou compose. Le cache de SUMO, `data/osm/besancon.json` (hors git),
+  est à part ; le manager le copie dans chaque nouveau worktree.
 - Aucun carrefour n'existe encore : ils se composent à la main sur la carte.
 
 | Commande | Effet |
@@ -163,8 +164,9 @@ Résultat au 26/09/2026 (bbox, donc déborde un peu sur les communes voisines) :
 contrôleur, donc une même programmation. Deux carrefours proches peuvent être pilotés
 ensemble, et deux feux à 30 m l'un de l'autre peuvent être indépendants. Donc :
 
-1. `pnpm osm:import` charge chaque feu OSM de la commune dans la table `feu` (type véhicule ou
-   piéton, position, balises), sans créer aucun carrefour.
+1. `pnpm osm:import`, ou l'outil « Zone OSM » du mode Édition, charge chaque feu OSM de la
+   zone d'import (par défaut, la commune ; par exemple Grand Besançon Métropole) dans la table
+   `feu` (type véhicule ou piéton, position, balises), sans créer aucun carrefour.
 2. Sur la carte, en mode « Composer un carrefour », on clique les feux qui partagent la
    **même programmation**. Un nom est proposé d'après les rues proches et reste modifiable.
    La nature (carrefour ou traversée piétonne) se choisit au même moment.

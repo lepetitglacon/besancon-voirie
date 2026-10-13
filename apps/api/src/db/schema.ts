@@ -3,6 +3,7 @@ import {
   bigint,
   customType,
   boolean,
+  check,
   date,
   geometry,
   index,
@@ -20,7 +21,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import type { Anneau, ArcGraphe, Controleur, Etape, IntervalleVert, Plage } from '@voirie/schema';
+import type { Anneau, ArcGraphe, Controleur, Etape, IntervalleVert, Plage, SourceZoneOsm } from '@voirie/schema';
 
 // Tables du projet — voir docs/ARCHITECTURE.md §4.
 // Les tables issues d'OpenStreetMap (osm_*) sont gérées par l'import, pas par Drizzle.
@@ -36,6 +37,10 @@ const ligne = customType<{ data: string; driverData: string }>({
 /** Plusieurs lignes : les passages piétons d'une branche. */
 const lignes = customType<{ data: string; driverData: string }>({
   dataType: () => 'geometry(MultiLineString, 4326)',
+});
+
+const multiPolygone = customType<{ data: string; driverData: string }>({
+  dataType: () => 'geometry(MultiPolygon, 4326)',
 });
 
 const creeLe = () => timestamp('cree_le', { withTimezone: true }).notNull().defaultNow();
@@ -378,4 +383,19 @@ export const essaiIa = pgTable(
     creeLe: timestamp('cree_le', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('essai_ia_analyse_idx').on(t.analyseId), index('essai_ia_carrefour_idx').on(t.carrefourId, t.creeLe)],
+);
+
+/**
+ * Zone d'import OSM de l'instance (une seule ligne) : l'import ne garde que les feux qu'elle
+ * contient — docs/ARCHITECTURE.md §5. Sans zone, il garde ceux de la commune de Besançon.
+ */
+export const zoneOsm = pgTable(
+  'zone_osm',
+  {
+    id: smallint('id').primaryKey().default(1),
+    geom: multiPolygone('geom').notNull(),
+    source: jsonb('source').$type<SourceZoneOsm>().notNull(),
+    modifieeLe: timestamp('modifiee_le', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [check('zone_osm_unique', sql`${t.id} = 1`)],
 );

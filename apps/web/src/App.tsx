@@ -36,6 +36,8 @@ import {
 } from './ds'
 import { useAnalysesIa, useNotificationsIa } from './configuration/analysesIa'
 import { PanneauEdition, type Edition } from './edition/PanneauEdition'
+import { CalqueZoneOsm, type ModeZone } from './zone/CalqueZoneOsm'
+import { PanneauZoneOsm, type BrouillonZone } from './zone/PanneauZoneOsm'
 import { CarteCarrefours } from './map/CarteCarrefours'
 import { CouchePertes } from './map/CouchePertes'
 import { PanneauMesure } from './map/PanneauMesure'
@@ -152,6 +154,14 @@ function App() {
     heure: new Date().getHours(),
   }))
   const [edition, setEdition] = useState<Edition | null>(null)
+  /** Outil « Zone OSM » du mode Édition : zone d'import des feux, tracée sur la carte. */
+  const [outilZone, setOutilZone] = useState(false)
+  /** Brouillon de la zone ; null : la zone enregistrée, telle quelle. */
+  const [brouillonZoneSaisi, setBrouillonZone] = useState<BrouillonZone | null>(null)
+  const [modeZone, setModeZone] = useState<ModeZone>('retoucher')
+  const [pointZone, setPointZone] = useState<LonLat | null>(null)
+  /** Mode « dessiner » de l'outil Zone OSM : sommets du polygone en cours. */
+  const [traceZone, setTraceZone] = useState<LonLat[]>([])
   const [configuration, setConfiguration] = useState<(CarrefourChoisi & {
     /** Proposition IA à charger à l'ouverture (« Ouvrir » d'une notification). */
     ouvrirAnalyseIa?: { id: string }
@@ -243,6 +253,7 @@ function App() {
     if (suivant !== 'edition') {
       setEdition(null)
       setConfiguration(null)
+      setOutilZone(false)
     }
     if (suivant !== 'temps_reel') setFicheTempsReel(null)
   }
@@ -296,6 +307,7 @@ function App() {
     enregistrer.reset()
     setMode('edition')
     setFicheTempsReel(null)
+    setOutilZone(false)
     setEdition(nouvelle)
   }
 
@@ -337,6 +349,7 @@ function App() {
   const configurer = (choix: CarrefourChoisi) => {
     setMode('edition')
     setFicheTempsReel(null)
+    setOutilZone(false)
     setEdition(null)
     setConfiguration(choix)
   }
@@ -411,6 +424,60 @@ function App() {
     return () => window.removeEventListener('beforeunload', retenir)
   }, [brouillonsEnCours])
 
+  // Zone d'import OSM : suivie toutes les 2 s pendant un import.
+  const zoneOsm = useQuery({
+    queryKey: ['zone-osm'],
+    queryFn: api.zoneOsm,
+    enabled: outilZone,
+    refetchInterval: (requete) =>
+      requete.state.data && ['telechargement', 'chargement'].includes(requete.state.data.import.statut) ? 2000 : false,
+  })
+  // Fin d'un import : les feux de la carte changent.
+  const statutImport = zoneOsm.data?.import.statut
+  useEffect(() => {
+    if (statutImport === 'termine') void queryClient.invalidateQueries({ queryKey: ['feux'] })
+  }, [statutImport, queryClient])
+  // À l'ouverture de l'outil, la carte se cadre sur la zone (enregistrée, sinon importée).
+  const cadrerZone = useRef(false)
+  useEffect(() => {
+    const donnees = zoneOsm.data
+    if (!outilZone || !cadrerZone.current || !donnees || !carte) return
+    cadrerZone.current = false
+    const points = (donnees.polygones ?? donnees.zone_importee?.polygones ?? []).flat()
+    if (points.length < 3) return
+    const lons = points.map((p) => p[0])
+    const lats = points.map((p) => p[1])
+    carte.fitBounds([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)], {
+      padding: { top: 110, bottom: 100, left: 380, right: 80 },
+      duration: 800,
+    })
+  }, [outilZone, zoneOsm.data, carte])
+  const changerModeZone = (suivant: ModeZone) => {
+    setModeZone(suivant)
+    setPointZone(null)
+    setTraceZone([])
+  }
+  /** Ferme le polygone dessiné (trois sommets au moins) et l'ajoute au tracé de la zone. */
+  const fermerTraceZone = () => {
+    if (traceZone.length < 3 || !brouillonZone) return
+    setBrouillonZone({
+      polygones: [...(brouillonZone.polygones ?? []), traceZone],
+      source: { contour: brouillonZone.source?.contour ?? null, retouchee: brouillonZone.polygones !== null },
+      modifie: true,
+    })
+    changerModeZone('retoucher')
+  }
+  const ouvrirZone = () => {
+    cadrerZone.current = true
+    setEdition(null)
+    setConfiguration(null)
+    changerModeZone('retoucher')
+    setBrouillonZone(null)
+    setOutilZone(true)
+  }
+  const brouillonZone: BrouillonZone | null =
+    brouillonZoneSaisi ?? (zoneOsm.data ? { polygones: zoneOsm.data.polygones, source: zoneOsm.data.source, modifie: false } : null)
+
   const composer = () =>
     demarrer({ carrefourId: null, selection: [], nature: 'carrefour', nomSaisi: null, modeRectangle: true })
 
@@ -419,6 +486,8 @@ function App() {
     if (!modeEdition || configuration || e.ctrlKey || e.metaKey || e.altKey) return
     if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
     const lettre = e.key.toLowerCase()
+    if (outilZone && e.key === 'Enter' && modeZone === 'dessiner') return fermerTraceZone()
+    if (outilZone && e.key === 'Escape') return modeZone !== 'retoucher' ? changerModeZone('retoucher') : setOutilZone(false)
     if (!edition) return lettre === 'n' && composer()
     if (e.key === 'Escape') return setEdition(null)
     if (lettre === 'r' || lettre === 'v') setEdition({ ...edition, modeRectangle: lettre === 'r' })
@@ -545,6 +614,10 @@ function App() {
           onDeplacerPointMesure={mesures.deplacer}
           onDeplacerPoignee={deplacerPoignee}
           onConnecter={connecter}
+          zoneOsm={outilZone}
+          onClicZone={
+            modeZone === 'choisir' ? setPointZone : modeZone === 'dessiner' ? (point) => setTraceZone((t) => [...t, point]) : undefined
+          }
           onTracer={tracer}
           onDessinerZoneIa={dessinerZoneIa}
           onPlacerFeu={placerFeu}
@@ -559,6 +632,23 @@ function App() {
           {tempsReel && feuxTempsReel.data && <CoucheFeuxTempsReel tempsReel={feuxTempsReel.data} tram={contexteTram} />}
           {tramAffiche && reseauTram.data && (
             <CoucheTrams reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
+          )}
+          {outilZone && brouillonZone && (
+            <CalqueZoneOsm
+              polygones={brouillonZone.polygones}
+              importee={zoneOsm.data?.zone_importee?.polygones ?? null}
+              mode={modeZone}
+              point={pointZone}
+              trace={traceZone}
+              onFermerTrace={fermerTraceZone}
+              onChanger={(polygones) =>
+                setBrouillonZone({
+                  polygones,
+                  source: { contour: brouillonZone.source?.contour ?? null, retouchee: brouillonZone.source !== null },
+                  modifie: true,
+                })
+              }
+            />
           )}
         </CarteCarrefours>
       </Box>
@@ -658,7 +748,15 @@ function App() {
             w="340px"
             maxW="calc(100vw - 24px)"
             surtitre="Besançon Voirie"
-            titre={edition ? (edition.carrefourId ? 'Modifier le carrefour' : 'Composer un carrefour') : 'Inventaire citoyen des feux tricolores'}
+            titre={
+              outilZone
+                ? "Zone d'import OSM"
+                : edition
+                  ? edition.carrefourId
+                    ? 'Modifier le carrefour'
+                    : 'Composer un carrefour'
+                  : 'Inventaire citoyen des feux tricolores'
+            }
             badges={
               <>
                 {sante.isSuccess && <Badge colorPalette="green">API connectée</Badge>}
@@ -668,6 +766,20 @@ function App() {
               </>
             }
           >
+            {outilZone && brouillonZone && (
+              <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted" maxH="calc(100vh - 200px)" overflowY="auto">
+                <PanneauZoneOsm
+                  zone={zoneOsm.data}
+                  brouillon={brouillonZone}
+                  onBrouillon={setBrouillonZone}
+                  mode={modeZone}
+                  onMode={changerModeZone}
+                  point={pointZone}
+                  trace={traceZone}
+                  onFermerTrace={fermerTraceZone}
+                />
+              </Box>
+            )}
             {edition && (
               <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
                 <PanneauEdition
@@ -698,6 +810,27 @@ function App() {
             />
           )}
 
+          {outilZone && (
+            <BandeauMode
+              position="fixed"
+              top={HAUT_BANDEAU}
+              left="50%"
+              transform="translateX(-50%)"
+              zIndex="2"
+              titre={modeZone === 'choisir' ? 'Choisir un contour' : modeZone === 'dessiner' ? 'Dessiner la zone' : "Zone d'import OSM"}
+              aides={[
+                modeZone === 'choisir'
+                  ? 'Clic sur la carte : contours qui contiennent ce point'
+                  : modeZone === 'dessiner'
+                    ? 'Clic : poser un sommet ; clic sur le premier ou Entrée : fermer'
+                    : 'Glisser les sommets ; « + » pour en ajouter',
+                <Kbd key="echap" variant="inverse">
+                  Échap
+                </Kbd>,
+              ]}
+            />
+          )}
+
           {modeEdition && <BarreOutils.Root position="fixed" left="50%" transform="translateX(-50%)" bottom="22px" zIndex="3">
             {edition ? (
               <>
@@ -718,8 +851,16 @@ function App() {
               </>
             ) : (
               <>
-                <BarreOutils.Outil glyphe="↖" libelle="Sélection" raccourci="V" actif />
+                <BarreOutils.Outil glyphe="↖" libelle="Sélection" raccourci="V" actif={!outilZone} onClick={() => setOutilZone(false)} />
                 <BarreOutils.Outil glyphe="⌖" libelle="Carrefour" raccourci="N" onClick={composer} />
+                <BarreOutils.Separateur />
+                <BarreOutils.Outil
+                  glyphe="⬚"
+                  libelle="Zone OSM"
+                  title="Zone d'import des feux depuis OSM"
+                  actif={outilZone}
+                  onClick={() => (outilZone ? setOutilZone(false) : ouvrirZone())}
+                />
               </>
             )}
           </BarreOutils.Root>}

@@ -15,6 +15,7 @@
     "outDir": "./dist",
     "rootDir": ".",
     "incremental": true,
+    "rewriteRelativeImportExtensions": true,
     "skipLibCheck": true,
     "strict": true,
     "strictPropertyInitialization": false,

@@ -8,6 +8,7 @@ import type { CadrePhotoIa, DetectionBranches, DetectionBranchesIa, EmpriseIa, S
 import { sql } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../../db/db.module.js';
 import { tableExiste } from '../../db/sql.js';
+import { assurerVoies } from '../../osm/voies-osm.js';
 import { BranchesService, deduire } from '../branches.service.js';
 import { DelaiClaude, ErreurClaude, lancerClaude, type ReponseClaude } from './claude.js';
 import { configurationDepuisLecture, consigne, LectureIa, schemaJsonLecture, SYSTEME, type ContexteIa, type ResultatLecture } from './lecture.js';
@@ -209,6 +210,12 @@ export class IaService {
 
   /** Voies OSM circulables (et voies de tram) dans le cadre de la photo, découpées au cadre. */
   private async voiesOsm({ bbox: [xmin, ymin, xmax, ymax] }: CadrePhoto): Promise<ContexteIa['voiesOsm']> {
+    // Voies chargées à la demande sur tout le cadre (Web Mercator → lon/lat, demi-diagonale en m).
+    const R = 6_378_137;
+    const lat = ((2 * Math.atan(Math.exp((ymin + ymax) / 2 / R)) - Math.PI / 2) * 180) / Math.PI;
+    const lon = ((xmin + xmax) / 2 / R) * (180 / Math.PI);
+    const demiDiagonale = (Math.hypot(xmax - xmin, ymax - ymin) / 2) * Math.cos((lat * Math.PI) / 180);
+    await assurerVoies(this.db, [lon, lat], demiDiagonale, { exiger: false });
     if (!(await tableExiste(this.db, 'osm_way'))) return [];
     const { rows } = await this.db.execute<{ osm_id: string; tags: Record<string, string>; coordonnees: LonLat[] }>(sql`
       WITH cadre AS (

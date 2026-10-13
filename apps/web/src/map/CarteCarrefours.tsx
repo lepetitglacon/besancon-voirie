@@ -101,6 +101,10 @@ interface Props {
   /** Glisser-déposer dans l'éditeur de configuration. */
   onDeplacerPoignee: (poignee: Poignee, position: LonLat) => void
   onConnecter: (de: string, vers: string) => void
+  /** Outil « Zone OSM » : la carte ne réagit pas aux clics (ni carrefours, ni feux). */
+  zoneOsm?: boolean
+  /** Outil « Zone OSM », choix d'un contour : point cliqué. */
+  onClicZone?: (point: LonLat) => void
   onTracer: (segment: [LonLat, LonLat]) => void
   /** Zone de la photo IA tracée sur la carte : [ouest, sud, est, nord]. */
   onDessinerZoneIa: (emprise: EmpriseIa) => void
@@ -299,6 +303,7 @@ export function CarteCarrefours(props: Props) {
       if (evenement.target.queryRenderedFeatures(evenement.point, { layers: ['mesure-points'] }).length) return
       return props.onPointMesure([longitude, latitude])
     }
+    if (props.zoneOsm) return props.onClicZone?.([longitude, latitude])
     const vise = carrefourVise(objet)
     if (props.tempsReel) {
       if (vise) props.onOuvrir(vise)

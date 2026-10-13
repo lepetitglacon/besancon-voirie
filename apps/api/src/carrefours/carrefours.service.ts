@@ -12,6 +12,7 @@ import type {
 } from '@voirie/schema';
 import { DRIZZLE, type Db } from '../db/db.module.js';
 import { tableExiste, uuids, type Executeur, type Tx } from '../db/sql.js';
+import { assurerVoies } from '../osm/voies-osm.js';
 import { recalculerCarrefour } from './positions.js';
 
 const LIMITE_CARREFOURS = 2000;
@@ -56,11 +57,29 @@ export class CarrefoursService {
 
   /** Nom proposé pour un groupe de feux, d'après les rues qui les entourent. */
   async suggererNom(feux: string[], nature: NatureCarrefour): Promise<string> {
+    await this.assurerVoiesAutour(feux);
     return proposerNom(await this.nomsProches(this.db, feux), nature);
+  }
+
+  /**
+   * Voies OSM (et tram) autour des feux, chargées à la demande : nom proposé et proximité du
+   * tram. Hors transaction (requête Overpass) ; sans réseau, on garde ce qui est en base.
+   */
+  private async assurerVoiesAutour(feux: string[]): Promise<void> {
+    if (feux.length === 0) return;
+    const { rows } = await this.db.execute<{ lon: number | null; lat: number | null; etendue: number | null }>(sql`
+      SELECT ST_X(c) AS lon, ST_Y(c) AS lat,
+             (SELECT max(ST_Distance(f.geom::geography, c::geography)) FROM feu f WHERE f.id = ANY (${uuids(feux)})) AS etendue
+      FROM (SELECT ST_Centroid(ST_Collect(geom)) AS c FROM feu WHERE id = ANY (${uuids(feux)})) g
+    `);
+    const g = rows[0];
+    if (g?.lon == null || g.lat == null) return;
+    await assurerVoies(this.db, [g.lon, g.lat], (g.etendue ?? 0) + RAYON_NOMMAGE_M, { exiger: false });
   }
 
   /** Compose un carrefour à partir de feux encore libres. */
   async creer({ nom, nature, feux }: CreerCarrefour): Promise<CarrefourResume> {
+    await this.assurerVoiesAutour(feux);
     return this.db.transaction(async (tx) => {
       await this.verrouillerFeux(tx, feux, null);
       const nomRetenu = nom ?? proposerNom(await this.nomsProches(tx, feux), nature);
@@ -81,6 +100,7 @@ export class CarrefoursService {
 
   /** Renomme, change la nature ou recompose les feux d'un carrefour (le slug ne change pas). */
   async modifier(id: string, modification: ModifierCarrefour): Promise<CarrefourResume> {
+    if (modification.feux) await this.assurerVoiesAutour(modification.feux);
     return this.db.transaction(async (tx) => {
       await this.exiger(tx, id);
       if (modification.feux) {

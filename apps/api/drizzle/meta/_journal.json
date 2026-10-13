@@ -148,6 +148,13 @@
       "when": 1791928205000,
       "tag": "20261013215005_passages_pietons_ia",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791932396479,
+      "tag": "20261013225956_zone_osm",
+      "breakpoints": true
     }
   ]
 }

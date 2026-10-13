@@ -562,3 +562,91 @@ svg.graphe-etapes {
 .calque-carrefour.pieton .calque-voie.interactive {
   cursor: pointer;
 }
+
+/* ── Zone d'import OSM (outil « Zone OSM » du mode Édition) ── */
+
+.calque-zone-osm {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  user-select: none;
+}
+
+.calque-zone-osm .masque {
+  fill: rgba(15, 23, 42, 0.35);
+}
+
+.calque-zone-osm .bord {
+  fill: none;
+  stroke: var(--chakra-colors-brand-solid);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+
+.calque-zone-osm .importee {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 2;
+  stroke-dasharray: 6 5;
+  opacity: 0.8;
+}
+
+.calque-zone-osm .sommet {
+  fill: #ffffff;
+  stroke: var(--chakra-colors-brand-solid);
+  stroke-width: 2;
+  pointer-events: all;
+  cursor: grab;
+}
+
+.calque-zone-osm .sommet.actif {
+  cursor: grabbing;
+  fill: var(--chakra-colors-brand-solid);
+}
+
+.calque-zone-osm .ajout {
+  fill: var(--chakra-colors-brand-solid);
+  opacity: 0.45;
+  pointer-events: all;
+  cursor: copy;
+}
+
+.calque-zone-osm .ajout:hover {
+  opacity: 0.9;
+}
+
+.calque-zone-osm .trace .ligne,
+.calque-zone-osm .trace .fermeture {
+  fill: none;
+  stroke: var(--chakra-colors-brand-solid);
+  stroke-width: 2.5;
+}
+
+.calque-zone-osm .trace .fermeture {
+  stroke-dasharray: 5 5;
+  opacity: 0.7;
+}
+
+.calque-zone-osm .trace .point {
+  fill: var(--chakra-colors-brand-solid);
+  stroke: #ffffff;
+  stroke-width: 1.5;
+}
+
+.calque-zone-osm .trace .premier {
+  fill: #ffffff;
+  stroke: var(--chakra-colors-brand-solid);
+  stroke-width: 3;
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.calque-zone-osm .point-choisi {
+  fill: var(--chakra-colors-brand-solid);
+  stroke: #ffffff;
+  stroke-width: 2;
+}

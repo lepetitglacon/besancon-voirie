@@ -37,7 +37,7 @@ describe('trierElements', () => {
   it('should split the response by kind and drop duplicates', () => {
     const donnees = trierElements(reponse);
     expect(donnees.horodatage).toBe('2026-09-26T10:00:00Z');
-    expect(donnees.commune.contours).toHaveLength(1);
+    expect(donnees.commune?.contours).toHaveLength(1);
     expect(donnees.signaux.map((s) => s.id)).toEqual([2, 3]);
     expect(donnees.voies.map((v) => v.id)).toEqual([5]);
     expect(donnees.trams.map((t) => t.id)).toEqual([6]);

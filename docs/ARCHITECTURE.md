@@ -87,7 +87,7 @@ Principes :
 | ORM | Drizzle ORM (+ SQL brut pour les requêtes spatiales) | 0.45 / drizzle-kit 0.31 |
 | Base | `pgrouting/pgrouting:17-3.5-4.0.1` | PG 17.5, PostGIS 3.5.2, pgRouting 4.0.1 |
 | File de jobs | pg-boss | à ajouter (phase 2) |
-| Import OSM | Overpass API + `apps/api/scripts/osm.ts` (osm2pgrouting envisagé pour la topologie) | en place |
+| Import OSM | Overpass API : feux de la zone (`apps/api/src/osm/`), voies à la demande autour des carrefours (osm2pgrouting envisagé pour la topologie) | en place |
 | Tuiles vectorielles (optionnel) | Martin (`ghcr.io/maplibre/martin`) | à ajouter si besoin |
 | Simulation (phase 2) | Eclipse SUMO (`pip install eclipse-sumo`) | 1.27+ |
 | Tests | Vitest partout ; e2e API contre la base `voirie_test` du docker compose | Vitest 4 |
@@ -362,41 +362,87 @@ Les schémas Drizzle (`apps/api/src/db/schema.ts`) reflètent ces tables. Drizzl
 
 ## 5. Import OpenStreetMap et composition des carrefours
 
-Implémentation : `apps/api/scripts/osm.ts` (Node 24, sans binaire externe). Tests :
+Implémentation : `apps/api/src/osm/import-osm.ts` (feux) et `voies-osm.ts` (voies à la
+demande), Node 24, sans binaire externe. L'import se lance en ligne de commande
+(`apps/api/scripts/osm.ts`) ou depuis l'application (outil « Zone OSM », §5.4). Tests :
 `scripts/osm.spec.ts` (unitaires) et `test/osm.e2e-spec.ts` (jeu OSM synthétique sur la base de test).
 
 ```bash
-pnpm osm:import            # relit le cache data/osm/besancon.json, ou télécharge s'il manque
-pnpm osm:import --refresh  # retélécharge depuis Overpass
+pnpm osm:import            # feux de la zone d'import (ou de la commune), depuis Overpass
 ```
 
-### 5.1 Import (Overpass)
+### 5.1 Import des feux, voies à la demande
 
-Une seule requête Overpass sur l'emprise de Besançon récupère :
-- la relation de la commune (`ref:INSEE=25056`), reconstituée en polygone par `ST_Polygonize` ;
+**L'import ne prend que les feux** : une seule requête Overpass, légère (quelques secondes même
+pour une intercommunalité), sur l'emprise de la **zone d'import** (§5.4) :
 - les nœuds `highway=traffic_signals` et `crossing=traffic_signals` ;
-- les voies `highway=*`, de `motorway` à `service` (avec leurs `_link`), et les voies `railway=tram`.
+- sans zone enregistrée, sur l'emprise par défaut (47,19–47,30 N, 5,93–6,09 E), la relation
+  de la commune (`ref:INSEE=25056`), reconstituée en polygone par `ST_Polygonize`, qui sert
+  alors de zone.
+
+Les tables `osm_meta`, `osm_commune`, `osm_zone` et `osm_signal` sont **supprimées puis
+recréées** à chaque import, dans une transaction.
+
+**Les voies se chargent à la demande, autour d'un carrefour** (`assurerVoies`) : avant la
+détection des branches (250 m autour du carrefour, anneau d'un giratoire compris), la lecture
+IA (le cadre de la photo), la suggestion de nom et le calcul de « tram à proximité » à la
+composition (autour des feux). Une requête `around` d'au moins 300 m récupère les voies
+`highway=*` (de `motorway` à `service`, avec leurs `_link`) et `railway=tram`, gardées dans
+`osm_way` et `osm_tram` ; l'emprise couverte va dans `osm_voies_chargees`, et une zone déjà
+couverte n'est pas redemandée. Ces tables survivent aux imports. Une base importée avant ce
+fonctionnement avait toutes les voies de l'emprise par défaut : elle est notée comme couverte.
+Sans réseau, la détection répond 503 ; la lecture IA et le nom se contentent de ce qui est en
+base. `OSM_VOIES_A_LA_DEMANDE=false` coupe ces requêtes (tests e2e).
 
 Plusieurs serveurs Overpass sont essayés dans l'ordre (overpass-api.de, private.coffee,
-mail.ru), et la réponse est mise en cache dans `data/osm/` (non versionné). Les tables
-`osm_meta`, `osm_commune`, `osm_signal`, `osm_way` (avec la liste de ses nœuds) et `osm_tram`
-sont **supprimées puis recréées** à chaque import, dans une transaction.
+mail.ru). **SUMO a son propre cache** (`data/osm/besancon.json`, non versionné, relu par
+`data/sumo/ville/preparer.sh`) : l'import des feux n'y touche pas.
 
-On a choisi Overpass plutôt qu'osm2pgsql : aucun binaire à installer, et un volume ciblé
-(~900 feux, ~13 700 voies). La **topologie routable** nécessaire aux corridors (phase 1 bis)
-reste à construire. Deux pistes : découper `osm_way` en SQL aux nœuds partagés puis
-`pgr_extractVertices`, ou passer à `osm2pgrouting` si le SQL devient trop lourd.
+On a choisi Overpass plutôt qu'osm2pgsql : aucun binaire à installer, et un volume ciblé. La
+**topologie routable** nécessaire aux corridors (phase 1 bis) reste à construire. Deux pistes :
+découper `osm_way` en SQL aux nœuds partagés puis `pgr_extractVertices`, ou passer à
+`osm2pgrouting` si le SQL devient trop lourd.
 
 ### 5.2 Synchronisation de la table `feu`
 
-Chaque feu OSM **situé dans la commune** devient une ligne de `feu` : type `vehicule` si
+Chaque feu OSM **situé dans la zone d'import** (à défaut, dans la commune) devient une ligne de `feu` : type `vehicule` si
 `highway=traffic_signals`, sinon `pieton` (`crossing=traffic_signals`, avec ou sans
 `highway`). La synchronisation se fait dans la transaction de l'import (`ON CONFLICT (osm_id)`) :
 - feu nouveau → ajouté, libre (`carrefour_id` nul) ;
 - feu existant → position OSM (`geom_osm`), type et balises mis à jour, **rattachement
   conservé** ; `geom` suit la position OSM, sauf pour un feu posé à la main sur son mât
   (`position_manuelle`), qui ne bouge plus ;
-- feu disparu d'OSM → `present_osm = false`, jamais supprimé.
+- feu disparu d'OSM, ou sorti de la zone → `present_osm = false`, jamais supprimé.
+
+### 5.4 Zone d'import (outil « Zone OSM » du mode Édition)
+
+La zone est enregistrée dans `zone_osm` (une seule ligne, `MultiPolygon`). Elle part d'un
+**contour administratif d'OSM** : « Choisir sur la carte », un clic, puis la commune,
+l'intercommunalité (Grand Besançon Métropole), le département… qui contiennent ce point
+(`is_in` d'Overpass). Le contour est élargi de 250 m et simplifié (~150 m) : quelques dizaines
+à quelques centaines de sommets, qu'on **retouche** sur la carte (glisser un sommet, glisser
+un « + » pour en ajouter, double-clic pour en retirer). On peut aussi **dessiner à la main** : chaque clic pose un
+sommet, un clic sur le premier (ou Entrée) ferme le polygone, Échap l'abandonne ; le polygone
+s'ajoute au tracé (seul, ou à côté d'un contour). « Supprimer la zone » ramène l'import à la
+commune de Besançon. Grand Besançon Métropole donne
+~570 km² et 130 sommets.
+
+À l'ouverture de l'outil, la carte se cadre sur la zone et montre en pointillé la **zone du
+dernier import**, que l'import garde dans `osm_zone` (recréée avec les autres tables `osm_*`) ;
+pour un import antérieur, le contour de la commune (`osm_commune`).
+
+« Importer les feux de la zone » lance l'import en tâche de fond dans l'API, un seul à la
+fois ; le panneau suit l'étape puis donne le bilan. La zone ne s'applique qu'à l'import
+suivant ; étendre la zone puis réimporter ne coûte qu'une requête de feux.
+
+| Méthode | Route | Effet |
+|---|---|---|
+| GET | `/api/osm/zone` | Zone, dernier import, décompte des feux, import en cours |
+| PUT | `/api/osm/zone` | `{ polygones, source }` (`EditionGuard`) |
+| DELETE | `/api/osm/zone` | Supprime la zone : l'import revient à la commune (`EditionGuard`) |
+| GET | `/api/osm/contours?lon=&lat=` | Contours administratifs qui contiennent le point (Overpass) |
+| GET | `/api/osm/contours/:id` | Contour d'une relation, élargi et simplifié (Overpass) |
+| POST | `/api/osm/import` | Lance l'import des feux de la zone, 202 (`EditionGuard`) |
 
 ### 5.3 Composition manuelle des carrefours
 

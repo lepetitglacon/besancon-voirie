@@ -24,7 +24,7 @@ export type Db = NodePgDatabase<typeof schema>;
       useFactory: (pool: pg.Pool): Db => drizzle({ client: pool, schema }),
     },
   ],
-  exports: [DRIZZLE],
+  exports: [DRIZZLE, PG_POOL],
 })
 export class DbModule implements OnApplicationShutdown {
   constructor(@Inject(PG_POOL) private readonly pool: pg.Pool) {}

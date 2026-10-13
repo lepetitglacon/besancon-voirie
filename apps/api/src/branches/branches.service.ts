@@ -29,6 +29,7 @@ import type {
 } from '@voirie/schema';
 import { DRIZZLE, type Db } from '../db/db.module.js';
 import { tableExiste, type Executeur } from '../db/sql.js';
+import { assurerVoies } from '../osm/voies-osm.js';
 import { proposerBranches, type Passage } from './detection.js';
 
 /** Marge ajoutée au feu le plus éloigné du centre pour tracer le cercle de détection. */
@@ -39,6 +40,8 @@ const RAYON_MAX_M = 80;
 const MARGE_ANNEAU_M = 15;
 /** Distance maximale entre le carrefour et l'anneau OSM qu'on lui associe. */
 const DISTANCE_ANNEAU_OSM_M = 60;
+/** Voies OSM chargées autour du carrefour avant la détection : cercle, anneau et ses rues. */
+const RAYON_VOIES_DETECTION_M = 250;
 /** Deux raccordements à l'anneau plus proches que cela forment un seul nœud (m). */
 const ECART_NOEUDS_MIN_M = 6;
 
@@ -152,8 +155,10 @@ export class BranchesService {
     `);
     const cercle = rows[0];
     if (!cercle) throw new NotFoundException('Carrefour inconnu');
-    const osm = await tableExiste(this.db, 'osm_way');
     const centreCarrefour: [number, number] = [cercle.lon, cercle.lat];
+    // Les voies OSM se chargent à la demande autour du carrefour (anneau d'un giratoire compris).
+    await assurerVoies(this.db, centreCarrefour, RAYON_VOIES_DETECTION_M);
+    const osm = await tableExiste(this.db, 'osm_way');
     const lu = cercle.nature === 'giratoire' && osm ? await this.anneauOsm(centreCarrefour) : null;
     // Giratoire : les branches rayonnent depuis le centre de l'anneau, et se détectent au-delà.
     const centre: [number, number] = lu ? lu.centre : centreCarrefour;

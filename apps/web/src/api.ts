@@ -11,6 +11,11 @@ import type {
   CarrefourResume,
   CarrefoursGeoJson,
   ConfigurationBranches,
+  ContourOsm,
+  EnregistrementZoneOsm,
+  ImportOsm,
+  PolygonesZone,
+  ZoneOsm,
   ConfigurationLignes,
   ConfigurationProgramme,
   CreerCarrefour,
@@ -148,5 +153,13 @@ export const api = {
   annulerLancementSumo: (id: string) =>
     requete<LancementSumo>(`/api/sumo/lancements/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   /** URL du flux SSE d'avancement d'un lancement. */
+  zoneOsm: () => requete<ZoneOsm>('/api/osm/zone'),
+  enregistrerZoneOsm: (zone: EnregistrementZoneOsm) =>
+    requete<ZoneOsm>('/api/osm/zone', { method: 'PUT', body: JSON.stringify(zone) }),
+  supprimerZoneOsm: () => requete<ZoneOsm>('/api/osm/zone', { method: 'DELETE' }),
+  contoursOsm: ([lon, lat]: LonLat) => requete<ContourOsm[]>(`/api/osm/contours?lon=${lon.toFixed(6)}&lat=${lat.toFixed(6)}`),
+  contourOsm: (osmId: number) =>
+    requete<{ nom: string; polygones: PolygonesZone; superficie_km2: number }>(`/api/osm/contours/${osmId}`),
+  importerOsm: () => requete<ImportOsm>('/api/osm/import', { method: 'POST' }),
   fluxLancementSumo: (id: string) => `/api/sumo/lancements/${encodeURIComponent(id)}/flux`,
 }
