@@ -13,6 +13,7 @@ import {
   NOEUDS_MIN,
   noeudDeVoie,
   proposerLiaisonsNoeuds,
+  repereLocal,
   voieAdjacente,
   type LonLat,
   type Segment,
@@ -31,6 +32,8 @@ export type Poignee =
   | { role: 'voie'; cle: string; sens: SensVoie; extremite: 0 | 1 }
   | { role: 'traversee'; branche: string; extremite: 0 | 1 }
   | { role: 'noeud'; code: string }
+  /** Passage piéton entier, translaté du point de départ du geste à la position. */
+  | { role: 'passage'; branche: string; depart: LonLat }
   /** Voies entières, translatées ensemble du point de départ du geste à la position. */
   | { role: 'voies'; cles: string[]; depart: LonLat }
 
@@ -125,6 +128,15 @@ export function deplacerPoignee(brouillon: Brouillon, poignee: Poignee, position
     if (!anneau) return brouillon
     return appliquerAnneau(brouillon, { noeuds: anneau.noeuds.map((n) => (n.code === poignee.code ? { ...n, position } : n)) })
   }
+  if (poignee.role === 'passage') {
+    const dLon = position[0] - poignee.depart[0]
+    const dLat = position[1] - poignee.depart[1]
+    return surBranche(brouillon, poignee.branche, (b) =>
+      b.traversee
+        ? { ...b, traversee: b.traversee.map(([lon, lat]) => [lon + dLon, lat + dLat] as LonLat) as Segment }
+        : b,
+    )
+  }
   if (poignee.role === 'voies') {
     const dLon = position[0] - poignee.depart[0]
     const dLat = position[1] - poignee.depart[1]
@@ -154,6 +166,37 @@ export function deplacerPoignee(brouillon: Brouillon, poignee: Poignee, position
     ...b,
     voies: b.voies.map((v) => (cleVoie(b.code, v.sens, v.rang) === poignee.cle ? { ...v, geom: remplacer(v.geom) } : v)),
   }))
+}
+
+/**
+ * Passage piéton tracé sur la carte : il revient à la branche la plus proche de son milieu
+ * (bout côté carrefour de ses voies, à défaut son axe), et remplace son passage s'il en avait un.
+ * null : aucune branche (hors tronçons d'anneau) à qui le donner.
+ */
+export function poserTraversee(brouillon: Brouillon, segment: Segment): { brouillon: Brouillon; branche: string; remplace: boolean } | null {
+  const milieu: LonLat = [(segment[0][0] + segment[1][0]) / 2, (segment[0][1] + segment[1][1]) / 2]
+  const repere = repereLocal(milieu)
+  const distance = (p: LonLat) => Math.hypot(...repere.versXY(p))
+  let proche: { branche: Branche; distance: number } | null = null
+  for (const b of brouillon.branches) {
+    if (b.troncon) continue
+    const points = b.voies.length ? b.voies.map((v) => v.geom[0]) : (b.geom ?? [])
+    for (const p of points) {
+      const d = distance(p)
+      if (!proche || d < proche.distance) proche = { branche: b, distance: d }
+    }
+  }
+  if (!proche) return null
+  const { branche } = proche
+  return {
+    brouillon: surBranche(brouillon, branche.code, (b) => ({ ...b, traversee: segment })),
+    branche: branche.code,
+    remplace: branche.traversee != null,
+  }
+}
+
+export function retirerTraversee(brouillon: Brouillon, code: string): Brouillon {
+  return surBranche(brouillon, code, (b) => ({ ...b, traversee: null }))
 }
 
 /** Ajoute un passage piéton proposé en travers de la branche, ou le retire. */

@@ -38,12 +38,16 @@ import { useProjection } from './projection'
  */
 export type ModeEdition = 'selection' | 'ajuster' | 'connecter' | 'feux' | 'pieton' | 'noeud'
 
+/** Outil « pieton » : glisser un passage (ou ses bouts), en tracer un, ou en retirer un d'un clic. */
+export type SousOutilPieton = 'deplacer' | 'tracer' | 'supprimer'
+
 /** Élément du calque cliqué, avec la position du clic (pour y ancrer une popup). */
 export type ClicCalque =
   | { type: 'voie'; cle: string; position: LonLat }
   | { type: 'connexion'; de: string; vers: string; position: LonLat }
   | { type: 'branche'; code: string; position: LonLat }
   | { type: 'noeud'; code: string; position: LonLat }
+  | { type: 'passage'; branche: string; position: LonLat }
 
 /** Feu du carrefour, déplaçable en mode « feux » pour le poser sur son mât. */
 export interface FeuPlacable {
@@ -68,6 +72,8 @@ interface Props {
   anneau: Anneau | null
   /** null : dessin seul, sans poignées ni clics. */
   mode: ModeEdition | null
+  /** Sous-outil de l'outil « pieton ». */
+  sousOutilPieton?: SousOutilPieton
   /** Connexions à mettre en avant (« de>vers »), par exemple celles de la ligne de feux active. */
   surlignees?: ReadonlySet<string>
   /** Lecture d'un programme : couleur du feu de chaque connexion (« de>vers ») et passage piéton. */
@@ -75,6 +81,8 @@ interface Props {
   onDeplacer: (poignee: PoigneeModele, position: LonLat) => void
   /** Ajoute la connexion, ou la retire si elle existe. */
   onConnecter: (de: string, vers: string) => void
+  /** Passage piéton tracé par un glisser sur la carte (sous-outil « tracer »). */
+  onTracerPassage?: (segment: [LonLat, LonLat]) => void
   /** Feux physiques du carrefour, à poser sur leur mât en mode « feux ». */
   feuxPlacables: FeuPlacable[]
   /** Pose le feu (ou le remet à sa position OSM : null) ; l'aperçu reste jusqu'à la fin de la promesse. */
@@ -101,16 +109,20 @@ const COULEUR_NOEUD = '#38bdf8'
 const DEPLACEMENT_NOEUD_MIN_M = 0.3
 const VIOLET_PASSAGE = '#7d3cb4'
 
-type Survol = { type: 'voie'; cle: string } | { type: 'connexion'; cle: string } | null
+type Survol = { type: 'voie'; cle: string } | { type: 'connexion'; cle: string } | { type: 'passage'; branche: string } | null
 
 type Glisse =
   | { type: 'poignee'; poignee: PoigneeModele; depart: LonLat; position: LonLat }
   /** Voies choisies glissées par leur corps ; `retirer` : Maj+clic sans bouger retire `cle` du choix. */
   | { type: 'voies'; cle: string; poignee: PoigneeModele & { role: 'voies' }; position: LonLat; retirer: boolean }
   | { type: 'connexion'; de: string; position: LonLat; cible: string | null }
+  /** Passage piéton en cours de tracé, du point d'appui au pointeur. */
+  | { type: 'trace'; depart: LonLat; position: LonLat }
   /** `enregistrement` : lâché, en attente de l'API (le feu reste affiché à sa nouvelle place). */
   | { type: 'feu'; id: string; depart: LonLat; position: LonLat; enregistrement: boolean }
 
+/** En dessous (m), un tracé de passage piéton est un clic égaré : rien n'est créé. */
+const LONGUEUR_PASSAGE_MIN_M = 2
 /** En dessous (m), un glisser de feu est un simple clic : rien n'est enregistré. */
 const DEPLACEMENT_FEU_MIN_M = 0.2
 const COULEUR_FEU: Record<TypeFeu, string> = { vehicule: '#e0561e', pieton: '#1f8a4c' }
@@ -124,10 +136,12 @@ export function CalqueCarrefour(props: Props) {
     connexions,
     anneau,
     mode,
+    sousOutilPieton = 'deplacer',
     surlignees,
     feux,
     onDeplacer,
     onConnecter,
+    onTracerPassage,
     feuxPlacables,
     onPlacerFeu,
     onApercuFeu,
@@ -175,7 +189,7 @@ export function CalqueCarrefour(props: Props) {
     }
     let appui: XY | null = null
     const relayerAppui = (e: globalThis.MouseEvent) => {
-      if (e.button !== 0 || (e.target as Element).closest('.calque-poignee, .calque-voie.deplacable')) return
+      if (e.button !== 0 || (e.target as Element).closest('.calque-poignee, .calque-voie.deplacable, .calque-passage.deplacable, .calque-zone-trace')) return
       appui = [e.clientX, e.clientY]
       canvas.dispatchEvent(new globalThis.MouseEvent('mousedown', e))
     }
@@ -261,7 +275,8 @@ export function CalqueCarrefour(props: Props) {
     return lonLat(e.clientX - cadre.left, e.clientY - cadre.top)
   }
 
-  const cliquable = mode === 'selection' || mode === 'pieton'
+  const cliquable = mode === 'selection'
+  const pieton = mode === 'pieton' ? sousOutilPieton : null
   const positionClic = (e: MouseEvent<SVGElement>): LonLat => {
     const cadre = (e.currentTarget.ownerSVGElement ?? e.currentTarget).getBoundingClientRect()
     return lonLat(e.clientX - cadre.left, e.clientY - cadre.top)
@@ -309,7 +324,11 @@ export function CalqueCarrefour(props: Props) {
       const { poignee, depart, position } = glisse
       const immobile = Math.hypot(...repereLocal(depart).versXY(position)) < DEPLACEMENT_NOEUD_MIN_M
       if (poignee.role === 'noeud' && immobile) onClic?.({ type: 'noeud', code: poignee.code, position })
-      else onDeplacer(poignee, position)
+      else if (!(poignee.role === 'passage' && immobile)) onDeplacer(poignee, position)
+    }
+    if (glisse?.type === 'trace') {
+      const { depart, position } = glisse
+      if (Math.hypot(...repereLocal(depart).versXY(position)) >= LONGUEUR_PASSAGE_MIN_M) onTracerPassage?.([depart, position])
     }
     if (glisse?.type === 'voies') {
       const { cle, poignee, position, retirer } = glisse
@@ -347,6 +366,15 @@ export function CalqueCarrefour(props: Props) {
     onPointerUp: terminer,
     onPointerCancel: () => setGlisse(null),
   })
+
+  // Sous-outil « tracer » : appui sur la carte, glisser jusqu'à l'autre trottoir.
+  const commencerTrace = (e: PointerEvent<SVGElement>) => {
+    if (e.button !== 0 || glisse) return
+    e.stopPropagation()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    const depart = positionPointeur(e)
+    setGlisse({ type: 'trace', depart, position: depart })
+  }
 
   // ── Poignées selon le mode ──
   const poignees: Array<{ cle: string; centre: XY; rayon: number; forme?: FormePoignee; couleur: string; vide: boolean; etat: EtatPoignee; titre: string; gestes?: ReturnType<typeof gestes> }> = []
@@ -397,22 +425,25 @@ export function CalqueCarrefour(props: Props) {
         })
       }
     }
-    if (mode === 'ajuster') {
-      for (const b of apercu.branches) {
-        if (!b.traversee) continue
-        for (const extremite of [0, 1] as const) {
-          const poignee: PoigneeModele = { role: 'traversee', branche: b.code, extremite }
-          poignees.push({
-            cle: `passage-${b.code}:${extremite}`,
-            centre: px(b.traversee[extremite]),
-            rayon: 6,
-            couleur: VIOLET_PASSAGE,
-            vide: false,
-            etat: 'normale',
-            titre: `Passage piéton ${b.code} : glisser pour le caler sur le marquage`,
-            gestes: gestes(poignee, b.traversee[extremite]),
-          })
-        }
+  }
+  if (pieton === 'deplacer') {
+    for (const b of apercu.branches) {
+      if (!b.traversee) continue
+      for (const extremite of [0, 1] as const) {
+        const poignee: PoigneeModele = { role: 'traversee', branche: b.code, extremite }
+        poignees.push({
+          cle: `passage-${b.code}:${extremite}`,
+          centre: px(b.traversee[extremite]),
+          rayon: 6,
+          couleur: VIOLET_PASSAGE,
+          vide: false,
+          etat:
+            glisse?.type === 'poignee' && glisse.poignee.role === 'traversee' && glisse.poignee.branche === b.code && glisse.poignee.extremite === extremite
+              ? 'active'
+              : 'normale',
+          titre: `Passage piéton ${b.code} : glisser ce bout jusqu’au trottoir`,
+          gestes: gestes(poignee, b.traversee[extremite]),
+        })
       }
     }
   }
@@ -482,15 +513,44 @@ export function CalqueCarrefour(props: Props) {
           ),
       )}
 
-      {apercu.branches.map(
-        (b) => b.traversee && (
+      {apercu.branches.map((b) => {
+        if (!b.traversee) return null
+        const depart = b.traversee
+        const commun = { segment: segmentPx(depart), largeur: largeurPassage, feu: feux ? (feux.traversees.get(b.code) ?? 'libre') : undefined }
+        if (pieton === 'deplacer') {
+          return (
             <PassagePieton
               key={`passage-${b.code}`}
-              segment={segmentPx(b.traversee)}
-              largeur={largeurPassage}
-              feu={feux ? (feux.traversees.get(b.code) ?? 'libre') : undefined}
+              {...commun}
+              etat="deplacable"
+              titre={`Passage piéton ${b.code} : glisser pour le déplacer`}
+              onPointerDown={(e) => {
+                if (e.button !== 0) return
+                const position = positionPointeur(e)
+                commencer({ role: 'passage', branche: b.code, depart: position }, position)(e)
+              }}
+              onPointerMove={suivre}
+              onPointerUp={terminer}
+              onPointerCancel={() => setGlisse(null)}
             />
-          ),
+          )
+        }
+        if (pieton === 'supprimer') {
+          return (
+            <PassagePieton
+              key={`passage-${b.code}`}
+              {...commun}
+              etat={survol?.type === 'passage' && survol.branche === b.code ? 'a-retirer' : 'retirable'}
+              titre={`Passage piéton ${b.code} : cliquer pour le retirer`}
+              onSurvol={(actif) => setSurvol(actif ? { type: 'passage', branche: b.code } : null)}
+              onClic={(e) => onClic?.({ type: 'passage', branche: b.code, position: positionClic(e) })}
+            />
+          )
+        }
+        return <PassagePieton key={`passage-${b.code}`} {...commun} />
+      })}
+      {glisse?.type === 'trace' && (
+        <PassagePieton segment={[px(glisse.depart), px(glisse.position)]} largeur={largeurPassage} etat="trace" />
       )}
 
       {[...voies].map(([cle, voie]) => (
@@ -590,6 +650,20 @@ export function CalqueCarrefour(props: Props) {
           )
         )
       })}
+
+      {pieton === 'tracer' && (
+        <rect
+          className="calque-zone-trace"
+          x={-1e5}
+          y={-1e5}
+          width={2e5}
+          height={2e5}
+          onPointerDown={commencerTrace}
+          onPointerMove={suivre}
+          onPointerUp={terminer}
+          onPointerCancel={() => setGlisse(null)}
+        />
+      )}
 
       {poignees.map(({ cle, gestes: g, ...poignee }) => (
         <Poignee key={cle} {...poignee} {...g} />

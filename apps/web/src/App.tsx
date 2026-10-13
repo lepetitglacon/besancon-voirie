@@ -158,6 +158,7 @@ function App() {
     connexions: [],
     anneau: null,
     mode: null,
+    sousOutilPieton: 'deplacer',
     feuxSurlignes: [],
     connexionsSurlignees: [],
     feux: null,
@@ -183,6 +184,10 @@ function App() {
   )
   const connecter = useCallback<ConfigurationCarrefourHandle['connecter']>(
     (de, vers) => panneauConfiguration.current?.connecter(de, vers),
+    [],
+  )
+  const tracerPassage = useCallback<ConfigurationCarrefourHandle['tracerPassage']>(
+    (segment) => panneauConfiguration.current?.tracerPassage(segment),
     [],
   )
   const dessinerZoneIa = useCallback<ConfigurationCarrefourHandle['dessinerZoneIa']>(
@@ -523,6 +528,7 @@ function App() {
           onDeplacerPointMesure={mesures.deplacer}
           onDeplacerPoignee={deplacerPoignee}
           onConnecter={connecter}
+          onTracerPassage={tracerPassage}
           onDessinerZoneIa={dessinerZoneIa}
           onPlacerFeu={placerFeu}
         >

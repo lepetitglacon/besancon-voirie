@@ -231,8 +231,8 @@ Sur la **photo aérienne** (fond de carte « Satellite »), l'éditeur dessine :
 - les connexions en courbes de Bézier, de la couleur de leur voie de départ ;
 - les flèches déduites et le code de chaque branche.
 
-- **✥ Ajuster les voies** (outil Voie, <kbd>L</kbd>) : faire glisser les extrémités des voies et
-  des passages piétons pour les caler sur le marquage de la photo. Glisser le corps d'une voie la
+- **✥ Ajuster les voies** (outil Voie, <kbd>L</kbd>) : faire glisser les extrémités des voies
+  pour les caler sur le marquage de la photo. Glisser le corps d'une voie la
   déplace entière ; <kbd>Maj</kbd>+clic ajoute une voie au choix (ou l'en retire), et glisser
   l'une des voies choisies les déplace toutes ensemble. Un clic sur la carte vide le choix. Les
   voies d'un tronçon d'anneau suivent leurs nœuds et ne se déplacent pas ainsi.
@@ -241,6 +241,19 @@ Sur la **photo aérienne** (fond de carte « Satellite »), l'éditeur dessine :
   quitte, un carré (femelle) là où elle y entre. Une liaison va donc toujours d'un rond (bout
   côté carrefour d'une entrante) à un carré (bout côté carrefour d'une sortante). Les poignées gardent ces formes en mode « Ajuster ». Pendant le geste, les voies sortantes s'allument et la plus proche est accrochée
   (élastique vert). Refaire le même geste, ou cliquer sur une courbe, retire la connexion.
+- **▦ Passages piétons** (outil Piéton, <kbd>P</kbd>) : une petite barre de sous-outils
+  s'ouvre au-dessus de la barre d'outils.
+  - *Déplacer* : glisser un passage le déplace entier, glisser l'un de ses bouts l'étire
+    jusqu'au trottoir.
+  - *Tracer* : glisser sur la carte d'un trottoir à l'autre. Le passage revient à la branche
+    dont les voies (bout côté carrefour) sont les plus proches de son milieu, et remplace son
+    passage si elle en avait un : une branche n'a qu'un passage piéton. Un tracé de moins de
+    2 m est ignoré.
+  - *Retirer* : un clic sur un passage le retire.
+
+  Dans cet outil, les voies et les liaisons ne prennent plus les clics : le passage est
+  toujours atteignable, même sous une courbe. La popup d'une branche (outil Sélection) garde la
+  case « passage piéton », qui pose le passage proposé.
 - Survoler une voie met en avant ses connexions. Pendant un ajustement, les voies et courbes
   suivent le pointeur en direct.
 - Dans l'onglet des lignes, les connexions de la ligne active sont mises en avant.

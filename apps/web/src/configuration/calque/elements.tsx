@@ -49,14 +49,36 @@ export function Voie({ segment, largeur, couleur, sortante, etat, interactive, d
 /** Couleur du feu qui commande un élément, pendant la lecture d'un programme ; « libre » : aucune ligne. */
 export type EtatFeu = 'vert' | 'jaune' | 'rouge' | 'libre'
 
-export function PassagePieton({ segment, largeur, feu }: { segment: [XY, XY]; largeur: number; feu?: EtatFeu }) {
+export type EtatPassage = 'normale' | 'deplacable' | 'retirable' | 'a-retirer' | 'trace'
+
+interface PropsPassage {
+  segment: [XY, XY]
+  largeur: number
+  feu?: EtatFeu
+  etat?: EtatPassage
+  titre?: string
+  onSurvol?: (survol: boolean) => void
+  onClic?: (e: MouseEvent<SVGElement>) => void
+  onPointerDown?: (e: PointerEvent<SVGElement>) => void
+  onPointerMove?: (e: PointerEvent<SVGElement>) => void
+  onPointerUp?: (e: PointerEvent<SVGElement>) => void
+  onPointerCancel?: () => void
+}
+
+export function PassagePieton({ segment, largeur, feu, etat = 'normale', titre, onSurvol, onClic, ...pointeur }: PropsPassage) {
   return (
     <path
-      className={classes('calque-passage', feu && `feu-${feu}`)}
+      className={classes('calque-passage', feu && `feu-${feu}`, etat !== 'normale' && etat)}
       d={d(segment)}
       strokeWidth={largeur}
       strokeDasharray={`${largeur / 5} ${largeur / 5}`}
-    />
+      onPointerEnter={onSurvol && (() => onSurvol(true))}
+      onPointerLeave={onSurvol && (() => onSurvol(false))}
+      onClick={onClic}
+      {...pointeur}
+    >
+      {titre && <title>{titre}</title>}
+    </path>
   )
 }
 

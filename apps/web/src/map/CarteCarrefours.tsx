@@ -101,6 +101,7 @@ interface Props {
   /** Glisser-déposer dans l'éditeur de configuration. */
   onDeplacerPoignee: (poignee: Poignee, position: LonLat) => void
   onConnecter: (de: string, vers: string) => void
+  onTracerPassage: (segment: [LonLat, LonLat]) => void
   /** Zone de la photo IA tracée sur la carte : [ouest, sud, est, nord]. */
   onDessinerZoneIa: (emprise: EmpriseIa) => void
   /** Pose un feu sur son mât, ou le remet à sa position OSM (null). */
@@ -414,6 +415,8 @@ export function CarteCarrefours(props: Props) {
           feux={configuration.feux}
           onDeplacer={props.onDeplacerPoignee}
           onConnecter={props.onConnecter}
+          onTracerPassage={props.onTracerPassage}
+          sousOutilPieton={configuration.sousOutilPieton}
           feuxPlacables={feuxPlacables}
           onPlacerFeu={props.onPlacerFeu}
           onApercuFeu={setApercuFeu}

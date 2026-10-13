@@ -87,6 +87,46 @@ body {
   opacity: 0.6;
 }
 
+/* Outil Piéton : les voies et les liaisons, dessinées par-dessus, ne prennent plus les clics. */
+.calque-carrefour.pieton .calque-voie,
+.calque-carrefour.pieton .calque-courbe .zone-clic {
+  pointer-events: none;
+}
+
+.calque-passage.deplacable {
+  pointer-events: stroke;
+  cursor: move;
+  opacity: 0.85;
+}
+
+.calque-carrefour.pieton .calque-passage.deplacable:hover {
+  opacity: 1;
+}
+
+.calque-passage.retirable {
+  pointer-events: stroke;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.calque-passage.a-retirer {
+  pointer-events: stroke;
+  cursor: pointer;
+  stroke: var(--chakra-colors-feu-rouge);
+  opacity: 0.9;
+}
+
+.calque-passage.trace {
+  opacity: 0.9;
+}
+
+/* Outil Piéton, sous-outil Tracer : toute la carte reçoit le glisser (la molette zoome toujours). */
+.calque-zone-trace {
+  fill: transparent;
+  pointer-events: all;
+  cursor: crosshair;
+}
+
 /* Giratoire : tronçons d'anneau entre les nœuds, sous les voies et les liaisons. */
 .calque-troncon {
   fill: none;

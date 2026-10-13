@@ -39,9 +39,9 @@ import { Aide, BandeauMode, BarreOutils, HAUT_BANDEAU, CarteEnTete, Chiffre, Ind
 import { demanderNotificationsSysteme, enFile, useAnalysesIa } from './analysesIa'
 import { lireBrouillons, modifierBrouillons, useBrouillonsCarrefour, type ModificationsBrouillons } from './brouillons'
 import { Chrono } from './FileIa'
-import type { ClicCalque, ModeEdition } from './calque/CalqueCarrefour'
+import type { ClicCalque, ModeEdition, SousOutilPieton } from './calque/CalqueCarrefour'
 import type { EtatFeu } from './calque/elements'
-import { basculerConnexion, basculerTraversee, deplacerPoignee, poserNoeud, type Brouillon, type Poignee, voiesDe } from './modele'
+import { basculerConnexion, deplacerPoignee, poserNoeud, poserTraversee, retirerTraversee, type Brouillon, type Poignee, voiesDe } from './modele'
 import { OngletGraphe, type Scenario } from './OngletGraphe'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
 import { OngletProgramme } from './OngletProgramme'
@@ -74,6 +74,7 @@ export interface AffichageConfiguration {
   anneau: Anneau | null
   /** Outil actif sur le calque ; null : dessin seul. */
   mode: ModeEdition | null
+  sousOutilPieton: SousOutilPieton
   feuxSurlignes: string[]
   /** Connexions de la ligne de feux active (« de>vers »), mises en avant sur la carte. */
   connexionsSurlignees: string[]
@@ -103,17 +104,35 @@ const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>>
   ajuster: {
     titre: 'Caler les voies',
     aides: [
-      'Glisser les extrémités des voies et des passages sur le marquage de la photo',
+      'Glisser les extrémités des voies sur le marquage de la photo',
       'Glisser une voie pour la déplacer ; Maj+clic pour en déplacer plusieurs',
     ],
   },
   connecter: { titre: 'Relier les voies', aides: ['Glisser d’une voie entrante vers une voie sortante', 'Clic sur une liaison : la retirer'] },
   feux: { titre: 'Poser les feux', aides: ['Glisser chaque feu jusqu’à son mât', 'Clic sur le point creux : position OSM'] },
-  pieton: { titre: 'Passages piétons', aides: ['Clic sur une voie ou un code de branche : ajouter ou retirer son passage'] },
   noeud: {
     titre: 'Nœuds de l’anneau',
     aides: ['Clic sur la carte : poser un nœud là où une rue (ou le tram) touche l’anneau', 'Glisser un nœud : le caler ; clic : ses réglages'],
   },
+}
+
+/** Hauteur de la barre d'outils du bas et de l'écart au-dessus : la barre des sous-outils s'y pose. */
+const HAUTEUR_BARRE_OUTILS = '66px'
+
+/** Sous-outils de l'outil Piéton, dans la petite barre au-dessus de la barre d'outils. */
+const SOUS_OUTILS_PIETON: Array<{ valeur: SousOutilPieton; glyphe: string; libelle: string }> = [
+  { valeur: 'deplacer', glyphe: '✥', libelle: 'Déplacer' },
+  { valeur: 'tracer', glyphe: '✎', libelle: 'Tracer' },
+  { valeur: 'supprimer', glyphe: '⌫', libelle: 'Retirer' },
+]
+
+const CONSIGNES_PIETON: Record<SousOutilPieton, { titre: string; aides: string[] }> = {
+  deplacer: { titre: 'Déplacer les passages', aides: ['Glisser un passage pour le déplacer', 'Glisser un bout jusqu’au trottoir'] },
+  tracer: {
+    titre: 'Tracer un passage',
+    aides: ['Glisser d’un trottoir à l’autre', 'Il revient à la branche la plus proche, et remplace son passage'],
+  },
+  supprimer: { titre: 'Retirer un passage', aides: ['Clic sur un passage : le retirer'] },
 }
 
 /** Hauteur du panneau bas « Plan de feux », en % de la fenêtre. */
@@ -149,6 +168,8 @@ export interface ConfigurationCarrefourHandle {
   clicCarte: (position: LonLat) => void
   deplacerPoignee: (poignee: Poignee, position: LonLat) => void
   connecter: (de: string, vers: string) => void
+  /** Passage piéton tracé sur la carte (outil Piéton, sous-outil Tracer). */
+  tracerPassage: (segment: [LonLat, LonLat]) => void
   dessinerZoneIa: (emprise: EmpriseIa) => void
   executer: (action: ActionConfiguration) => void
 }
@@ -186,6 +207,7 @@ const focusLibre = () => {
 export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneauBas, onModifierFeux, onSupprimer, onFermer }: Props) {
   const queryClient = useQueryClient()
   const [outil, setOutil] = useState<OutilCarte>('selection')
+  const [sousOutilPieton, setSousOutilPieton] = useState<SousOutilPieton>('deplacer')
   const [popup, setPopup] = useState<Popup | null>(null)
   const [panneauOuvert, setPanneauOuvert] = useState(false)
   const [ongletBas, setOngletBas] = useState<Onglet>('programme')
@@ -491,6 +513,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         connexions: configuration.connexions,
         anneau: configuration.anneau,
         mode: cadrage ? null : outil,
+        sousOutilPieton,
         feuxSurlignes,
         connexionsSurlignees,
         feux,
@@ -504,6 +527,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       configuration.connexions,
       configuration.anneau,
       outil,
+      sousOutilPieton,
       cadrage,
       feuxSurlignes,
       connexionsSurlignees,
@@ -621,9 +645,18 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       if (outil === 'selection') setPopup({ type: 'feu', feu, position })
     },
     clicCalque: (clic) => {
-      if (outil !== 'pieton') return setPopup(clic)
-      const code = clic.type === 'voie' ? clic.cle.split(':')[0] : clic.type === 'branche' ? clic.code : undefined
-      if (code) setBrouillonBranches(basculerTraversee(configuration, code, centre))
+      if (clic.type === 'passage') return setBrouillonBranches(retirerTraversee(configuration, clic.branche))
+      setPopup(clic)
+    },
+    tracerPassage: (segment) => {
+      const pose = poserTraversee(configuration, segment)
+      if (!pose) {
+        return notifications.create({ type: 'warning', title: 'Aucune branche', description: 'Ajoutez d’abord les branches du carrefour.' })
+      }
+      setBrouillonBranches(pose.brouillon)
+      if (pose.remplace) {
+        notifications.create({ type: 'info', title: `Passage de ${pose.branche} remplacé`, description: 'Une branche n’a qu’un passage piéton.' })
+      }
     },
     clicCarte: (position) => {
       if (outil === 'noeud' && giratoire) return setBrouillonBranches(poserNoeud(configuration, position))
@@ -718,7 +751,9 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
     ? { titre: 'Zone de la photo IA', aides: ['Glisser sur la carte pour dessiner la zone : l’IA ne voit rien en dehors', 'Entrée : lancer'] }
     : onglet === 'lignes' && ligneActive
       ? { titre: `Feux de ${ligneActive}`, aides: ['Clic sur un feu du carrefour : l’ajouter ou le retirer'] }
-      : CONSIGNES[outil]
+      : outil === 'pieton'
+        ? CONSIGNES_PIETON[sousOutilPieton]
+        : CONSIGNES[outil]
 
   return (
     <>
@@ -852,6 +887,28 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
             </Kbd>,
           ]}
         />
+      )}
+
+      {/* Sous-outils de l'outil actif, sur une petite carte au-dessus de la barre d'outils. */}
+      {outil === 'pieton' && !cadrage && (
+        <BarreOutils.Root
+          position="fixed"
+          left="50%"
+          transform="translateX(-50%)"
+          bottom={panneauOuvert ? `calc(${hauteurPanneau} + 16px + ${HAUTEUR_BARRE_OUTILS})` : `calc(22px + ${HAUTEUR_BARRE_OUTILS})`}
+          zIndex="3"
+          aria-label="Outils des passages piétons"
+        >
+          {SOUS_OUTILS_PIETON.map((o) => (
+            <BarreOutils.Outil
+              key={o.valeur}
+              glyphe={o.glyphe}
+              libelle={o.libelle}
+              actif={sousOutilPieton === o.valeur}
+              onClick={() => setSousOutilPieton(o.valeur)}
+            />
+          ))}
+        </BarreOutils.Root>
       )}
 
       <BarreOutils.Root
