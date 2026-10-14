@@ -122,22 +122,23 @@ function Demarrage({ onEmprise }: { onEmprise: (bbox: Bbox) => void }) {
   useEffect(() => {
     const carte = current?.getMap()
     if (!carte) return
-    // En bas à gauche : le bas à droite accueille la carte de suivi.
+    // En bas à gauche : le bas à droite accueille les contrôles et la carte de suivi. Repliable
+    // d'origine, on la garde dépliée : MapLibre la replie au clic sur « i » et au premier glisser
+    // de la carte, on la rouvre aussitôt.
     const attribution = new AttributionControl({ compact: true })
     carte.addControl(attribution, 'bottom-left')
-    // Repliée (bouton « i ») : dépliée, elle passerait sous la barre d'outils. MapLibre la déplie
-    // quand arrivent les premières attributions des sources : on la replie à ce moment-là.
     const conteneur = carte.getContainer().querySelector('.maplibregl-ctrl-attrib')
-    const replier = new MutationObserver(() => {
-      if (!conteneur?.classList.contains('maplibregl-compact-show')) return
-      conteneur.classList.remove('maplibregl-compact-show')
-      replier.disconnect()
+    const deplier = () => conteneur?.classList.add('maplibregl-compact-show')
+    deplier()
+    const garderDepliee = new MutationObserver(() => {
+      if (!conteneur?.classList.contains('maplibregl-compact-show')) deplier()
     })
-    if (conteneur) replier.observe(conteneur, { attributes: true, attributeFilter: ['class'] })
+    if (conteneur) garderDepliee.observe(conteneur, { attributes: true, attributeFilter: ['class'] })
     onEmprise(emprise(carte))
     return () => {
-      replier.disconnect()
-      carte.removeControl(attribution)
+      garderDepliee.disconnect()
+      // Carte démontée (page Design system) : MapLibre a déjà retiré ses contrôles.
+      if (carte.hasControl(attribution)) carte.removeControl(attribution)
     }
   }, [current, onEmprise])
   return null

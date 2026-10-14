@@ -9,25 +9,43 @@ import { recettesProjet } from './recettes-projet'
  */
 const config = defineConfig({
   globalCss: {
-    'html, body, #root': { height: '100%', margin: 0 },
-    html: { colorPalette: 'brand', bg: 'bg.canvas' },
-    body: { textStyle: 'sm' },
+    // body à part : sa hauteur dépend du zoom de l'interface (plus bas).
+    'html, #root': { height: '100%', margin: 0 },
+    html: {
+      colorPalette: 'brand',
+      bg: 'bg.canvas',
+      // Réglages d'accessibilité (src/accessibilite), posés sur <html>.
+      '--echelle-texte': '1',
+      '--echelle-ui': '1',
+      // Taille de la fenêtre dans l'interface zoomée : `zoom` multiplie aussi les vh et vw.
+      '--ecran-h': 'calc(100vh / var(--echelle-ui))',
+      '--ecran-w': 'calc(100vw / var(--echelle-ui))',
+    },
+    // Zoom de l'interface : tout le body, portails compris. La carte annule ce zoom (.carte-plein-ecran).
+    // minHeight : Chakra le fixe à la hauteur de la fenêtre, que le zoom agrandirait (ascenseur).
+    body: { textStyle: 'sm', margin: 0, zoom: 'var(--echelle-ui)', height: 'var(--ecran-h)', minHeight: 0 },
+    'html[data-espacement] body': { letterSpacing: '0.05em', wordSpacing: '0.15em' },
   },
   theme: {
     tokens: {
+      // --police : police choisie dans les réglages d'accessibilité.
       fonts: {
-        body: { value: "'IBM Plex Sans', system-ui, sans-serif" },
-        heading: { value: "'IBM Plex Sans', system-ui, sans-serif" },
+        body: { value: "var(--police, 'IBM Plex Sans'), system-ui, sans-serif" },
+        heading: { value: "var(--police, 'IBM Plex Sans'), system-ui, sans-serif" },
         mono: { value: "'IBM Plex Mono', ui-monospace, monospace" },
       },
-      // Interface dense : la maquette travaille en 11–15 px.
+      // Interface dense : la maquette travaille en 11–15 px. Multipliées par le réglage de
+      // taille du texte (src/accessibilite), comme les interlignes des textStyles plus bas.
       fontSizes: {
-        '2xs': { value: '11px' },
-        xs: { value: '12px' },
-        sm: { value: '13px' },
-        md: { value: '14px' },
-        lg: { value: '15px' },
-        xl: { value: '17px' },
+        '2xs': { value: 'calc(11px * var(--echelle-texte))' },
+        xs: { value: 'calc(12px * var(--echelle-texte))' },
+        sm: { value: 'calc(13px * var(--echelle-texte))' },
+        md: { value: 'calc(14px * var(--echelle-texte))' },
+        lg: { value: 'calc(15px * var(--echelle-texte))' },
+        xl: { value: 'calc(17px * var(--echelle-texte))' },
+        '2xl': { value: 'calc(1.5rem * var(--echelle-texte))' },
+        '3xl': { value: 'calc(1.875rem * var(--echelle-texte))' },
+        '4xl': { value: 'calc(2.25rem * var(--echelle-texte))' },
       },
       radii: {
         barre: { value: '14px' },
@@ -153,9 +171,27 @@ const config = defineConfig({
       },
     },
     textStyles: {
+      // Interlignes de Chakra, suivant la taille du texte.
+      '2xs': { value: { fontSize: '2xs', lineHeight: 'calc(0.75rem * var(--echelle-texte))' } },
+      xs: { value: { fontSize: 'xs', lineHeight: 'calc(1rem * var(--echelle-texte))' } },
+      sm: { value: { fontSize: 'sm', lineHeight: 'calc(1.25rem * var(--echelle-texte))' } },
+      md: { value: { fontSize: 'md', lineHeight: 'calc(1.5rem * var(--echelle-texte))' } },
+      lg: { value: { fontSize: 'lg', lineHeight: 'calc(1.75rem * var(--echelle-texte))' } },
+      xl: { value: { fontSize: 'xl', lineHeight: 'calc(1.875rem * var(--echelle-texte))' } },
+      '2xl': { value: { fontSize: '2xl', lineHeight: 'calc(2rem * var(--echelle-texte))' } },
+      '3xl': { value: { fontSize: '3xl', lineHeight: 'calc(2.375rem * var(--echelle-texte))' } },
+      '4xl': {
+        value: { fontSize: '4xl', lineHeight: 'calc(2.75rem * var(--echelle-texte))', letterSpacing: '-0.025em' },
+      },
+      label: { value: { fontSize: 'sm', lineHeight: 'calc(1.25rem * var(--echelle-texte))', fontWeight: 'medium' } },
       /** Libellé de section : « DURÉES », « CONFLITS (3) ». */
       overline: {
-        value: { fontSize: '2xs', lineHeight: '1rem', textTransform: 'uppercase', letterSpacing: '0.06em' },
+        value: {
+          fontSize: '2xs',
+          lineHeight: 'calc(1rem * var(--echelle-texte))',
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+        },
       },
       /** Valeurs chiffrées : durées, distances, coordonnées. */
       valeur: { value: { fontFamily: 'mono', fontSize: 'sm', fontVariantNumeric: 'tabular-nums' } },

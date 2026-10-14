@@ -29,8 +29,8 @@ export function CarteSuivi({ brouillons, ouvert, onReprendre, analyses, onOuvrir
     <Stack
       gap="3"
       w="300px"
-      maxW="calc(100vw - 24px)"
-      maxH="40vh"
+      maxW="calc(var(--ecran-w) - 24px)"
+      maxH="calc(var(--ecran-h) * 0.4)"
       overflowY="auto"
       p="12px 14px"
       bg="bg.panel"

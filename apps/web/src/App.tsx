@@ -8,6 +8,8 @@ import { useMap } from 'react-map-gl/maplibre'
 import { api } from './api'
 import { ChoixLignesBus } from './bus/ChoixLignesBus'
 import { CHOIX_LIGNES_BUS_DEFAUT, filtrerReseauBus, lignesBus, lignesMasquees, type ChoixLignesBus as Choix } from './bus/lignesBus'
+import { MenuSite } from './site/MenuSite'
+import { PagesSite } from './site/PagesSite'
 import { abandonnerBrouillons, useBrouillons, type BrouillonsCarrefour } from './configuration/brouillons'
 import { CarteSuivi } from './configuration/CarteSuivi'
 import { MENU_CONFIGURATION, type ActionConfiguration } from './configuration/actions'
@@ -30,6 +32,7 @@ import {
   MenuContextuel,
   Message,
   ModeCouleur,
+  PanneauOutil,
   Pastille,
   Section,
   Segments,
@@ -639,7 +642,7 @@ function App() {
         onChoisir={choisirMenu}
         onFermer={() => setEcranMenu(null)}
       />
-      <Box position="fixed" inset="0">
+      <Box position="fixed" inset="0" className="carte-plein-ecran">
         <CarteCarrefours
           carrefours={carrefours.data}
           afficherCarrefours={sumo ? false : mode !== 'brut' || brut.carrefours || edition !== null || configuration !== null}
@@ -760,7 +763,6 @@ function App() {
         mesures={mesures}
         onCentrer={centrerSur}
       />
-      <ListeMesures position="fixed" top={{ base: HAUT_BANDEAU, xl: '3' }} right="60px" zIndex="3" mesures={mesures} onCentrer={centrerSur} />
 
       {configuration ? (
         <ConfigurationCarrefour
@@ -789,7 +791,7 @@ function App() {
           left="3"
           zIndex="2"
           w="340px"
-          maxW="calc(100vw - 24px)"
+          maxW="calc(var(--ecran-w) - 24px)"
           surtitre={ficheTempsReel ? 'Temps réel' : 'Besançon Voirie'}
           titre={ficheTempsReel ? ficheTempsReel.carrefour.nom : 'Feux et trams en temps réel'}
           badges={
@@ -825,7 +827,7 @@ function App() {
             left="3"
             zIndex="2"
             w="340px"
-            maxW="calc(100vw - 24px)"
+            maxW="calc(var(--ecran-w) - 24px)"
             surtitre="Besançon Voirie"
             titre={
               outilZone
@@ -846,7 +848,7 @@ function App() {
             }
           >
             {outilZone && brouillonZone && (
-              <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted" maxH="calc(100vh - 200px)" overflowY="auto">
+              <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted" maxH="calc(var(--ecran-h) - 200px)" overflowY="auto">
                 <PanneauZoneOsm
                   zone={zoneOsm.data}
                   brouillon={brouillonZone}
@@ -948,7 +950,8 @@ function App() {
 
       {!tempsReel && !sumo && <CarteSuivi
         position="fixed"
-        right="3"
+        // À gauche des contrôles de la carte (36 px à 16 px du bord).
+        right="64px"
         bottom={configuration && panneauBasOuvert ? `calc(${hauteurPanneau} + 12px)` : '3'}
         zIndex="2"
         brouillons={brouillons}
@@ -958,130 +961,22 @@ function App() {
         onOuvrirAnalyse={ouvrirAnalyseIa}
       />}
 
-      {brutOuvert && (
-        // En haut à droite ; sous la barre des modes sur un écran étroit, où il la chevaucherait.
-        <Box position="fixed" top={{ base: HAUT_BANDEAU, xl: '3' }} right="60px" zIndex="3">
-          <CarteEnTete
-            w="320px"
-            maxW="calc(100vw - 24px)"
-            maxH={{ base: `calc(100vh - ${HAUT_BANDEAU} - 12px)`, xl: 'calc(100vh - 24px)' }}
-            surtitre="Données brutes"
-            titre={
-              <HStack gap="1.5">
-                <Text>Couches</Text>
-                <Button size="2xs" variant="ghost" ms="auto" onClick={() => setPanneauBrut(false)}>
-                  Fermer
-                </Button>
-              </HStack>
-            }
-          >
-            <Box mt="2" minH="0" overflowY="auto">
-              <Stack gap="2">
-                <Bascule coche={brut.carrefours} onChange={basculer('carrefours')}>
-                  Carrefours à feux{carrefours.data && ` (${carrefours.data.features.length} dans la vue)`}
-                </Bascule>
-                <Bascule coche={brut.lignes} onChange={basculer('lignes')}>
-                  Tram : lignes (GTFS)
-                </Bascule>
-                <Bascule coche={brut.arrets} onChange={basculer('arrets')}>
-                  Tram : arrêts
-                </Bascule>
-                <Bascule coche={brut.rames} onChange={basculer('rames')}>
-                  Tram : rames, position estimée{enLigne !== undefined && ` (${enLigne} en ligne)`}
-                </Bascule>
-                <Bascule coche={brut.zones} onChange={basculer('zones')}>
-                  Tram : zones probables
-                </Bascule>
-                <Bascule coche={brut.pertes} onChange={basculer('pertes')}>
-                  Tram : temps perdu par tronçon
-                </Bascule>
-                {brut.pertes && (
-                  <Stack gap="2" ps="11">
-                    <HStack gap="1.5">
-                      <Selecteur
-                        size="xs"
-                        aria-label="Type de jour"
-                        valeur={creneau.typeJour}
-                        onChange={(valeur) => setCreneau((c) => ({ ...c, typeJour: valeur as TypeJour }))}
-                      >
-                        <option value="semaine">Semaine</option>
-                        <option value="samedi">Samedi</option>
-                        <option value="dimanche">Dimanche</option>
-                      </Selecteur>
-                      <Selecteur
-                        size="xs"
-                        aria-label="Heure"
-                        valeur={creneau.heure ?? ''}
-                        onChange={(valeur) => setCreneau((c) => ({ ...c, heure: valeur === '' ? null : Number(valeur) }))}
-                      >
-                        <option value="">Toute la journée</option>
-                        {Array.from({ length: 24 }, (_, h) => (
-                          <option key={h} value={h}>
-                            {h} h – {h + 1} h
-                          </option>
-                        ))}
-                      </Selecteur>
-                    </HStack>
-                    <HStack as="ul" rowGap="1" columnGap="2.5" wrap="wrap" listStyleType="none" textStyle="xs">
-                      {PALIERS_PERTE.map((palier) => (
-                        <HStack as="li" key={palier.libelle} gap="1">
-                          <Pastille forme="trait" couleur={palier.couleur} />
-                          {palier.libelle}
-                        </HStack>
-                      ))}
-                    </HStack>
-                    <Aide>
-                      Durée habituelle moins durée quand ça roule bien.
-                      {historique.data && ` ${historique.data.troncons.length} tronçon(s) observé(s).`}
-                    </Aide>
-                  </Stack>
-                )}
-                {etatHistorique.data && (
-                  <Aide>
-                    Historique tram : {etatHistorique.data.passages.toLocaleString('fr-FR')} passage(s)
-                    {etatHistorique.data.premier &&
-                      ` depuis le ${new Date(etatHistorique.data.premier).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`}
-                    {!etatHistorique.data.collecteActive && ' · collecte arrêtée (TRAM_COLLECTE)'}
-                  </Aide>
-                )}
-                <Bascule coche={brut.busLignes} onChange={basculer('busLignes')}>
-                  Bus : lignes (GTFS)
-                </Bascule>
-                <Bascule coche={brut.busArrets} onChange={basculer('busArrets')}>
-                  Bus : arrêts
-                </Bascule>
-                <Bascule coche={brut.busRames} onChange={basculer('busRames')}>
-                  Bus : véhicules, position estimée{busEnLigne !== undefined && ` (${busEnLigne} en ligne)`}
-                </Bascule>
-                <Bascule coche={brut.busZones} onChange={basculer('busZones')}>
-                  Bus : zones probables
-                </Bascule>
-                {busAffiche && (
-                  <Stack gap="1" ps="11">
-                    {choixLignes}
-                  </Stack>
-                )}
-                {etatHistoriqueBus.data && (
-                  <Aide>
-                    Historique bus : {etatHistoriqueBus.data.passages.toLocaleString('fr-FR')} passage(s)
-                    {etatHistoriqueBus.data.premier &&
-                      ` depuis le ${new Date(etatHistoriqueBus.data.premier).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`}
-                    {!etatHistoriqueBus.data.collecteActive && ' · collecte arrêtée (BUS_COLLECTE)'}
-                    {' · tronçons regroupés par couple d’arrêts, toutes lignes confondues'}
-                  </Aide>
-                )}
-                {reseauBus.isError || busTempsReel.isError ? (
-                  <Message ton="erreur">Bus indisponibles : {(reseauBus.error ?? busTempsReel.error)?.message}</Message>
-                ) : null}
-              </Stack>
-            </Box>
-          </CarteEnTete>
-        </Box>
-      )}
-      {/* Colonne de droite : zoom (plus « nord » quand la carte est tournée), puis les panneaux. */}
-      <Stack position="fixed" top="4" right="4" zIndex="2" gap="3" align="flex-end">
+      {/* Menu du site en haut à droite. */}
+      <MenuSite position="fixed" top="4" right="4" zIndex="3" />
+      <PagesSite />
+
+      {/* Contrôles en bas à droite : zoom (plus « nord » quand la carte est tournée), puis les
+          panneaux. Au-dessus du panneau du bas quand il est ouvert. */}
+      <Stack
+        position="fixed"
+        bottom={configuration && panneauBasOuvert ? `calc(${hauteurPanneau} + 16px)` : '4'}
+        right="4"
+        zIndex="2"
+        gap="3"
+        align="flex-end"
+      >
         <ControleZoom />
-        <Popover.Root positioning={{ placement: 'left-start', gutter: 10 }}>
+        <Popover.Root positioning={{ placement: 'left-end', gutter: 10 }}>
           <Popover.Trigger asChild>
             <BoutonCarte libelle="Fond de carte et calques">
               <MapIcon />
@@ -1198,25 +1093,153 @@ function App() {
             </Popover.Positioner>
           </Portal>
         </Popover.Root>
-        <BoutonCarte
-          libelle="Mesures de distance"
-          actif={mesures.liste}
-          onClick={mesures.liste ? mesures.fermerListe : mesures.ouvrirListe}
+        <PanneauOutil
+          ouvert={mesures.liste}
+          bouton={
+            <BoutonCarte
+              libelle="Mesures de distance"
+              actif={mesures.liste}
+              onClick={mesures.liste ? mesures.fermerListe : mesures.ouvrirListe}
+            >
+              <Ruler />
+            </BoutonCarte>
+          }
         >
-          <Ruler />
-        </BoutonCarte>
+          <ListeMesures mesures={mesures} onCentrer={centrerSur} />
+        </PanneauOutil>
         {mode === 'brut' && (
-          <BoutonCarte
-            libelle="Couches des données brutes"
-            actif={brutOuvert}
-            onClick={() => {
-              if (brutOuvert) return setPanneauBrut(false)
-              mesures.fermerListe()
-              setPanneauBrut(true)
-            }}
+          <PanneauOutil
+            ouvert={brutOuvert}
+            bouton={
+              <BoutonCarte
+                libelle="Couches des données brutes"
+                actif={brutOuvert}
+                onClick={() => {
+                  if (brutOuvert) return setPanneauBrut(false)
+                  mesures.fermerListe()
+                  setPanneauBrut(true)
+                }}
+              >
+                <Layers />
+              </BoutonCarte>
+            }
           >
-            <Layers />
-          </BoutonCarte>
+              <CarteEnTete
+                w="320px"
+                maxW="calc(var(--ecran-w) - 24px)"
+                maxH="calc(var(--ecran-h) - 32px)"
+                surtitre="Données brutes"
+                titre={
+                  <HStack gap="1.5">
+                    <Text>Couches</Text>
+                    <Button size="2xs" variant="ghost" ms="auto" onClick={() => setPanneauBrut(false)}>
+                      Fermer
+                    </Button>
+                  </HStack>
+                }
+              >
+                <Box mt="2" minH="0" overflowY="auto">
+                  <Stack gap="2">
+                    <Bascule coche={brut.carrefours} onChange={basculer('carrefours')}>
+                      Carrefours à feux{carrefours.data && ` (${carrefours.data.features.length} dans la vue)`}
+                    </Bascule>
+                    <Bascule coche={brut.lignes} onChange={basculer('lignes')}>
+                      Tram : lignes (GTFS)
+                    </Bascule>
+                    <Bascule coche={brut.arrets} onChange={basculer('arrets')}>
+                      Tram : arrêts
+                    </Bascule>
+                    <Bascule coche={brut.rames} onChange={basculer('rames')}>
+                      Tram : rames, position estimée{enLigne !== undefined && ` (${enLigne} en ligne)`}
+                    </Bascule>
+                    <Bascule coche={brut.zones} onChange={basculer('zones')}>
+                      Tram : zones probables
+                    </Bascule>
+                    <Bascule coche={brut.pertes} onChange={basculer('pertes')}>
+                      Tram : temps perdu par tronçon
+                    </Bascule>
+                    {brut.pertes && (
+                      <Stack gap="2" ps="11">
+                        <HStack gap="1.5">
+                          <Selecteur
+                            size="xs"
+                            aria-label="Type de jour"
+                            valeur={creneau.typeJour}
+                            onChange={(valeur) => setCreneau((c) => ({ ...c, typeJour: valeur as TypeJour }))}
+                          >
+                            <option value="semaine">Semaine</option>
+                            <option value="samedi">Samedi</option>
+                            <option value="dimanche">Dimanche</option>
+                          </Selecteur>
+                          <Selecteur
+                            size="xs"
+                            aria-label="Heure"
+                            valeur={creneau.heure ?? ''}
+                            onChange={(valeur) => setCreneau((c) => ({ ...c, heure: valeur === '' ? null : Number(valeur) }))}
+                          >
+                            <option value="">Toute la journée</option>
+                            {Array.from({ length: 24 }, (_, h) => (
+                              <option key={h} value={h}>
+                                {h} h – {h + 1} h
+                              </option>
+                            ))}
+                          </Selecteur>
+                        </HStack>
+                        <HStack as="ul" rowGap="1" columnGap="2.5" wrap="wrap" listStyleType="none" textStyle="xs">
+                          {PALIERS_PERTE.map((palier) => (
+                            <HStack as="li" key={palier.libelle} gap="1">
+                              <Pastille forme="trait" couleur={palier.couleur} />
+                              {palier.libelle}
+                            </HStack>
+                          ))}
+                        </HStack>
+                        <Aide>
+                          Durée habituelle moins durée quand ça roule bien.
+                          {historique.data && ` ${historique.data.troncons.length} tronçon(s) observé(s).`}
+                        </Aide>
+                      </Stack>
+                    )}
+                    {etatHistorique.data && (
+                      <Aide>
+                        Historique tram : {etatHistorique.data.passages.toLocaleString('fr-FR')} passage(s)
+                        {etatHistorique.data.premier &&
+                          ` depuis le ${new Date(etatHistorique.data.premier).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`}
+                        {!etatHistorique.data.collecteActive && ' · collecte arrêtée (TRAM_COLLECTE)'}
+                      </Aide>
+                    )}
+                    <Bascule coche={brut.busLignes} onChange={basculer('busLignes')}>
+                      Bus : lignes (GTFS)
+                    </Bascule>
+                    <Bascule coche={brut.busArrets} onChange={basculer('busArrets')}>
+                      Bus : arrêts
+                    </Bascule>
+                    <Bascule coche={brut.busRames} onChange={basculer('busRames')}>
+                      Bus : véhicules, position estimée{busEnLigne !== undefined && ` (${busEnLigne} en ligne)`}
+                    </Bascule>
+                    <Bascule coche={brut.busZones} onChange={basculer('busZones')}>
+                      Bus : zones probables
+                    </Bascule>
+                    {busAffiche && (
+                      <Stack gap="1" ps="11">
+                        {choixLignes}
+                      </Stack>
+                    )}
+                    {etatHistoriqueBus.data && (
+                      <Aide>
+                        Historique bus : {etatHistoriqueBus.data.passages.toLocaleString('fr-FR')} passage(s)
+                        {etatHistoriqueBus.data.premier &&
+                          ` depuis le ${new Date(etatHistoriqueBus.data.premier).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`}
+                        {!etatHistoriqueBus.data.collecteActive && ' · collecte arrêtée (BUS_COLLECTE)'}
+                        {' · tronçons regroupés par couple d’arrêts, toutes lignes confondues'}
+                      </Aide>
+                    )}
+                    {reseauBus.isError || busTempsReel.isError ? (
+                      <Message ton="erreur">Bus indisponibles : {(reseauBus.error ?? busTempsReel.error)?.message}</Message>
+                    ) : null}
+                  </Stack>
+                </Box>
+              </CarteEnTete>
+          </PanneauOutil>
         )}
       </Stack>
     </>

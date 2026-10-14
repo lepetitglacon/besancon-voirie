@@ -271,7 +271,25 @@ const field = defineSlotRecipe({
   },
 })
 
+/**
+ * Fenêtres et tiroirs : Chakra les dimensionne en dvw / dvh, que le zoom de l'interface
+ * (réglages d'accessibilité) multiplie. Ramenés à la taille de la fenêtre (--ecran-w / -h).
+ */
+const plein = { w: 'var(--ecran-w)', h: 'var(--ecran-h)' }
+
+const dialog = defineSlotRecipe({
+  slots: ['trigger', 'backdrop', 'positioner', 'content', 'title', 'description', 'closeTrigger', 'header', 'body', 'footer'],
+  base: { backdrop: plein, positioner: plein },
+})
+
+const drawer = defineSlotRecipe({
+  slots: ['trigger', 'backdrop', 'positioner', 'content', 'title', 'description', 'closeTrigger', 'header', 'body', 'footer'],
+  base: { backdrop: plein, positioner: plein },
+})
+
 export const recettesMulti = {
+  dialog,
+  drawer,
   segmentGroup,
   tabs,
   switch: switchRecipe,

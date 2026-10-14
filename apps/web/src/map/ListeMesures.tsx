@@ -11,7 +11,7 @@ interface Props extends BoxProps {
 }
 
 /**
- * Panneau latéral des mesures enregistrées : toutes sont tracées sur la carte en lecture seule ;
+ * Panneau des mesures enregistrées, accroché à son bouton : toutes sont tracées sur la carte en lecture seule ;
  * « Éditer » n'ouvre que celle-là, centrée, dans la frise du bas.
  */
 export function ListeMesures({ mesures, onCentrer, ...props }: Props) {
@@ -25,8 +25,8 @@ export function ListeMesures({ mesures, onCentrer, ...props }: Props) {
     <Box {...props}>
       <CarteEnTete
         w="320px"
-        maxW="calc(100vw - 24px)"
-        maxH="calc(100vh - 24px)"
+        maxW="calc(var(--ecran-w) - 24px)"
+        maxH="calc(var(--ecran-h) - 32px)"
         surtitre="Mesures de distance"
         titre={
           <HStack gap="1.5">

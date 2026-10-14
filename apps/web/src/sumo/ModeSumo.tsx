@@ -70,8 +70,8 @@ export function ModeSumo() {
         left="3"
         zIndex="2"
         w={formulaire ? GAUCHE_FORMULAIRE : GAUCHE}
-        maxW="calc(100vw - 24px)"
-        maxH="calc(100vh - 24px)"
+        maxW="calc(var(--ecran-w) - 24px)"
+        maxH="calc(var(--ecran-h) - 24px)"
         // Le formulaire occupe toute la hauteur et défile à l'intérieur.
         bottom={formulaire ? '3' : undefined}
         essais={essais.data}
@@ -114,7 +114,7 @@ export function ModeSumo() {
         right={MARGE_DROITE}
         zIndex="2"
         w={DROITE}
-        maxH="calc(100vh - 24px)"
+        maxH="calc(var(--ecran-h) - 24px)"
         essai={essai}
         troncons={troncons?.features.map((f) => f.properties)}
         series={series}
