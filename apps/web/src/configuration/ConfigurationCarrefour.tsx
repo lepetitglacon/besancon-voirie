@@ -22,11 +22,13 @@ import {
   type Branche,
   type BranchesCarrefour,
   type CarrefourResume,
+  type Chainage,
   type Connexion,
   type EmpriseIa,
   type FeuResume,
   type LignesCarrefour,
   type PlanSaisi,
+  type SensVoie,
   type SourceBranche,
 } from '@voirie/schema'
 import { useCallback, useEffect, useEffectEvent, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
@@ -41,7 +43,7 @@ import { lireBrouillons, modifierBrouillons, useBrouillonsCarrefour, type Modifi
 import { Chrono } from './FileIa'
 import type { ClicCalque, ModeEdition, SousOutil } from './calque/CalqueCarrefour'
 import type { EtatFeu } from './calque/elements'
-import { basculerConnexion, deplacerPoignee, enleverVoie, poserNoeud, poserTraversee, retirerTraversee, tracerVoie, type Brouillon, type Poignee, voiesDe } from './modele'
+import { basculerChainage, basculerConnexion, deplacerPoignee, enleverVoie, poserNoeud, poserTraversee, retirerTraversee, tracerVoie, type Brouillon, type Poignee, voiesDe } from './modele'
 import { OngletGraphe, type Scenario } from './OngletGraphe'
 import { OngletLignes, type BrouillonLignes } from './OngletLignes'
 import { OngletProgramme } from './OngletProgramme'
@@ -52,6 +54,7 @@ import { feuxDesLignes, geometrieEnregistree, lignesPourMoteur, plansSaisis } fr
 /** Références stables : un `[]` littéral relancerait les effets de synchronisation à chaque rendu. */
 const AUCUNE_BRANCHE: Branche[] = []
 const AUCUNE_CONNEXION: Connexion[] = []
+const AUCUN_CHAINAGE: Chainage[] = []
 const AUCUN_FEU: string[] = []
 const AUCUNE_LIGNE: never[] = []
 const AUCUNE_SOURCE: Record<string, SourceBranche> = {}
@@ -63,6 +66,7 @@ const pourEnregistrer = (brouillon: Brouillon) => ({
     return branche
   }),
   connexions: brouillon.connexions,
+  chainages: brouillon.chainages,
   anneau: brouillon.anneau,
 })
 
@@ -70,6 +74,7 @@ const pourEnregistrer = (brouillon: Brouillon) => ({
 export interface AffichageConfiguration {
   branches: Branche[]
   connexions: Connexion[]
+  chainages: Chainage[]
   /** Nœuds de l'anneau d'un giratoire ; null pour un carrefour ordinaire. */
   anneau: Anneau | null
   /** Outil actif sur le calque ; null : dessin seul. */
@@ -102,7 +107,14 @@ type Popup =
   | { type: 'feu'; feu: FeuResume; position: LonLat }
 
 const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>> = {
-  connecter: { titre: 'Relier les voies', aides: ['Glisser d’une voie entrante vers une voie sortante', 'Clic sur une liaison : la retirer'] },
+  connecter: {
+    titre: 'Relier les voies',
+    aides: [
+      'Glisser d’une voie entrante vers une voie sortante',
+      'Glisser le bout éloigné d’une sortante vers celui d’une entrante : les chaîner',
+      'Clic sur une liaison ou un chaînage : le retirer',
+    ],
+  },
   feux: { titre: 'Poser les feux', aides: ['Glisser chaque feu jusqu’à son mât', 'Clic sur le point creux : position OSM'] },
   noeud: {
     titre: 'Nœuds de l’anneau',
@@ -123,6 +135,13 @@ const SOUS_OUTILS: Array<{ valeur: SousOutil; glyphe: string; libelle: string }>
   { valeur: 'supprimer', glyphe: '⌫', libelle: 'Retirer' },
 ]
 
+/** Sens d'une voie tracée (sous-outil Tracer de l'outil Voie). */
+const SENS_TRACE: Array<{ sens: SensVoie | null; glyphe: string; libelle: string; titre: string }> = [
+  { sens: null, glyphe: '◎', libelle: 'Auto', titre: 'Vers le centre du carrefour : entrante ; en s’en éloignant : sortante' },
+  { sens: 'entrante', glyphe: '⇥', libelle: 'Entrante', titre: 'La voie tracée arrive au carrefour : ligne d’arrêt au bout du tracé' },
+  { sens: 'sortante', glyphe: '↦', libelle: 'Sortante', titre: 'La voie tracée part du carrefour : elle commence au début du tracé' },
+]
+
 const CONSIGNES_SOUS_OUTILS: Record<OutilAvecSousOutils, Record<SousOutil, { titre: string; aides: string[] }>> = {
   ajuster: {
     deplacer: {
@@ -133,6 +152,7 @@ const CONSIGNES_SOUS_OUTILS: Record<OutilAvecSousOutils, Record<SousOutil, { tit
       titre: 'Tracer une voie',
       aides: [
         'Glisser dans le sens de la circulation : vers le carrefour, une entrante ; en s’en éloignant, une sortante',
+        'Sens imposé dans la barre (Entrante, Sortante), sinon déduit du centre du carrefour',
         'Elle rejoint la branche la plus proche, à son rang',
       ],
     },
@@ -222,6 +242,8 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   const [outil, setOutil] = useState<OutilCarte>('selection')
   const [sousOutils, setSousOutils] = useState<Record<OutilAvecSousOutils, SousOutil>>({ ajuster: 'deplacer', pieton: 'deplacer' })
   const sousOutil = avecSousOutils(outil) ? sousOutils[outil] : 'deplacer'
+  /** Sens d'une voie tracée : imposé, ou null pour le déduire du centre du carrefour. */
+  const [sensTrace, setSensTrace] = useState<SensVoie | null>(null)
   const [popup, setPopup] = useState<Popup | null>(null)
   const [panneauOuvert, setPanneauOuvert] = useState(false)
   const [ongletBas, setOngletBas] = useState<Onglet>('programme')
@@ -251,11 +273,15 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   const enregistre: BranchesCarrefour | undefined = branchesEnregistrees.data
   const configuration: Brouillon = useMemo(
     () =>
-      brouillonBranches ?? {
-        branches: enregistre?.branches ?? AUCUNE_BRANCHE,
-        connexions: enregistre?.connexions ?? AUCUNE_CONNEXION,
-        anneau: enregistre?.anneau ?? null,
-      },
+      brouillonBranches
+        ? // Un brouillon gardé d'avant les chaînages n'en a pas.
+          { ...brouillonBranches, chainages: brouillonBranches.chainages ?? AUCUN_CHAINAGE }
+        : {
+            branches: enregistre?.branches ?? AUCUNE_BRANCHE,
+            connexions: enregistre?.connexions ?? AUCUNE_CONNEXION,
+            chainages: enregistre?.chainages ?? AUCUN_CHAINAGE,
+            anneau: enregistre?.anneau ?? null,
+          },
     [brouillonBranches, enregistre],
   )
   const branches = configuration.branches
@@ -266,7 +292,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
     mutationFn: () => api.detecterBranches(carrefour.id),
     onSuccess: (proposition) =>
       modifier({
-        branches: { branches: proposition.branches, connexions: proposition.connexions, anneau: proposition.anneau },
+        branches: { branches: proposition.branches, connexions: proposition.connexions, chainages: proposition.chainages ?? [], anneau: proposition.anneau },
         sources: proposition.sources,
         analyseIa: null,
       }),
@@ -331,7 +357,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         (enregistrees.length === 0 ||
           window.confirm(`Remplacer aussi les lignes de feux par les ${lignesProposees.length} proposées par l’IA ?`))
       modifier({
-        branches: { branches: proposition.branches, connexions: proposition.connexions, anneau: proposition.anneau },
+        branches: { branches: proposition.branches, connexions: proposition.connexions, chainages: proposition.chainages ?? [], anneau: proposition.anneau },
         sources: proposition.sources,
         analyseIa: proposition.ia,
         ...(avecLignes ? { lignes: { lignes: lignesProposees, conflits_admis: [] } } : {}),
@@ -525,6 +551,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       onAffichage({
         branches,
         connexions: configuration.connexions,
+        chainages: configuration.chainages,
         anneau: configuration.anneau,
         mode: cadrage ? null : outil,
         sousOutil,
@@ -539,6 +566,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
     [
       branches,
       configuration.connexions,
+      configuration.chainages,
       configuration.anneau,
       outil,
       sousOutil,
@@ -638,7 +666,9 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   // Actions venues de la carte : clics (popups, choix des feux d'une ligne), glisser-déposer.
   useImperativeHandle(ref, () => ({
     deplacerPoignee: (poignee, position) => setBrouillonBranches(deplacerPoignee(configuration, poignee, position)),
-    connecter: (de, vers) => setBrouillonBranches(basculerConnexion(configuration, de, vers)),
+    // De la sortie d'une voie (sortante) à l'entrée d'une autre (entrante) : un chaînage.
+    connecter: (de, vers) =>
+      setBrouillonBranches(de.includes(':s') ? basculerChainage(configuration, de, vers) : basculerConnexion(configuration, de, vers)),
     dessinerZoneIa: (emprise) => {
       if (!cadrage) return
       demandeIa.reset()
@@ -667,7 +697,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
     },
     tracer: (segment) => {
       if (outil === 'ajuster') {
-        const trace = tracerVoie(configuration, segment, centre)
+        const trace = tracerVoie(configuration, segment, centre, sensTrace)
         if (!trace) {
           return notifications.create({ type: 'warning', title: 'Aucune branche', description: 'Ajoutez d’abord les branches du carrefour.' })
         }
@@ -723,6 +753,10 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         onChanger={setBrouillonBranches}
         onOutil={choisirOutil}
         onBranche={(code) => setPopup({ type: 'branche', code, position: popup.position })}
+        onInverser={(inversee) => {
+          setBrouillonBranches(inversee.brouillon)
+          setPopup({ ...popup, cle: inversee.cle })
+        }}
         onFermer={fermerPopup}
       />
     ) : popup?.type === 'connexion' ? (
@@ -937,6 +971,21 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
               onClick={() => setSousOutils((actuels) => ({ ...actuels, [outil]: o.valeur }))}
             />
           ))}
+          {outil === 'ajuster' && sousOutil === 'tracer' && (
+            <>
+              <BarreOutils.Separateur />
+              {SENS_TRACE.map((o) => (
+                <BarreOutils.Outil
+                  key={o.libelle}
+                  glyphe={o.glyphe}
+                  libelle={o.libelle}
+                  title={o.titre}
+                  actif={sensTrace === o.sens}
+                  onClick={() => setSensTrace(o.sens)}
+                />
+              ))}
+            </>
+          )}
         </BarreOutils.Root>
       )}
 

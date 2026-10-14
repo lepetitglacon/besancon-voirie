@@ -111,16 +111,18 @@ interface PropsCourbe {
   couleur: string
   etat: EtatCourbe
   feu?: EtatFeu
+  /** Chaînage d'une sortante vers une entrante (bouts éloignés), et non une connexion. */
+  chainage?: boolean
   titre: string
   onSurvol?: (survol: boolean) => void
   onClic?: (e: MouseEvent<SVGElement>) => void
 }
 
-export function Courbe({ entree, sortie, couleur, etat, feu, titre, onSurvol, onClic }: PropsCourbe) {
+export function Courbe({ entree, sortie, couleur, etat, feu, chainage, titre, onSurvol, onClic }: PropsCourbe) {
   const chemin = cheminConnexion(entree, sortie)
   const interactive = onSurvol !== undefined
   return (
-    <g className={classes('calque-courbe', etat, feu && `feu-${feu}`)}>
+    <g className={classes('calque-courbe', chainage && 'chainage', etat, feu && `feu-${feu}`)}>
       {/* Tracé large et transparent : facilite le survol et le clic. */}
       {interactive && (
         <path

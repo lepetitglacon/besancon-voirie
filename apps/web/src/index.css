@@ -200,6 +200,12 @@ body {
   pointer-events: stroke;
 }
 
+/* Chaînage (sortante → entrante, bouts éloignés) : en pointillé, ce n'est pas un mouvement. */
+.calque-courbe.chainage .trace {
+  stroke-width: 4;
+  stroke-dasharray: 0.1 8;
+}
+
 .calque-courbe.survolee .trace,
 .calque-courbe.surlignee .trace {
   stroke-width: 5;

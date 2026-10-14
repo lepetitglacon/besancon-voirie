@@ -101,18 +101,35 @@ export const CleVoie = z.string().regex(/^[A-Z0-9]{1,4}:[es]\d$/, 'Voie attendue
 export const Connexion = z.object({ de: CleVoie, vers: CleVoie });
 export type Connexion = z.infer<typeof Connexion>;
 
+/**
+ * Chaînage d'une voie sortante vers une voie entrante, de bout éloigné à bout éloigné : dans un
+ * carrefour complexe (une place faite de plusieurs petits carrefours), ce qui sort par la voie
+ * `de` arrive dans la voie `vers`. Ce n'est pas un mouvement : aucun feu ne le commande, et les
+ * mouvements restent locaux, d'une voie entrante à une voie sortante.
+ */
+export const Chainage = z.object({ de: CleVoie, vers: CleVoie });
+export type Chainage = z.infer<typeof Chainage>;
+
+/** Rues d'un carrefour, tronçons d'anneau compris, et rues seules. */
+export const BRANCHES_MAX = 40;
+export const RUES_MAX = 24;
+
 export const ConfigurationBranches = z
   .object({
-    /** Rues (12 au plus) et, dans un giratoire, tronçons d'anneau (un par nœud, 16 au plus). */
-    branches: z.array(Branche).max(28),
+    /**
+     * Rues (24 au plus : une place compte ses tronçons intérieurs) et, dans un giratoire,
+     * tronçons d'anneau (un par nœud, 16 au plus).
+     */
+    branches: z.array(Branche).max(BRANCHES_MAX),
     connexions: z.array(Connexion).max(300).default([]),
+    chainages: z.array(Chainage).max(200).default([]),
     /** Anneau d'un giratoire ; null pour un carrefour ordinaire. */
     anneau: Anneau.nullable().default(null),
   })
-  .superRefine(({ branches, connexions, anneau }, ctx) => {
+  .superRefine(({ branches, connexions, chainages, anneau }, ctx) => {
     const codes = branches.map((b) => b.code);
-    if (branches.filter((b) => !b.troncon).length > 12) {
-      ctx.addIssue({ code: 'custom', path: ['branches'], message: '12 rues au plus' });
+    if (branches.filter((b) => !b.troncon).length > RUES_MAX) {
+      ctx.addIssue({ code: 'custom', path: ['branches'], message: `${RUES_MAX} rues au plus` });
     }
     const noeuds = new Set(anneau?.noeuds.map((n) => n.code));
     branches.forEach((b, i) => {
@@ -146,6 +163,18 @@ export const ConfigurationBranches = z
       if (vues.has(cle)) ctx.addIssue({ code: 'custom', path: ['connexions', i], message: `Connexion ${cle} en double` });
       vues.add(cle);
     });
+    const chaines = new Set<string>();
+    chainages.forEach((c, i) => {
+      if (!c.de.includes(':s') || !voies.has(c.de)) {
+        ctx.addIssue({ code: 'custom', path: ['chainages', i, 'de'], message: `${c.de} n'est pas une voie sortante` });
+      }
+      if (!c.vers.includes(':e') || !voies.has(c.vers)) {
+        ctx.addIssue({ code: 'custom', path: ['chainages', i, 'vers'], message: `${c.vers} n'est pas une voie entrante` });
+      }
+      const cle = `${c.de}>${c.vers}`;
+      if (chaines.has(cle)) ctx.addIssue({ code: 'custom', path: ['chainages', i], message: `Chaînage ${cle} en double` });
+      chaines.add(cle);
+    });
   });
 export type ConfigurationBranches = z.infer<typeof ConfigurationBranches>;
 
@@ -166,6 +195,8 @@ export interface BranchesCarrefour {
   centre: [number, number];
   branches: BrancheLue[];
   connexions: Connexion[];
+  /** Voies sortantes qui en alimentent d'autres, entrantes, à l'intérieur d'un carrefour complexe. */
+  chainages: Chainage[];
   /** Anneau d'un giratoire ; null pour un carrefour ordinaire. */
   anneau: Anneau | null;
   /** Mouvements déduits des connexions. */

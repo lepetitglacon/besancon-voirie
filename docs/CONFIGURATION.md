@@ -80,10 +80,44 @@ CREATE TABLE connexion (                               -- « lane connector »
   voie_sortie_id  uuid NOT NULL REFERENCES voie ON DELETE CASCADE,
   UNIQUE (voie_entree_id, voie_sortie_id)
 );
+
+CREATE TABLE chainage (                                -- carrefour complexe : sortante → entrante
+  id              uuid PRIMARY KEY,
+  carrefour_id    uuid NOT NULL REFERENCES carrefour ON DELETE CASCADE,
+  voie_sortie_id  uuid NOT NULL REFERENCES voie ON DELETE CASCADE,
+  voie_entree_id  uuid NOT NULL REFERENCES voie ON DELETE CASCADE,
+  UNIQUE (voie_sortie_id, voie_entree_id)
+);
 ```
 
 Les **flèches** et les **mouvements** ne sont pas stockés : `@voirie/engine` les déduit des
 connexions (`flechesParVoie`, `mouvementsDepuisConnexions`), côté API comme côté navigateur.
+
+#### Carrefours complexes : chaînages
+
+Une place faite de plusieurs petits carrefours (Place du Maréchal Leclerc) reste **un seul
+carrefour, avec un seul programme**. Ses tronçons intérieurs sont des branches ordinaires
+(24 rues au plus, au lieu de 12) ; un **chaînage** dit que ce qui sort par une voie sortante
+arrive dans une voie entrante : `O2:s0 ⇢ NE2:e0`. Il relie les **bouts éloignés** des deux voies,
+comme une prise : le rond de la sortante (là où la circulation la quitte) dans le carré de
+l'entrante (là où elle y entre).
+
+- Un chaînage n'est **pas un mouvement** : aucun feu ne le commande, il n'entre ni dans les
+  flèches ni dans les conflits. Chaque voie entrante intérieure garde sa ligne d'arrêt, ses
+  liaisons et, s'il y en a, ses feux.
+- Les **mouvements restent locaux**, d'une voie entrante à une voie sortante : on peut changer
+  de direction à l'intérieur de la place, un itinéraire de bout en bout n'a donc pas de sens
+  unique.
+- Une sortante peut alimenter plusieurs entrantes (la chaussée s'élargit), et plusieurs
+  sortantes une même entrante.
+- Éditeur : outil **Liaison** (<kbd>C</kbd>), glisser le rond éloigné d'une sortante sur le
+  carré éloigné d'une entrante ; le chaînage se dessine en pointillé, un clic le retire. La
+  popup d'une voie liste ses chaînages.
+- Tracer une voie intérieure : le sens se déduit du centre du carrefour (vers lui, une
+  entrante), ce qui n'a plus de sens au milieu d'une place. Le sous-outil **Tracer** de l'outil
+  Voie impose donc le sens (**Auto**, **Entrante**, **Sortante**), et la popup d'une voie la
+  fait **passer en entrante** (ou en sortante) : même tracé, même sens de circulation, la
+  ligne d'arrêt change de bout. Ses liaisons et chaînages partent avec elle.
 
 ### Détection depuis OSM (proposition)
 

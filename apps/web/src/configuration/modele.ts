@@ -1,6 +1,6 @@
 /**
- * Brouillon de configuration d'un carrefour (branches, voies, passages piétons, connexions)
- * et opérations d'édition, sans effet de bord.
+ * Brouillon de configuration d'un carrefour (branches, voies, passages piétons, connexions,
+ * chaînages) et opérations d'édition, sans effet de bord.
  */
 import {
   azimutSegment,
@@ -10,6 +10,7 @@ import {
   distanceArretNoeud,
   genererVoies,
   insererNoeud,
+  lireCleVoie,
   NOEUDS_MIN,
   noeudDeVoie,
   proposerLiaisonsNoeuds,
@@ -17,13 +18,14 @@ import {
   voieAdjacente,
   type LonLat,
   type Segment,
-  type XY,
 } from '@voirie/engine'
-import type { Anneau, Branche, Connexion, PrioriteEntree, SensVoie, TypeVoie } from '@voirie/schema'
+import type { Anneau, Branche, Chainage, Connexion, PrioriteEntree, SensVoie, TypeVoie } from '@voirie/schema'
 
 export interface Brouillon {
   branches: Branche[]
   connexions: Connexion[]
+  /** Voies sortantes qui alimentent des voies entrantes, dans un carrefour complexe. */
+  chainages: Chainage[]
   /** Anneau d'un giratoire ; null pour un carrefour ordinaire. */
   anneau: Anneau | null
 }
@@ -62,7 +64,21 @@ function surBranche(brouillon: Brouillon, code: string, modifier: (b: Branche) =
   return { ...brouillon, branches: brouillon.branches.map((b) => (b.code === code ? modifier(b) : b)) }
 }
 
-const sansVoie = (connexions: Connexion[], cle: string) => connexions.filter((c) => c.de !== cle && c.vers !== cle)
+/**
+ * Répercute un changement de clés de voies (`cle` : nouvelle clé, null = voie disparue) sur les
+ * connexions et les chaînages ; un lien dont une voie disparaît part avec elle.
+ */
+function suivreCles(brouillon: Brouillon, cle: (ancienne: string) => string | null): Brouillon {
+  const suivre = <T extends { de: string; vers: string }>(liens: readonly T[]) =>
+    liens.flatMap((l) => {
+      const de = cle(l.de)
+      const vers = cle(l.vers)
+      return de && vers ? [{ de, vers }] : []
+    })
+  return { ...brouillon, connexions: suivre(brouillon.connexions), chainages: suivre(brouillon.chainages) }
+}
+
+const sansVoie = (brouillon: Brouillon, retiree: string) => suivreCles(brouillon, (cle) => (cle === retiree ? null : cle))
 
 /** Ajoute une voie à côté de la dernière du même sens, sans toucher aux voies déjà calées. */
 export function ajouterVoie(brouillon: Brouillon, code: string, sens: SensVoie, centre: LonLat): Brouillon {
@@ -84,10 +100,10 @@ export function retirerVoie(brouillon: Brouillon, code: string, sens: SensVoie):
   const derniere = branche && voiesDe(branche, sens).at(-1)
   if (!derniere) return brouillon
   const suivant = surBranche(brouillon, code, (b) => ({ ...b, voies: b.voies.filter((v) => v !== derniere) }))
-  return { ...suivant, connexions: sansVoie(suivant.connexions, cleVoie(code, sens, derniere.rang)) }
+  return sansVoie(suivant, cleVoie(code, sens, derniere.rang))
 }
 
-/** Décale les rangs d'un sens d'une branche (`nouveauRang`, null = voie retirée) et suit les connexions. */
+/** Décale les rangs d'un sens d'une branche (`nouveauRang`, null = voie retirée) et suit connexions et chaînages. */
 function renumeroter(brouillon: Brouillon, code: string, sens: SensVoie, nouveauRang: (rang: number) => number | null): Brouillon {
   const lettre = sens === 'entrante' ? 'e' : 's'
   const prefixe = `${code}:${lettre}`
@@ -108,22 +124,46 @@ function renumeroter(brouillon: Brouillon, code: string, sens: SensVoie, nouveau
           }),
         },
   )
-  const connexions = brouillon.connexions.flatMap((c) => {
-    const de = cle(c.de)
-    const vers = cle(c.vers)
-    return de && vers ? [{ de, vers }] : []
-  })
-  return { ...brouillon, branches, connexions }
+  return suivreCles({ ...brouillon, branches }, cle)
+}
+
+const milieu = (s: Segment): LonLat => [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2]
+
+/**
+ * Insère une voie dans une branche à son rang, d'après sa position (0 = la plus à gauche dans le
+ * sens de la circulation) ; les voies à sa droite, leurs connexions et chaînages sont renumérotés.
+ * `geom` : [bout côté carrefour, bout éloigné].
+ */
+function insererVoie(brouillon: Brouillon, code: string, sens: SensVoie, geom: Segment, type: TypeVoie = 'generale'): { brouillon: Brouillon; cle: string } {
+  const branche = brouillon.branches.find((b) => b.code === code)!
+  // Sens de la circulation : vers le carrefour pour une entrante, en s'en éloignant pour une sortante.
+  const [a, b] = sens === 'entrante' ? [geom[1], geom[0]] : geom
+  const repere = repereLocal(a)
+  const direction = repere.versXY(b)
+  const gauche = (s: Segment) => {
+    const [x, y] = repere.versXY(milieu(s))
+    return -direction[1] * x + direction[0] * y
+  }
+  const rang = voiesDe(branche, sens).filter((v) => gauche(v.geom) > gauche(geom)).length
+  const decale = renumeroter(brouillon, code, sens, (r) => (r >= rang ? r + 1 : r))
+  return {
+    brouillon: surBranche(decale, code, (br) => ({ ...br, voies: [...br.voies, { sens, rang, type, geom }] })),
+    cle: cleVoie(code, sens, rang),
+  }
 }
 
 /**
- * Voie tracée sur la carte dans le sens de la circulation : vers le carrefour, une entrante ;
- * en s'en éloignant, une sortante. Elle rejoint la branche (hors tronçons d'anneau) dont les
- * voies sont les plus proches de son milieu, à son rang d'après sa position (0 = la plus à
- * gauche dans son sens) ; les voies à sa droite et leurs connexions sont renumérotées.
+ * Voie tracée sur la carte dans le sens de la circulation. Son sens est imposé (`sens`), ou à
+ * défaut déduit : vers le carrefour, une entrante ; en s'en éloignant, une sortante. Elle
+ * rejoint la branche (hors tronçons d'anneau) dont les voies sont les plus proches de son
+ * milieu, à son rang d'après sa position.
  */
-export function tracerVoie(brouillon: Brouillon, trace: Segment, centre: LonLat): { brouillon: Brouillon; cle: string } | null {
-  const milieu = (s: Segment): LonLat => [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2]
+export function tracerVoie(
+  brouillon: Brouillon,
+  trace: Segment,
+  centre: LonLat,
+  sens: SensVoie | null = null,
+): { brouillon: Brouillon; cle: string } | null {
   const repere = repereLocal(milieu(trace))
   let proche: { branche: Branche; distance: number } | null = null
   for (const b of brouillon.branches) {
@@ -136,22 +176,27 @@ export function tracerVoie(brouillon: Brouillon, trace: Segment, centre: LonLat)
   }
   if (!proche) return null
   const { branche } = proche
-  // Le bout le plus proche du carrefour (ou du nœud d'une rue de giratoire) est le bout côté carrefour.
+  // Sans sens imposé : le bout le plus proche du carrefour (ou du nœud d'une rue de giratoire)
+  // est le bout côté carrefour.
   const origine = repereLocal(origineVoies(brouillon, branche, centre).centre)
-  const [a, b] = trace.map((p) => origine.versXY(p)) as [XY, XY]
-  const versCarrefour = Math.hypot(...b) < Math.hypot(...a)
-  const sens: SensVoie = versCarrefour ? 'entrante' : 'sortante'
-  const geom: Segment = versCarrefour ? [trace[1], trace[0]] : [trace[0], trace[1]]
-  // Rang : nombre de voies du même sens plus à gauche, vu dans le sens de la circulation.
-  const direction: XY = [b[0] - a[0], b[1] - a[1]]
-  const gauche = ([x, y]: XY) => -direction[1] * x + direction[0] * y
-  const cote = (s: Segment) => gauche(origine.versXY(milieu(s)))
-  const rang = voiesDe(branche, sens).filter((v) => cote(v.geom) > cote(geom)).length
-  const decale = renumeroter(brouillon, branche.code, sens, (r) => (r >= rang ? r + 1 : r))
-  return {
-    brouillon: surBranche(decale, branche.code, (br) => ({ ...br, voies: [...br.voies, { sens, rang, type: 'generale', geom }] })),
-    cle: cleVoie(branche.code, sens, rang),
-  }
+  const [a, b] = trace.map((p) => Math.hypot(...origine.versXY(p))) as [number, number]
+  const choisi: SensVoie = sens ?? (b < a ? 'entrante' : 'sortante')
+  const geom: Segment = choisi === 'entrante' ? [trace[1], trace[0]] : [trace[0], trace[1]]
+  return insererVoie(brouillon, branche.code, choisi, geom)
+}
+
+/**
+ * Change une voie entrante en sortante, ou l'inverse (clé « S:e1 »), sans toucher au sens de la
+ * circulation : c'est le bout côté carrefour qui change d'extrémité. Ses liaisons et chaînages,
+ * qui n'ont plus de sens, partent avec elle ; elle prend son rang parmi les voies de son nouveau sens.
+ */
+export function inverserVoie(brouillon: Brouillon, cle: string): { brouillon: Brouillon; cle: string } | null {
+  const lue = lireCleVoie(cle)
+  const voie = lue && brouillon.branches.find((b) => b.code === lue.branche)?.voies.find((v) => v.sens === lue.sens && v.rang === lue.rang)
+  if (!lue || !voie) return null
+  const sens: SensVoie = voie.sens === 'entrante' ? 'sortante' : 'entrante'
+  // Même tracé parcouru dans le même sens : ses deux bouts échangent leur rôle.
+  return insererVoie(enleverVoie(brouillon, cle), lue.branche, sens, [voie.geom[1], voie.geom[0]], voie.type)
 }
 
 /** Retire une voie (clé « S:e1 ») et ses connexions ; les voies à sa droite prennent son rang. */
@@ -169,22 +214,16 @@ export function changerTypeVoie(brouillon: Brouillon, code: string, sens: SensVo
   }))
 }
 
-/** Renomme une branche et répercute le nouveau code dans les clés des connexions. */
+/** Renomme une branche et répercute le nouveau code dans les clés des connexions et chaînages. */
 export function renommerBranche(brouillon: Brouillon, ancien: string, nouveau: string): Brouillon {
   const renommer = (cle: string) => (cle.startsWith(`${ancien}:`) ? `${nouveau}${cle.slice(ancien.length)}` : cle)
-  return {
-    ...brouillon,
-    branches: brouillon.branches.map((b) => (b.code === ancien ? { ...b, code: nouveau } : b)),
-    connexions: brouillon.connexions.map((c) => ({ de: renommer(c.de), vers: renommer(c.vers) })),
-  }
+  return suivreCles({ ...brouillon, branches: brouillon.branches.map((b) => (b.code === ancien ? { ...b, code: nouveau } : b)) }, renommer)
 }
 
 export function supprimerBranche(brouillon: Brouillon, code: string): Brouillon {
-  return {
-    ...brouillon,
-    branches: brouillon.branches.filter((b) => b.code !== code),
-    connexions: brouillon.connexions.filter((c) => !c.de.startsWith(`${code}:`) && !c.vers.startsWith(`${code}:`)),
-  }
+  return suivreCles({ ...brouillon, branches: brouillon.branches.filter((b) => b.code !== code) }, (cle) =>
+    cle.startsWith(`${code}:`) ? null : cle,
+  )
 }
 
 /** Ajoute la connexion, ou la retire si elle existe déjà. */
@@ -195,6 +234,17 @@ export function basculerConnexion(brouillon: Brouillon, de: string, vers: string
     connexions: existe
       ? brouillon.connexions.filter((c) => !(c.de === de && c.vers === vers))
       : [...brouillon.connexions, { de, vers }],
+  }
+}
+
+/** Ajoute le chaînage d'une voie sortante vers une voie entrante, ou le retire s'il existe déjà. */
+export function basculerChainage(brouillon: Brouillon, de: string, vers: string): Brouillon {
+  const existe = brouillon.chainages.some((c) => c.de === de && c.vers === vers)
+  return {
+    ...brouillon,
+    chainages: existe
+      ? brouillon.chainages.filter((c) => !(c.de === de && c.vers === vers))
+      : [...brouillon.chainages, { de, vers }],
   }
 }
 
@@ -336,7 +386,11 @@ function appliquerAnneau(
     .filter((c) => cles.has(c.de) && cles.has(c.vers))
     .filter((c) => !anneau || troncons.length === 0 || noeudDeVoie(c.de, branches, anneau) === noeudDeVoie(c.vers, branches, anneau))
     .filter((c) => !vues.has(`${c.de}>${c.vers}`) && vues.add(`${c.de}>${c.vers}`))
-  return { branches, connexions, anneau }
+  // Les chaînages relient les rues entre elles : ils suivent leurs voies, sans notion de nœud.
+  const chainages = brouillon.chainages
+    .map((c) => ({ de: renommer(c.de), vers: renommer(c.vers) }))
+    .filter((c) => cles.has(c.de) && cles.has(c.vers))
+  return { branches, connexions, chainages, anneau }
 }
 
 /** Ajoute les liaisons par défaut d'un nœud (continuer, sortir, s'insérer) qui manquent. */

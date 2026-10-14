@@ -47,6 +47,7 @@ const depart: Brouillon = {
     { de: 'S:e0', vers: 'N:s0' },
     { de: 'N:e0', vers: 'S:s0' },
   ],
+  chainages: [],
   anneau: null,
 }
 
@@ -78,7 +79,7 @@ describe('opérations du brouillon', () => {
   })
 
   it('supprime une branche et ses connexions', () => {
-    expect(supprimerBranche(depart, 'N')).toEqual({ branches: [depart.branches[0]], connexions: [], anneau: null })
+    expect(supprimerBranche(depart, 'N')).toEqual({ branches: [depart.branches[0]], connexions: [], chainages: [], anneau: null })
   })
 
   it('ajoute puis retire une connexion par le même geste', () => {

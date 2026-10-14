@@ -7,7 +7,7 @@
  * relayés au canvas : la carte zoome et se déplace aussi depuis une voie ou une liaison.
  */
 import { azimutsVoiesGiratoire, cleVoie, flechesParVoie, repereLocal, type LonLat, type XY } from '@voirie/engine'
-import type { Anneau, Branche, Connexion, EmpriseIa, TypeFeu } from '@voirie/schema'
+import type { Anneau, Branche, Chainage, Connexion, EmpriseIa, TypeFeu } from '@voirie/schema'
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
 import { useMap } from 'react-map-gl/maplibre'
 import { FLECHES } from '../libelles'
@@ -72,6 +72,8 @@ export interface ApercuFeu {
 interface Props {
   branches: Branche[]
   connexions: Connexion[]
+  /** Sortantes chaînées à des entrantes, de bout éloigné à bout éloigné (carrefour complexe). */
+  chainages: Chainage[]
   /** Nœuds de l'anneau d'un giratoire ; null pour un carrefour ordinaire. */
   anneau: Anneau | null
   /** null : dessin seul, sans poignées ni clics. */
@@ -83,7 +85,10 @@ interface Props {
   /** Lecture d'un programme : couleur du feu de chaque connexion (« de>vers ») et passage piéton. */
   feux?: { connexions: ReadonlyMap<string, EtatFeu>; traversees: ReadonlyMap<string, EtatFeu> } | null
   onDeplacer: (poignee: PoigneeModele, position: LonLat) => void
-  /** Ajoute la connexion, ou la retire si elle existe. */
+  /**
+   * Ajoute le lien, ou le retire s'il existe : connexion d'une entrante vers une sortante, ou
+   * chaînage d'une sortante (`de` en « :s ») vers une entrante.
+   */
   onConnecter: (de: string, vers: string) => void
   /** Voie ou passage piéton tracé par un glisser sur la carte (sous-outil « tracer »). */
   onTracer?: (segment: [LonLat, LonLat]) => void
@@ -119,7 +124,8 @@ type Glisse =
   | { type: 'poignee'; poignee: PoigneeModele; depart: LonLat; position: LonLat }
   /** Voies choisies glissées par leur corps ; `retirer` : Maj+clic sans bouger retire `cle` du choix. */
   | { type: 'voies'; cle: string; poignee: PoigneeModele & { role: 'voies' }; position: LonLat; retirer: boolean }
-  | { type: 'connexion'; de: string; position: LonLat; cible: string | null }
+  /** `chainage` : tiré du bout éloigné d'une sortante, vers le bout éloigné d'une entrante. */
+  | { type: 'connexion'; de: string; chainage: boolean; position: LonLat; cible: string | null }
   /** Passage piéton en cours de tracé, du point d'appui au pointeur. */
   | { type: 'trace'; depart: LonLat; position: LonLat }
   /** `enregistrement` : lâché, en attente de l'API (le feu reste affiché à sa nouvelle place). */
@@ -146,6 +152,7 @@ export function CalqueCarrefour(props: Props) {
   const {
     branches,
     connexions,
+    chainages,
     anneau,
     mode,
     sousOutil = 'deplacer',
@@ -237,9 +244,9 @@ export function CalqueCarrefour(props: Props) {
   const apercu = useMemo(
     () =>
       glisse?.type === 'poignee' || glisse?.type === 'voies'
-        ? deplacerPoignee({ branches, connexions, anneau }, glisse.poignee, glisse.position)
-        : { branches, connexions, anneau },
-    [branches, connexions, anneau, glisse],
+        ? deplacerPoignee({ branches, connexions, chainages, anneau }, glisse.poignee, glisse.position)
+        : { branches, connexions, chainages, anneau },
+    [branches, connexions, chainages, anneau, glisse],
   )
   const couleurs = useMemo(() => couleursVoies(apercu.branches), [apercu.branches])
   const fleches = useMemo(
@@ -258,7 +265,7 @@ export function CalqueCarrefour(props: Props) {
   const segmentPx = (geom: [LonLat, LonLat]): [XY, XY] => [px(geom[0]), px(geom[1])]
 
   // ── Relations entre éléments, pour les états visuels ──
-  const connexionsDeVoie = (cle: string) => apercu.connexions.filter((c) => c.de === cle || c.vers === cle)
+  const connexionsDeVoie = (cle: string) => [...apercu.connexions, ...apercu.chainages].filter((c) => c.de === cle || c.vers === cle)
   const voiesLiees = new Set<string>()
   const courbesLiees = new Set<string>()
   if (survol?.type === 'voie') {
@@ -277,7 +284,7 @@ export function CalqueCarrefour(props: Props) {
   const outilVoie = mode === 'ajuster' ? sousOutil : null
 
   const etatVoie = (cle: string, sortante: boolean): EtatVoie => {
-    if (glisse?.type === 'connexion' && sortante) return cle === cibleEnCours ? 'cible' : 'cible-possible'
+    if (glisse?.type === 'connexion' && sortante !== glisse.chainage) return cle === cibleEnCours ? 'cible' : 'cible-possible'
     if (outilVoie === 'supprimer' && survol?.type === 'voie' && survol.cle === cle) return 'a-retirer'
     if (voiesChoisies.has(cle)) return 'choisie'
     if (selection === cle) return 'survolee'
@@ -303,12 +310,13 @@ export function CalqueCarrefour(props: Props) {
   const cliquable = mode === 'selection'
   const positionClic = (e: MouseEvent<SVGElement>): LonLat => pointeur(e)
 
-  const sortanteLaPlusProche = (position: LonLat): string | null => {
+  /** Connexion : bout côté carrefour d'une sortante ; chaînage : bout éloigné d'une entrante. */
+  const cibleLaPlusProche = (position: LonLat, chainage: boolean): string | null => {
     const [x, y] = px(position)
     let meilleure: { cle: string; distance: number } | null = null
     for (const [cle, voie] of voies) {
-      if (voie.sens !== 'sortante') continue
-      const [vx, vy] = px(voie.geom[0])
+      if (voie.sens !== (chainage ? 'entrante' : 'sortante')) continue
+      const [vx, vy] = px(voie.geom[chainage ? 1 : 0])
       const distance = Math.hypot(vx - x, vy - y)
       if (distance <= TOLERANCE_CIBLE_PX && (!meilleure || distance < meilleure.distance)) meilleure = { cle, distance }
     }
@@ -319,7 +327,7 @@ export function CalqueCarrefour(props: Props) {
     e.stopPropagation()
     e.currentTarget.setPointerCapture(e.pointerId)
     if (mode === 'connecter' && poignee.role === 'voie') {
-      setGlisse({ type: 'connexion', de: poignee.cle, position: depart, cible: null })
+      setGlisse({ type: 'connexion', de: poignee.cle, chainage: poignee.extremite === 1, position: depart, cible: null })
     } else {
       setGlisse({ type: 'poignee', poignee, depart, position: depart })
     }
@@ -328,7 +336,7 @@ export function CalqueCarrefour(props: Props) {
   const suivre = (e: PointerEvent<SVGElement>) => {
     if (!glisse || (glisse.type === 'feu' && glisse.enregistrement)) return
     const position = positionPointeur(e)
-    setGlisse(glisse.type === 'connexion' ? { ...glisse, position, cible: sortanteLaPlusProche(position) } : { ...glisse, position })
+    setGlisse(glisse.type === 'connexion' ? { ...glisse, position, cible: cibleLaPlusProche(position, glisse.chainage) } : { ...glisse, position })
   }
 
   const terminer = () => {
@@ -407,15 +415,16 @@ export function CalqueCarrefour(props: Props) {
       for (const extremite of [0, 1] as const) {
         const poignee: PoigneeModele = { role: 'voie', cle, sens: voie.sens, extremite }
         // Comme une prise : rond (mâle) au bout par où la circulation quitte la voie, carré
-        // (femelle) au bout par où elle y entre. Une liaison va toujours d'un rond à un carré.
+        // (femelle) au bout par où elle y entre. Un lien va toujours d'un rond à un carré : côté
+        // carrefour, c'est une connexion (entrante → sortante) ; aux bouts éloignés, un chaînage
+        // (sortante → entrante), qui relie les petits carrefours d'une place.
         const sortie = sortante ? extremite === 1 : extremite === 0
-        // En mode connexion, seul le bout côté carrefour se relie ; l'autre bout montre le sens.
-        const bornee = mode === 'connecter' && extremite === 1
+        const chainage = extremite === 1
         const etat: EtatPoignee =
           glisse?.type === 'connexion'
-            ? bornee
+            ? chainage !== glisse.chainage
               ? 'inactive'
-              : sortante
+              : !sortie
                 ? cle === cibleEnCours
                   ? 'cible'
                   : 'cible-possible'
@@ -433,16 +442,19 @@ export function CalqueCarrefour(props: Props) {
           couleur: couleurs.get(cle) ?? GRIS_SORTANTE,
           vide: sortante,
           etat,
-          titre: bornee
-            ? `${cle} : ${sortante ? 'sortie de la voie' : 'entrée dans la voie'}`
-            : mode === 'connecter'
-              ? sortante
-                ? `${cle} : lâcher ici pour connecter`
-                : `${cle} : glisser vers une voie sortante`
+          titre:
+            mode === 'connecter'
+              ? chainage
+                ? sortie
+                  ? `${cle} : sortie de la voie, glisser vers le bout d’une voie entrante pour les chaîner`
+                  : `${cle} : entrée dans la voie, lâcher ici pour chaîner`
+                : sortie
+                  ? `${cle} : glisser vers une voie sortante`
+                  : `${cle} : lâcher ici pour connecter`
               : `${cle} : glisser pour caler ${extremite === 0 ? 'la ligne d’arrêt' : 'l’autre bout'}`,
-          // En mode connexion, seules les voies entrantes se tirent, par le bout côté carrefour ;
-          // les sortantes sont des cibles.
-          gestes: mode === 'connecter' && (sortante || bornee) ? undefined : gestes(poignee, voie.geom[extremite]),
+          // En mode connexion, on tire les ronds (là où la circulation quitte une voie) ; les
+          // carrés sont des cibles.
+          gestes: mode === 'connecter' && !sortie ? undefined : gestes(poignee, voie.geom[extremite]),
         })
       }
     }
@@ -636,8 +648,32 @@ export function CalqueCarrefour(props: Props) {
         )
       })}
 
+      {apercu.chainages.map((c) => {
+        const sortante = voies.get(c.de)
+        const entrante = voies.get(c.vers)
+        if (!sortante || !entrante) return null
+        const cle = cleConnexion(c)
+        return (
+          <Courbe
+            key={cle}
+            chainage
+            entree={[px(sortante.geom[1]), px(sortante.geom[0])]}
+            sortie={[px(entrante.geom[1]), px(entrante.geom[0])]}
+            couleur={couleurs.get(c.vers) ?? '#ffffff'}
+            etat={etatCourbe(cle)}
+            titre={mode === 'connecter' ? `${c.de} ⇢ ${c.vers} : cliquer pour retirer le chaînage` : `${c.de} ⇢ ${c.vers} (chaînage)`}
+            onSurvol={mode ? (actif) => setSurvol(actif ? { type: 'connexion', cle } : null) : undefined}
+            onClic={mode === 'connecter' ? () => onConnecter(c.de, c.vers) : undefined}
+          />
+        )
+      })}
+
       {glisse?.type === 'connexion' && depart && (
-        <Elastique depart={px(depart.geom[0])} arrivee={cible ? px(cible.geom[0]) : px(glisse.position)} valide={cible !== undefined} />
+        <Elastique
+          depart={px(depart.geom[glisse.chainage ? 1 : 0])}
+          arrivee={cible ? px(cible.geom[glisse.chainage ? 1 : 0]) : px(glisse.position)}
+          valide={cible !== undefined}
+        />
       )}
 
       {[...voies]

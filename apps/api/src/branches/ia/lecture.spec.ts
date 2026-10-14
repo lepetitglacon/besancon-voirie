@@ -28,6 +28,7 @@ const detection: DetectionBranches = {
     },
   ],
   connexions: [],
+  chainages: [],
   anneau: null,
   mouvements: [],
   fleches: {},

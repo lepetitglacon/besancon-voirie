@@ -181,6 +181,27 @@ export const connexion = pgTable(
 );
 
 /**
+ * Chaînage d'une voie sortante vers une voie entrante du même carrefour, de bout éloigné à bout
+ * éloigné : une place faite de plusieurs petits carrefours (docs/CONFIGURATION.md §3).
+ */
+export const chainage = pgTable(
+  'chainage',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    carrefourId: uuid('carrefour_id')
+      .notNull()
+      .references(() => carrefour.id, { onDelete: 'cascade' }),
+    voieSortieId: uuid('voie_sortie_id')
+      .notNull()
+      .references(() => voie.id, { onDelete: 'cascade' }),
+    voieEntreeId: uuid('voie_entree_id')
+      .notNull()
+      .references(() => voie.id, { onDelete: 'cascade' }),
+  },
+  (t) => [unique().on(t.voieSortieId, t.voieEntreeId)],
+);
+
+/**
  * Ligne de feux (signal group) — docs/CONFIGURATION.md §4. `mouvements` : clés « S>O » des
  * mouvements commandés ; `traverse` : branche traversée par une ligne piétonne (R12).
  */

@@ -22,6 +22,7 @@ import type {
   BrancheLue,
   BranchesCarrefour,
   ConfigurationBranches,
+  Chainage,
   Connexion,
   DetectionBranches,
   SensBranche,
@@ -76,6 +77,7 @@ export function deduire(
   branches: Branche[],
   connexions: Connexion[],
   anneau: Anneau | null = null,
+  chainages: Chainage[] = [],
 ): BranchesCarrefour {
   const avecDepart = new Set(connexions.map((c) => c.de));
   const alertes = branches.flatMap((b) =>
@@ -95,6 +97,7 @@ export function deduire(
     centre,
     branches: branches.map((b): BrancheLue => ({ ...b, sens: sensDe(b) })),
     connexions,
+    chainages,
     anneau,
     mouvements: mouvementsDepuisConnexions(branches, connexions, azimutsVoies),
     fleches: flechesParVoie(branches, connexions, azimutsVoies),
@@ -134,7 +137,15 @@ export class BranchesService {
       WHERE c.carrefour_id = ${carrefourId}
       ORDER BY 1, 2
     `);
-    return deduire(centre, branches, connexions, anneau);
+    const { rows: chainages } = await this.db.execute<Chainage>(sql`
+      SELECT bs.code || ':s' || vs.rang AS de, be.code || ':e' || ve.rang AS vers
+      FROM chainage c
+      JOIN voie vs ON vs.id = c.voie_sortie_id JOIN branche bs ON bs.id = vs.branche_id
+      JOIN voie ve ON ve.id = c.voie_entree_id JOIN branche be ON be.id = ve.branche_id
+      WHERE c.carrefour_id = ${carrefourId}
+      ORDER BY 1, 2
+    `);
+    return deduire(centre, branches, connexions, anneau, chainages);
   }
 
   /**
@@ -207,8 +218,8 @@ export class BranchesService {
     return { ...deduire(centreCarrefour, branches, connexions, anneau), rayon_m: Math.round(rayon), sources: parDefaut };
   }
 
-  /** Remplace branches, voies, passages piétons, connexions et anneau du carrefour. */
-  async enregistrer(carrefourId: string, { branches, connexions, anneau }: ConfigurationBranches): Promise<BranchesCarrefour> {
+  /** Remplace branches, voies, passages piétons, connexions, chaînages et anneau du carrefour. */
+  async enregistrer(carrefourId: string, { branches, connexions, chainages, anneau }: ConfigurationBranches): Promise<BranchesCarrefour> {
     const horsNoeud = anneau ? liaisonsHorsNoeud(branches, connexions, anneau) : [];
     if (horsNoeud.length > 0) {
       throw new BadRequestException({
@@ -245,6 +256,12 @@ export class BranchesService {
         // Les clés ont été validées par le schéma : les deux voies existent.
         await tx.execute(sql`
           INSERT INTO connexion (carrefour_id, voie_entree_id, voie_sortie_id)
+          VALUES (${carrefourId}, ${idsVoies.get(c.de)!}, ${idsVoies.get(c.vers)!})
+        `);
+      }
+      for (const c of chainages) {
+        await tx.execute(sql`
+          INSERT INTO chainage (carrefour_id, voie_sortie_id, voie_entree_id)
           VALUES (${carrefourId}, ${idsVoies.get(c.de)!}, ${idsVoies.get(c.vers)!})
         `);
       }

@@ -41,7 +41,9 @@ import {
 import { DIRECTIONS, FLECHES, SIGNAUX } from './libelles'
 import {
   ajouterVoie,
+  basculerChainage,
   basculerConnexion,
+  inverserVoie,
   basculerTraversee,
   changerPrioriteEntree,
   changerTypeVoie,
@@ -93,10 +95,12 @@ interface PropsVoie {
   onChanger: (brouillon: Brouillon) => void
   onOutil: (outil: OutilCarte) => void
   onBranche: (code: string) => void
+  /** Voie passée d'entrante à sortante (ou l'inverse) : sa clé change. */
+  onInverser: (inversee: { brouillon: Brouillon; cle: string }) => void
   onFermer: () => void
 }
 
-export function PopupVoie({ cle, brouillon, onChanger, onOutil, onBranche, onFermer }: PropsVoie) {
+export function PopupVoie({ cle, brouillon, onChanger, onOutil, onBranche, onInverser, onFermer }: PropsVoie) {
   const lue = lireCleVoie(cle)
   const branche = lue && brouillon.branches.find((b) => b.code === lue.branche)
   const voie = branche?.voies.find((v) => v.sens === lue!.sens && v.rang === lue!.rang)
@@ -104,6 +108,7 @@ export function PopupVoie({ cle, brouillon, onChanger, onOutil, onBranche, onFer
   const entrante = voie.sens === 'entrante'
   const directions = entrante ? (flechesParVoie(brouillon.branches, brouillon.connexions)[cle] ?? []) : []
   const liaisons = brouillon.connexions.filter((c) => c.de === cle || c.vers === cle)
+  const chainages = brouillon.chainages.filter((c) => c.de === cle || c.vers === cle)
 
   return (
     <PopupCarte
@@ -134,6 +139,22 @@ export function PopupVoie({ cle, brouillon, onChanger, onOutil, onBranche, onFer
           onChange={(type) => onChanger(changerTypeVoie(brouillon, branche.code, voie.sens, voie.rang, type))}
           options={TYPES}
         />
+      </Section>
+      <Section libelle="Sens">
+        <HStack justify="space-between">
+          <Text textStyle="sm">{entrante ? 'Arrive au carrefour' : 'Part du carrefour'}</Text>
+          <Button
+            size="xs"
+            title="Même tracé, même sens de circulation : la ligne d’arrêt passe à l’autre bout"
+            onClick={() => {
+              const inversee = inverserVoie(brouillon, cle)
+              if (inversee) onInverser(inversee)
+            }}
+          >
+            Passer en {entrante ? 'sortante' : 'entrante'}
+          </Button>
+        </HStack>
+        {(liaisons.length > 0 || chainages.length > 0) && <Aide>Ses liaisons et chaînages seront retirés.</Aide>}
       </Section>
       {entrante && (
         <Section libelle="Mouvements">
@@ -181,6 +202,20 @@ export function PopupVoie({ cle, brouillon, onChanger, onOutil, onBranche, onFer
           ))
         )}
       </Section>
+      {chainages.length > 0 && (
+        <Section libelle={`Chaînages (${chainages.length})`}>
+          {chainages.map((c) => (
+            <HStack key={`${c.de}>${c.vers}`} justify="space-between" textStyle="sm">
+              <Text>
+                {c.de} ⇢ {c.vers}
+              </Text>
+              <Button variant="lien" size="xs" colorPalette="red" onClick={() => onChanger(basculerChainage(brouillon, c.de, c.vers))}>
+                retirer
+              </Button>
+            </HStack>
+          ))}
+        </Section>
+      )}
     </PopupCarte>
   )
 }

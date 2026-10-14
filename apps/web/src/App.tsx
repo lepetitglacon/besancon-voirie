@@ -173,6 +173,7 @@ function App() {
   const [affichageConfiguration, setAffichageConfiguration] = useState<AffichageConfiguration>({
     branches: [],
     connexions: [],
+    chainages: [],
     anneau: null,
     mode: null,
     sousOutil: 'deplacer',
