@@ -1,5 +1,6 @@
-import { createSlotRecipeContext, type HTMLChakraProps } from '@chakra-ui/react'
-import { useEffect, useState } from 'react'
+import { chakra, createSlotRecipeContext, type HTMLChakraProps } from '@chakra-ui/react'
+import { NavigationControl } from 'maplibre-gl'
+import { useEffect, useRef } from 'react'
 import { useMap } from 'react-map-gl/maplibre'
 import { controleZoom } from '../theme/recettes-projet'
 
@@ -10,25 +11,26 @@ const Bouton = withContext<HTMLButtonElement, HTMLChakraProps<'button'>>('button
 const Separateur = withContext<HTMLDivElement, HTMLChakraProps<'div'>>('div', 'separateur')
 
 /**
- * Zoom et remise au nord, dans la `<Map>` ou à côté (sous le MapProvider). Le bouton « nord »
- * n'apparaît que lorsque la carte est tournée ou inclinée.
+ * Zoom et boussole, dans la `<Map>` ou à côté (sous le MapProvider). La boussole de MapLibre
+ * reste affichée : clic, remettre au nord et à plat ; glisser, tourner et incliner.
  */
 export function ControleZoom(props: HTMLChakraProps<'div'>) {
   // Dans la <Map> (current) ou à côté, sous le MapProvider (carte d'id « carte »).
   const cartes = useMap()
   const carte = cartes.current ?? cartes.carte
-  const [oriente, setOriente] = useState(false)
-
+  // Seul le bouton de la boussole est repris, sans le contrôle MapLibre (index.css l'habille).
+  const boussole = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (!carte) return
-    const suivre = () => setOriente(Math.abs(carte.getBearing()) > 0.5 || carte.getPitch() > 0.5)
-    suivre()
-    carte.on('rotate', suivre)
-    carte.on('pitch', suivre)
-    return () => {
-      carte.off('rotate', suivre)
-      carte.off('pitch', suivre)
+    const conteneur = boussole.current
+    if (!carte || !conteneur) return
+    const controle = new NavigationControl({ showZoom: false, visualizePitch: true })
+    conteneur.append(controle.onAdd(carte.getMap()))
+    const bouton = conteneur.querySelector('button')
+    if (bouton) {
+      bouton.title = 'Glisser : tourner et incliner la carte ; clic : remettre au nord'
+      bouton.setAttribute('aria-label', 'Boussole')
     }
+    return () => controle.onRemove()
   }, [carte])
 
   return (
@@ -40,14 +42,8 @@ export function ControleZoom(props: HTMLChakraProps<'div'>) {
       <Bouton aria-label="Dézoomer" onClick={() => carte?.zoomOut()}>
         −
       </Bouton>
-      {oriente && (
-        <>
-          <Separateur />
-          <Bouton aria-label="Remettre au nord" title="Remettre au nord" fontSize="13px" onClick={() => carte?.resetNorthPitch()}>
-            N
-          </Bouton>
-        </>
-      )}
+      <Separateur />
+      <chakra.div ref={boussole} className="controle-zoom__boussole" />
     </Racine>
   )
 }
