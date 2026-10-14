@@ -2,8 +2,11 @@ import { createSlotRecipeContext, type HTMLChakraProps } from '@chakra-ui/react'
 import type { ReactNode } from 'react'
 import { bandeauMode } from '../theme/recettes-projet'
 
-/** Sous la barre des modes de l'application, en haut au centre. */
-export const HAUT_BANDEAU = '84px'
+/** Bas de la barre d'outils flottante, en bas au centre de la carte. */
+export const BAS_BARRE_OUTILS = '22px'
+
+/** Hauteur d'une barre d'outils et de l'écart au-dessus : sous-outils et bandeau s'y empilent. */
+export const HAUTEUR_BARRE_OUTILS = '66px'
 
 const { withProvider, withContext } = createSlotRecipeContext({ recipe: bandeauMode })
 
@@ -17,7 +20,7 @@ interface Props extends Omit<HTMLChakraProps<'div'>, 'title'> {
   aides?: ReactNode[]
 }
 
-/** Pilule sombre en haut de la carte, qui rappelle le mode en cours et comment en sortir. */
+/** Pilule sombre posée au-dessus de la barre d'outils, qui rappelle le mode en cours et comment en sortir. */
 export function BandeauMode({ titre, aides = [], ...props }: Props) {
   return (
     <Racine {...props}>

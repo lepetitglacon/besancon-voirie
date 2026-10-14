@@ -37,7 +37,7 @@ import { useMap } from 'react-map-gl/maplibre'
 import { api } from '../api'
 import { NATURES } from '../carrefour/libelles'
 import { ResumeCarrefour } from '../carrefour/ResumeCarrefour'
-import { Aide, BandeauMode, BarreOutils, HAUT_BANDEAU, CarteEnTete, Chiffre, Indice, Message, notifications, PanneauBas, Valeur, type EtatLampe } from '../ds'
+import { Aide, BandeauMode, BarreOutils, BAS_BARRE_OUTILS, CarteEnTete, Chiffre, HAUTEUR_BARRE_OUTILS, Indice, Message, notifications, PanneauBas, Valeur, type EtatLampe } from '../ds'
 import { demanderNotificationsSysteme, enFile, useAnalysesIa } from './analysesIa'
 import { lireBrouillons, modifierBrouillons, useBrouillonsCarrefour, type ModificationsBrouillons } from './brouillons'
 import { Chrono } from './FileIa'
@@ -121,9 +121,6 @@ const CONSIGNES: Partial<Record<OutilCarte, { titre: string; aides: string[] }>>
     aides: ['Clic sur la carte : poser un nœud là où une rue (ou le tram) touche l’anneau', 'Glisser un nœud : le caler ; clic : ses réglages'],
   },
 }
-
-/** Hauteur de la barre d'outils du bas et de l'écart au-dessus : la barre des sous-outils s'y pose. */
-const HAUTEUR_BARRE_OUTILS = '66px'
 
 /** Outils qui ont des sous-outils, dans la petite barre au-dessus de la barre d'outils. */
 type OutilAvecSousOutils = 'ajuster' | 'pieton'
@@ -817,6 +814,9 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       : avecSousOutils(outil)
         ? CONSIGNES_SOUS_OUTILS[outil][sousOutil]
         : CONSIGNES[outil]
+  // Barres du bas : outils, sous-outils au-dessus, puis la consigne. Au-dessus du panneau ouvert.
+  const basBarre = panneauOuvert ? `calc(${hauteurPanneau} + 16px)` : BAS_BARRE_OUTILS
+  const sousOutilsAffiches = avecSousOutils(outil) && !cadrage
 
   return (
     <>
@@ -938,7 +938,8 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       {consigne && (
         <BandeauMode
           position="fixed"
-          top={HAUT_BANDEAU}
+          // Au-dessus de la barre d'outils, et de celle des sous-outils quand elle est affichée.
+          bottom={`calc(${basBarre} + ${HAUTEUR_BARRE_OUTILS} * ${sousOutilsAffiches ? 2 : 1})`}
           left="50%"
           transform="translateX(-50%)"
           zIndex="2"
@@ -953,12 +954,12 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       )}
 
       {/* Sous-outils de l'outil actif, sur une petite carte au-dessus de la barre d'outils. */}
-      {avecSousOutils(outil) && !cadrage && (
+      {sousOutilsAffiches && (
         <BarreOutils.Root
           position="fixed"
           left="50%"
           transform="translateX(-50%)"
-          bottom={panneauOuvert ? `calc(${hauteurPanneau} + 16px + ${HAUTEUR_BARRE_OUTILS})` : `calc(22px + ${HAUTEUR_BARRE_OUTILS})`}
+          bottom={`calc(${basBarre} + ${HAUTEUR_BARRE_OUTILS})`}
           zIndex="3"
           aria-label={outil === 'ajuster' ? 'Outils des voies' : 'Outils des passages piétons'}
         >
@@ -993,7 +994,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         position="fixed"
         left="50%"
         transform="translateX(-50%)"
-        bottom={panneauOuvert ? `calc(${hauteurPanneau} + 16px)` : '22px'}
+        bottom={basBarre}
         zIndex="3"
       >
         {OUTILS.filter((o) => giratoire || !o.giratoire).map((o) => (
