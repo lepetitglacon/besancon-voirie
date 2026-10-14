@@ -33,7 +33,7 @@ export function PanneauMesure({ mesures, onCentrer, ...props }: Props) {
     <Box {...props}>
       <CarteEnTete
         w="620px"
-        maxW="calc(100vw - 24px)"
+        maxW="calc(var(--ecran-w) - 24px)"
         surtitre={mesures.courante.id ? 'Édition de la mesure' : 'Nouvelle mesure'}
         titre={<EnTete mesures={mesures} />}
       >

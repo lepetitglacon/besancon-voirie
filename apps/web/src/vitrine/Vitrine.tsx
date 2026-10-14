@@ -18,7 +18,9 @@ import {
   Text,
   Wrap,
 } from '@chakra-ui/react'
+import { ArrowLeft } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
+import { Link, useLocation } from 'react-router'
 import {
   Aide,
   BandeauMode,
@@ -47,6 +49,9 @@ import {
 
 /** Vitrine du design system : chaque composant, dans ses états, en clair comme en sombre. */
 export default function Vitrine() {
+  // Vue de la carte au départ (« #zoom/lat/lon »), passée par le menu du site.
+  const vue: string = useLocation().state?.vue ?? ''
+
   return (
     <Box minH="100%" bg="bg.canvas" color="fg">
       <Flex as="header" align="center" gap="3" px="8" py="4" borderBottomWidth="1px" borderColor="border.subtle" bg="bg.panel">
@@ -54,6 +59,12 @@ export default function Vitrine() {
         <Aide>d'après documents/Traffic Manager UX.html</Aide>
         <Box flex="1" />
         <ModeCouleur />
+        <Button asChild size="sm" variant="outline">
+          <Link to={{ pathname: '/', hash: vue }}>
+            <ArrowLeft />
+            Retour à la carte
+          </Link>
+        </Button>
       </Flex>
       <Stack gap="10" px="8" py="8" maxW="1200px" mx="auto">
         <Fondations />

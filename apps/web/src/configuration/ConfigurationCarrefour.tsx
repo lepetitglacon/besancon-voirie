@@ -170,7 +170,7 @@ const CONSIGNES_SOUS_OUTILS: Record<OutilAvecSousOutils, Record<SousOutil, { tit
 
 /** Hauteur du panneau bas « Plan de feux », en % de la fenêtre. */
 const HAUTEUR_PANNEAU_VH = 44
-export const hauteurPanneau = `${HAUTEUR_PANNEAU_VH}vh`
+export const hauteurPanneau = `calc(var(--ecran-h) * ${HAUTEUR_PANNEAU_VH / 100})`
 
 /** Plus grand côté de l'image envoyée à l'IA (px) : la résolution baisse quand la zone grandit. */
 const TAILLE_PHOTO_IA_PX = 1024
@@ -826,7 +826,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         left="3"
         zIndex="2"
         w="340px"
-        maxW="calc(100vw - 24px)"
+        maxW="calc(var(--ecran-w) - 24px)"
         pe="10"
         surtitre={`Besançon Voirie · ${NATURES[carrefour.nature].toLowerCase()}`}
         titre={carrefour.nom}

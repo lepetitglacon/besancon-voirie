@@ -38,7 +38,8 @@ export function MenuContextuel({ point, entete, entrees, onChoisir, onFermer }: 
           pointerEvents="none"
           aria-hidden
           tabIndex={-1}
-          style={{ left: point?.x ?? 0, top: point?.y ?? 0 }}
+          // Point en pixels de la fenêtre : ramené à l'échelle de l'interface zoomée.
+          style={{ left: `calc(${point?.x ?? 0}px / var(--echelle-ui))`, top: `calc(${point?.y ?? 0}px / var(--echelle-ui))` }}
         />
       </Menu.Trigger>
       <Portal>
