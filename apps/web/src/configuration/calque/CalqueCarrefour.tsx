@@ -161,7 +161,9 @@ export function CalqueCarrefour(props: Props) {
     selection,
     cadrePhoto,
   } = props
-  const projection = useProjection()
+  // Le plan du calque suit la pente du terrain sous les voies.
+  const reperes = useMemo(() => branches.flatMap((b) => b.voies.flatMap((v) => v.geom)), [branches])
+  const projection = useProjection(reperes)
   const { current: carte } = useMap()
   const refSvg = useRef<SVGSVGElement>(null)
   const [survol, setSurvol] = useState<Survol>(null)
@@ -246,7 +248,7 @@ export function CalqueCarrefour(props: Props) {
   )
 
   if (!projection) return null
-  const { px, lonLat, metresParPixel } = projection
+  const { px, pointeur, metresParPixel, etendue, svg } = projection
   const largeurVoie = Math.max(2, LARGEUR_VOIE_M / metresParPixel)
   const largeurPassage = Math.max(2, LARGEUR_PASSAGE_M / metresParPixel)
 
@@ -296,16 +298,10 @@ export function CalqueCarrefour(props: Props) {
   }
 
   // ── Glisser-déposer (capture du pointeur sur la poignée) ──
-  const positionPointeur = (e: PointerEvent<SVGElement>): LonLat => {
-    const cadre = e.currentTarget.ownerSVGElement!.getBoundingClientRect()
-    return lonLat(e.clientX - cadre.left, e.clientY - cadre.top)
-  }
+  const positionPointeur = (e: PointerEvent<SVGElement>): LonLat => pointeur(e)
 
   const cliquable = mode === 'selection'
-  const positionClic = (e: MouseEvent<SVGElement>): LonLat => {
-    const cadre = (e.currentTarget.ownerSVGElement ?? e.currentTarget).getBoundingClientRect()
-    return lonLat(e.clientX - cadre.left, e.clientY - cadre.top)
-  }
+  const positionClic = (e: MouseEvent<SVGElement>): LonLat => pointeur(e)
 
   const sortanteLaPlusProche = (position: LonLat): string | null => {
     const [x, y] = px(position)
@@ -527,8 +523,8 @@ export function CalqueCarrefour(props: Props) {
   const cible = cibleEnCours ? voies.get(cibleEnCours) : undefined
 
   return (
-    <svg ref={refSvg} className={`calque-carrefour ${mode ?? 'lecture'}`} aria-label="Configuration du carrefour">
-      {coinsCadre && cadrePhoto && <CadrePhoto coins={coinsCadre} libelle={cadrePhoto.libelle} />}
+    <svg ref={refSvg} className={`calque-carrefour ${mode ?? 'lecture'}`} {...svg} aria-label="Configuration du carrefour">
+      {coinsCadre && cadrePhoto && <CadrePhoto coins={coinsCadre} libelle={cadrePhoto.libelle} etendue={etendue} />}
 
       {apercu.branches.map(
         (b) =>
@@ -694,10 +690,10 @@ export function CalqueCarrefour(props: Props) {
       {(pieton === 'tracer' || outilVoie === 'tracer') && (
         <rect
           className="calque-zone-trace"
-          x={-1e5}
-          y={-1e5}
-          width={2e5}
-          height={2e5}
+          x={etendue.x}
+          y={etendue.y}
+          width={etendue.largeur}
+          height={etendue.hauteur}
           onPointerDown={commencerTrace}
           onPointerMove={suivre}
           onPointerUp={terminer}

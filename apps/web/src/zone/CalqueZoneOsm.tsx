@@ -7,7 +7,8 @@
  */
 import type { LonLat, XY } from '@voirie/engine'
 import type { PolygonesZone } from '@voirie/schema'
-import { useState, type PointerEvent } from 'react'
+import { useMemo, useState, type PointerEvent } from 'react'
+import { fond } from '../configuration/calque/elements'
 import { useProjection } from '../configuration/calque/projection'
 
 export type ModeZone = 'retoucher' | 'choisir' | 'dessiner'
@@ -32,10 +33,12 @@ type Saisie = { polygone: number; sommet: number; position: LonLat; insere: bool
 const chemin = (points: readonly XY[]) => `${points.map(([x, y], i) => `${i ? 'L' : 'M'}${x},${y}`).join(' ')} Z`
 
 export function CalqueZoneOsm({ polygones, importee, mode, onChanger, point, trace, onFermerTrace }: Props) {
-  const projection = useProjection()
+  // Le plan du calque suit la pente du terrain sous la zone.
+  const reperes = useMemo(() => (polygones ?? importee)?.flat(), [polygones, importee])
+  const projection = useProjection(reperes)
   const [saisie, setSaisie] = useState<Saisie | null>(null)
   if (!projection) return null
-  const { px, lonLat } = projection
+  const { px, lonLat, pointeur, etendue, svg } = projection
 
   // Pendant un glisser, le polygone suit le pointeur ; il n'est remonté qu'au relâché.
   const affiches: PolygonesZone | null =
@@ -47,10 +50,7 @@ export function CalqueZoneOsm({ polygones, importee, mode, onChanger, point, tra
         })
       : polygones
 
-  const position = (e: PointerEvent<SVGElement>): LonLat => {
-    const cadre = e.currentTarget.ownerSVGElement!.getBoundingClientRect()
-    return lonLat(e.clientX - cadre.left, e.clientY - cadre.top)
-  }
+  const position = (e: PointerEvent<SVGElement>): LonLat => pointeur(e)
 
   const saisir = (polygone: number, sommet: number, insere: LonLat | null) => (e: PointerEvent<SVGElement>) => {
     if (e.button !== 0 || !polygones) return
@@ -73,8 +73,8 @@ export function CalqueZoneOsm({ polygones, importee, mode, onChanger, point, tra
   // La carte est assombrie hors du tracé, ou à défaut hors de la zone importée.
   const masque = contours.length > 0 ? contours : anciens
   return (
-    <svg className={`calque-zone-osm ${mode}`} aria-label="Zone d'import OSM">
-      {masque.length > 0 && <path className="masque" d={`M-1e5,-1e5 H1e5 V1e5 H-1e5 Z ${masque.map(chemin).join(' ')}`} fillRule="evenodd" />}
+    <svg className={`calque-zone-osm ${mode}`} {...svg} aria-label="Zone d'import OSM">
+      {masque.length > 0 && <path className="masque" d={`${fond(etendue)} ${masque.map(chemin).join(' ')}`} fillRule="evenodd" />}
       {anciens.map((contour, i) => (
         <path key={`importee-${i}`} className="importee" d={chemin(contour)}>
           <title>Zone du dernier import</title>

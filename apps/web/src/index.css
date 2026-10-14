@@ -28,11 +28,12 @@ body {
 /* ── Calque de configuration (SVG au-dessus de la carte) ── */
 
 .calque-carrefour {
+  /* Plan au sol : taille et transformation 3D viennent de la projection (projection.ts). */
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
   z-index: 1;
-  width: 100%;
-  height: 100%;
+  transform-origin: 0 0;
   overflow: visible;
   pointer-events: none; /* le fond laisse passer les gestes vers la carte */
   user-select: none;
@@ -566,11 +567,12 @@ svg.graphe-etapes {
 /* ── Zone d'import OSM (outil « Zone OSM » du mode Édition) ── */
 
 .calque-zone-osm {
+  /* Plan au sol : taille et transformation 3D viennent de la projection (projection.ts). */
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
   z-index: 1;
-  width: 100%;
-  height: 100%;
+  transform-origin: 0 0;
   overflow: visible;
   pointer-events: none;
   user-select: none;
