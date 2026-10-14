@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Layer, NavigationControl, Source, useMap } from 'react-map-gl/maplibre'
+import { Layer, Source, useMap } from 'react-map-gl/maplibre'
 import { MNT_TERRARIUM } from './altitude'
 import { aujourdhuiA, clarte, melanger, positionSoleil } from './soleil'
 
@@ -147,7 +147,6 @@ export function FondDeCarte(options: OptionsFond) {
 
   return (
     <>
-      {affichage3d && <NavigationControl position="bottom-right" visualizePitch showZoom={false} />}
       <Source
         id={SOURCE_MNT}
         type="raster-dem"

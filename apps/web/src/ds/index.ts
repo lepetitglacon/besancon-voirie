@@ -1,5 +1,5 @@
 /** Design system du projet : composants Chakra habillés d'après la maquette « Traffic Manager ». */
-export { BandeauMode, HAUT_BANDEAU } from './BandeauMode'
+export { BandeauMode, BAS_BARRE_OUTILS, HAUTEUR_BARRE_OUTILS } from './BandeauMode'
 export * as BarreOutils from './BarreOutils'
 export { CarteEnTete } from './CarteEnTete'
 export { Chiffre } from './Chiffre'

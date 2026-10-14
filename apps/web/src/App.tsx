@@ -22,7 +22,8 @@ import {
 import {
   Aide,
   BandeauMode,
-  HAUT_BANDEAU,
+  BAS_BARRE_OUTILS,
+  HAUTEUR_BARRE_OUTILS,
   BarreOutils,
   Bascule,
   BoutonCarte,
@@ -757,8 +758,12 @@ function App() {
         position="fixed"
         left="50%"
         transform="translateX(-50%)"
-        // Au-dessus de la barre d'outils centrale, quand elle est affichée.
-        bottom={modeEdition && !configuration ? '96px' : '22px'}
+        // Au-dessus de la barre d'outils centrale et de sa bulle d'aide, quand elles sont affichées.
+        bottom={
+          modeEdition && !configuration
+            ? `calc(${BAS_BARRE_OUTILS} + ${HAUTEUR_BARRE_OUTILS} * ${edition || outilZone ? 2 : 1})`
+            : BAS_BARRE_OUTILS
+        }
         zIndex="3"
         mesures={mesures}
         onCentrer={centrerSur}
@@ -877,7 +882,8 @@ function App() {
           {edition && (
             <BandeauMode
               position="fixed"
-              top={HAUT_BANDEAU}
+              // Au-dessus de la barre d'outils du bas.
+              bottom={`calc(${BAS_BARRE_OUTILS} + ${HAUTEUR_BARRE_OUTILS})`}
               left="50%"
               transform="translateX(-50%)"
               zIndex="2"
@@ -894,7 +900,8 @@ function App() {
           {outilZone && (
             <BandeauMode
               position="fixed"
-              top={HAUT_BANDEAU}
+              // Au-dessus de la barre d'outils du bas.
+              bottom={`calc(${BAS_BARRE_OUTILS} + ${HAUTEUR_BARRE_OUTILS})`}
               left="50%"
               transform="translateX(-50%)"
               zIndex="2"
@@ -912,7 +919,7 @@ function App() {
             />
           )}
 
-          {modeEdition && <BarreOutils.Root position="fixed" left="50%" transform="translateX(-50%)" bottom="22px" zIndex="3">
+          {modeEdition && <BarreOutils.Root position="fixed" left="50%" transform="translateX(-50%)" bottom={BAS_BARRE_OUTILS} zIndex="3">
             {edition ? (
               <>
                 <BarreOutils.Outil

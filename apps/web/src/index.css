@@ -32,6 +32,27 @@ body {
   pointer-events: none;
 }
 
+/* Boussole de MapLibre dans <ControleZoom> : sans son habillage, au gabarit des boutons de zoom. */
+.controle-zoom__boussole .maplibregl-ctrl-group {
+  margin: 0;
+  background: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.controle-zoom__boussole .maplibregl-ctrl-group button {
+  width: 36px;
+  height: 36px;
+}
+
+.controle-zoom__boussole .maplibregl-ctrl-group button:hover {
+  background-color: var(--chakra-colors-bg-muted);
+}
+
+:root.dark .controle-zoom__boussole .maplibregl-ctrl-icon {
+  filter: invert(1);
+}
+
 .popup-carte-ancre {
   z-index: 3;
 }
