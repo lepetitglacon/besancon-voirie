@@ -1,4 +1,5 @@
-import { Accordion, Box, Button, chakra, HStack, Stack, Text } from '@chakra-ui/react'
+import { Accordion, Box, Button, HStack, Stack, Text } from '@chakra-ui/react'
+import { PastilleLigne } from '../ds'
 import { CATEGORIES_BUS, type LigneBus } from './lignesBus'
 
 interface Props {
@@ -11,7 +12,8 @@ interface Props {
 
 /**
  * Lignes de bus affichées, en accordéon par famille : plus de 150 lignes, repliées par défaut
- * pour ne pas envahir le panneau. Une pastille par ligne, pleine si la ligne est affichée.
+ * pour ne pas envahir le panneau. Une pastille par ligne (PastilleLigne), pleine si la ligne est
+ * affichée.
  */
 export function ChoixLignesBus({ lignes, masquees, onChange, enCirculation }: Props) {
   const basculer = (ligne: string) => {
@@ -60,30 +62,17 @@ export function ChoixLignesBus({ lignes, masquees, onChange, enCirculation }: Pr
                   </HStack>
                   <HStack gap="1" wrap="wrap">
                     {famille.map(({ ligne, couleur, couleurTexte }) => {
-                      const visible = !masquees.has(ligne)
                       const n = enCirculation?.get(ligne) ?? 0
                       return (
-                        <chakra.button
+                        <PastilleLigne
                           key={ligne}
-                          type="button"
-                          aria-pressed={visible}
+                          ligne={ligne}
+                          couleur={couleur}
+                          couleurTexte={couleurTexte}
+                          affichee={!masquees.has(ligne)}
+                          onChange={() => basculer(ligne)}
                           title={`Ligne ${ligne}${enCirculation ? ` · ${n} bus en circulation` : ''}`}
-                          onClick={() => basculer(ligne)}
-                          minW="7"
-                          px="1.5"
-                          py="0.5"
-                          borderRadius="sm"
-                          borderWidth="1.5px"
-                          borderColor={couleur}
-                          bg={visible ? couleur : 'transparent'}
-                          color={visible ? couleurTexte : 'fg.muted'}
-                          textStyle="2xs"
-                          fontWeight="semibold"
-                          cursor="pointer"
-                          opacity={visible ? 1 : 0.7}
-                        >
-                          {ligne}
-                        </chakra.button>
+                        />
                       )
                     })}
                   </HStack>

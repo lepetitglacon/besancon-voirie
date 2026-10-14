@@ -39,6 +39,7 @@ import {
   ModeCouleur,
   PanneauBas,
   Pastille,
+  PastilleLigne,
   PopupCarte,
   Section,
   Segments,
@@ -47,6 +48,8 @@ import {
   Valeur,
   type EtatLampe,
 } from '../ds'
+import { ChoixLignesBus } from '../bus/ChoixLignesBus'
+import type { LigneBus } from '../bus/lignesBus'
 
 /** Vitrine du design system : chaque composant, dans ses états, en clair comme en sombre. */
 export default function Vitrine() {
@@ -474,16 +477,8 @@ function ComposantsProjet() {
         </Flex>
       </Exemple>
 
-      <Exemple nom="Étiquettes de véhicules (marqueurs de la carte)">
-        <Wrap gap="3" align="center" p="4" bg="bg.muted" borderRadius="l2">
-          {ETIQUETTES.map((e) => (
-            <EtiquetteVehicule key={`${e.mode}-${e.ligne}`} {...e} />
-          ))}
-        </Wrap>
-        <Aide>
-          Pictogramme et numéro aux couleurs GTFS de la ligne, bord blanc pour la photo aérienne. Tram : silhouette de
-          rame, bas plat et large, haut arrondi. Bus : carré. Estompée (55 %) au terminus.
-        </Aide>
+      <Exemple nom="Transports en commun">
+        <Transports />
       </Exemple>
 
       <Exemple nom="Popups de la carte">
@@ -596,9 +591,85 @@ function ComposantsProjet() {
             <Text>Arrivée prévue dans 2 min</Text>
             <Aide>Durée du tronçon : médiane de 214 passages observés</Aide>
           </PopupCarte>
+
+          <PopupCarte
+            taille="compacte"
+            icone={<EtiquetteVehicule mode="bus" ligne="L4" couleur="#E2001A" couleurTexte="#FFFFFF" />}
+            titre="L4 → Pôle Orchamps"
+            soustitre="Bus 146"
+            onFermer={() => {}}
+          >
+            <Text>4 Vents → Gounod</Text>
+            <Text>Arrivée prévue dans 40 s</Text>
+            <Aide>Vitesse moyenne du tronçon : 31 km/h · zone probable : 340 m</Aide>
+          </PopupCarte>
         </Flex>
       </Exemple>
     </Bloc>
+  )
+}
+
+/** Lignes d'exemple pour le choix des lignes de bus. */
+const LIGNES_BUS: LigneBus[] = [
+  { ligne: 'L3', couleur: '#006AB3', couleurTexte: '#FFFFFF', categorie: 'lianes' },
+  { ligne: 'L4', couleur: '#E2001A', couleurTexte: '#FFFFFF', categorie: 'lianes' },
+  { ligne: 'L5', couleur: '#1FA22E', couleurTexte: '#FFFFFF', categorie: 'lianes' },
+  { ligne: 'L6', couleur: '#FFE500', couleurTexte: '#000000', categorie: 'lianes' },
+  { ligne: '7', couleur: '#A74C21', couleurTexte: '#FFFFFF', categorie: 'urbaines' },
+  { ligne: '10', couleur: '#CECB00', couleurTexte: '#000000', categorie: 'urbaines' },
+  { ligne: '51', couleur: '#009EE0', couleurTexte: '#FFFFFF', categorie: 'periurbaines' },
+  { ligne: 'D104', couleur: '#E8526B', couleurTexte: '#FFFFFF', categorie: 'scolaires' },
+]
+
+/** Étiquettes des véhicules sur la carte, pastilles et accordéon du choix des lignes de bus. */
+function Transports() {
+  const [masquees, setMasquees] = useState<Set<string>>(() => new Set(['D104']))
+  return (
+    <Stack gap="4">
+      <Stack gap="1.5">
+        <LibelleSection>Étiquettes de véhicules (marqueurs de la carte)</LibelleSection>
+        <Wrap gap="3" align="center" p="4" bg="bg.muted" borderRadius="l2">
+          {ETIQUETTES.map((e) => (
+            <EtiquetteVehicule key={`${e.mode}-${e.ligne}`} {...e} />
+          ))}
+        </Wrap>
+        <Aide>
+          Pictogramme et numéro aux couleurs GTFS de la ligne, bord blanc pour la photo aérienne. Tram : silhouette de
+          rame, bas plat et large, haut arrondi. Bus : carré. Estompée (55 %) au terminus. Sur la carte, la traînée
+          (zone probable) est tracée dans la couleur de la ligne sous l'étiquette.
+        </Aide>
+      </Stack>
+      <Stack gap="1.5">
+        <LibelleSection>Pastilles de ligne</LibelleSection>
+        <HStack gap="1" wrap="wrap">
+          {LIGNES_BUS.map((l) => (
+            <PastilleLigne
+              key={l.ligne}
+              {...l}
+              affichee={!masquees.has(l.ligne)}
+              onChange={(affichee) =>
+                setMasquees((m) => {
+                  const suivantes = new Set(m)
+                  if (affichee) suivantes.delete(l.ligne)
+                  else suivantes.add(l.ligne)
+                  return suivantes
+                })
+              }
+            />
+          ))}
+        </HStack>
+        <Aide>Pleine : ligne affichée ; contour : masquée.</Aide>
+      </Stack>
+      <Stack gap="1.5">
+        <LibelleSection>Choix des lignes de bus (Données brutes, Calques)</LibelleSection>
+        <ChoixLignesBus
+          lignes={LIGNES_BUS}
+          masquees={masquees}
+          onChange={setMasquees}
+          enCirculation={new Map([['L3', 4], ['L4', 3], ['7', 2], ['51', 1]])}
+        />
+      </Stack>
+    </Stack>
   )
 }
 
