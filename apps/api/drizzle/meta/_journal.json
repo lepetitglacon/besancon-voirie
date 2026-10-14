@@ -162,6 +162,13 @@
       "when": 1791938126869,
       "tag": "20261014003526_chainage",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792008044108,
+      "tag": "20261014200044_bus_passage",
+      "breakpoints": true
     }
   ]
 }

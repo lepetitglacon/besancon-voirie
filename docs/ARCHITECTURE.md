@@ -729,6 +729,14 @@ du temps, ni la fiabilité réelle des estimations. L'API enregistre donc chaque
 - Limites : pas de GPS, donc la perte est connue par tronçon, pas au mètre près. Le temps à
   quai n'est pas séparable du roulage (Ginko ne publie pas de départ distinct). Les fériés et
   les vacances scolaires ne sont pas distingués.
+- **Bus** : même chaîne, avec la même lecture du flux (`BUS_COLLECTE`, comme `TRAM_COLLECTE`
+  s'il est absent), dans `bus_passage` et la vue `bus_troncon_observe`. Côté réseau, un
+  parcours bus est un tracé GTFS (`<route>-<sens>-<shape_id>`), car les variantes d'une ligne
+  ne desservent pas les mêmes arrêts. Ginko renumérote les `shape_id` à chaque publication, et
+  plusieurs lignes partagent les mêmes rues : l'historique bus est donc regroupé par couple
+  d'arrêts, toutes lignes confondues (parcours fictif `*`). Les marges de repli
+  (`PARAMETRES_BUS`) sont plus larges que celles du tram tant que l'historique manque.
+  Volume : ~10 fois celui du tram.
 
 
 ### 8.3 Modes d'affichage et fond de carte

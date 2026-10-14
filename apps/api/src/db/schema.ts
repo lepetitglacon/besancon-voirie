@@ -301,51 +301,62 @@ export const topSynchro = pgTable(
 );
 
 /**
- * Passage d'une rame à un arrêt, déduit du flux GTFS-RT Ginko : l'arrêt disparaît de la liste
- * des arrêts restants de la course. Voir docs/ARCHITECTURE.md §8.2.
+ * Passage d'un véhicule à un arrêt, déduit du flux GTFS-RT Ginko : l'arrêt disparaît de la liste
+ * des arrêts restants de la course. Voir docs/ARCHITECTURE.md §8.2. Mêmes colonnes pour le tram
+ * et le bus, dans deux tables : le bus compte dix fois plus de passages.
  */
-export const tramPassage = pgTable(
-  'tram_passage',
-  {
-    /** Jour de service de la course (une course après minuit appartient à la veille). */
-    jour: date('jour', { mode: 'string' }).notNull(),
-    course: text('course').notNull(),
-    sequence: smallint('sequence').notNull(),
-    vehicule: text('vehicule'),
-    parcours: text('parcours').notNull(),
-    arret: text('arret').notNull(),
-    arretPrecedent: text('arret_precedent'),
-    /** Dernière heure prévue avant la disparition de l'arrêt : l'heure de passage retenue. */
-    heurePrevue: timestamp('heure_prevue', { withTimezone: true }).notNull(),
-    /** Instant (horodatage du flux) où l'arrêt a disparu. */
-    detecteA: timestamp('detecte_a', { withTimezone: true }).notNull(),
-    heureTheorique: timestamp('heure_theorique', { withTimezone: true }),
-    /** Heure prévue à différents horizons avant le passage : horizon (s) → s epoch. */
-    previsions: jsonb('previsions').$type<Record<string, number>>().notNull().default({}),
-  },
-  (t) => [
-    primaryKey({ columns: [t.jour, t.course, t.sequence] }),
-    uniqueIndex('tram_passage_course_arret_idx').on(t.jour, t.course, t.arret),
-    index('tram_passage_heure_idx').on(t.heurePrevue),
-  ],
-);
+function tablePassages<N extends string>(nom: N) {
+  return pgTable(
+    nom,
+    {
+      /** Jour de service de la course (une course après minuit appartient à la veille). */
+      jour: date('jour', { mode: 'string' }).notNull(),
+      course: text('course').notNull(),
+      sequence: smallint('sequence').notNull(),
+      vehicule: text('vehicule'),
+      parcours: text('parcours').notNull(),
+      arret: text('arret').notNull(),
+      arretPrecedent: text('arret_precedent'),
+      /** Dernière heure prévue avant la disparition de l'arrêt : l'heure de passage retenue. */
+      heurePrevue: timestamp('heure_prevue', { withTimezone: true }).notNull(),
+      /** Instant (horodatage du flux) où l'arrêt a disparu. */
+      detecteA: timestamp('detecte_a', { withTimezone: true }).notNull(),
+      heureTheorique: timestamp('heure_theorique', { withTimezone: true }),
+      /** Heure prévue à différents horizons avant le passage : horizon (s) → s epoch. */
+      previsions: jsonb('previsions').$type<Record<string, number>>().notNull().default({}),
+    },
+    (t) => [
+      primaryKey({ columns: [t.jour, t.course, t.sequence] }),
+      uniqueIndex(`${nom}_course_arret_idx`).on(t.jour, t.course, t.arret),
+      index(`${nom}_heure_idx`).on(t.heurePrevue),
+    ],
+  );
+}
+
+export const tramPassage = tablePassages('tram_passage');
+export const busPassage = tablePassages('bus_passage');
 
 /**
  * Durée observée de chaque tronçon : deux passages consécutifs d'une même course.
- * Créée par une migration manuelle (0003), déclarée ici pour le typage.
+ * Créées par des migrations manuelles (0003 pour le tram), déclarées ici pour le typage.
  */
-export const tramTronconObserve = pgView('tram_troncon_observe', {
-  parcours: text('parcours').notNull(),
-  depart: text('depart').notNull(),
-  arrivee: text('arrivee').notNull(),
-  jour: date('jour', { mode: 'string' }).notNull(),
-  course: text('course').notNull(),
-  vehicule: text('vehicule'),
-  arriveeA: timestamp('arrivee_a', { withTimezone: true }).notNull(),
-  dureeS: real('duree_s').notNull(),
-  heure: smallint('heure').notNull(),
-  typeJour: text('type_jour').notNull(),
-}).existing();
+function vueTroncons<N extends string>(nom: N) {
+  return pgView(nom, {
+    parcours: text('parcours').notNull(),
+    depart: text('depart').notNull(),
+    arrivee: text('arrivee').notNull(),
+    jour: date('jour', { mode: 'string' }).notNull(),
+    course: text('course').notNull(),
+    vehicule: text('vehicule'),
+    arriveeA: timestamp('arrivee_a', { withTimezone: true }).notNull(),
+    dureeS: real('duree_s').notNull(),
+    heure: smallint('heure').notNull(),
+    typeJour: text('type_jour').notNull(),
+  }).existing();
+}
+
+export const tramTronconObserve = vueTroncons('tram_troncon_observe');
+export const busTronconObserve = vueTroncons('bus_troncon_observe');
 
 /** File des propositions « OSM + IA » : une analyse de l'orthophoto par Claude, par demande. */
 export const statutAnalyseIa = pgEnum('statut_analyse_ia', ['en_attente', 'en_cours', 'terminee', 'echec']);

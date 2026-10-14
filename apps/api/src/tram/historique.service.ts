@@ -2,8 +2,23 @@ import { Inject, Injectable } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import type { CalibrationPrevision, TronconObserve, TypeJour } from '@voirie/schema';
 import { DRIZZLE, type Db } from '../db/db.module.js';
-import { tramPassage, tramTronconObserve } from '../db/schema.js';
+import { busPassage, busTronconObserve, tramPassage, tramTronconObserve } from '../db/schema.js';
 import type { Passage } from './collecte.js';
+
+/** Mode dont on garde l'historique des passages. */
+export type ModeTransport = 'tram' | 'bus';
+
+const TABLES = {
+  tram: { passages: tramPassage, troncons: tramTronconObserve },
+  bus: { passages: busPassage, troncons: busTronconObserve },
+} as const;
+
+/**
+ * Les tracés des bus (`shape_id`) sont renumérotés à chaque publication du GTFS, et plusieurs
+ * lignes empruntent la même rue : leurs tronçons sont regroupés par couple d'arrêts, toutes
+ * lignes confondues, sous ce parcours fictif.
+ */
+export const PARCOURS_BUS = '*';
 
 /** Profondeur par défaut de l'historique exploité, en jours. */
 export const HISTORIQUE_JOURS = 28;
@@ -31,11 +46,12 @@ export class HistoriqueTramService {
   constructor(@Inject(DRIZZLE) private readonly db: Db) {}
 
   /** Enregistre des passages ; ceux déjà connus sont ignorés. Renvoie le nombre d'ajouts. */
-  async enregistrer(passages: Passage[]): Promise<number> {
+  async enregistrer(passages: Passage[], mode: ModeTransport = 'tram'): Promise<number> {
     if (passages.length === 0) return 0;
+    const table = TABLES[mode].passages;
     const date = (s: number) => new Date(s * 1000);
     const ajoutes = await this.db
-      .insert(tramPassage)
+      .insert(table)
       .values(
         passages.map((passage) => ({
           ...passage,
@@ -45,20 +61,26 @@ export class HistoriqueTramService {
         })),
       )
       .onConflictDoNothing()
-      .returning({ jour: tramPassage.jour });
+      .returning({ jour: table.jour });
     return ajoutes.length;
   }
 
   /**
    * Durées observées de chaque tronçon sur les `jours` derniers jours, pour un type de jour et
    * une heure locale (`null` : toute la journée). La référence est le p10 toutes heures
-   * confondues : la durée du tronçon quand ça roule bien.
+   * confondues : la durée du tronçon quand ça roule bien. Bus : par couple d'arrêts (PARCOURS_BUS).
    */
-  async troncons(typeJour: TypeJour, heure: number | null, jours: number): Promise<TronconObserve[]> {
-    const t = tramTronconObserve;
+  async troncons(
+    typeJour: TypeJour,
+    heure: number | null,
+    jours: number,
+    mode: ModeTransport = 'tram',
+  ): Promise<TronconObserve[]> {
+    const t = TABLES[mode].troncons;
+    const parcours = mode === 'bus' ? sql`${PARCOURS_BUS}::text` : sql`${t.parcours}`;
     const { rows } = await this.db.execute<TronconObserve & Record<string, unknown>>(sql`
       WITH obs AS (
-        SELECT ${t.parcours} AS parcours, ${t.depart} AS depart, ${t.arrivee} AS arrivee,
+        SELECT ${parcours} AS parcours, ${t.depart} AS depart, ${t.arrivee} AS arrivee,
                ${t.dureeS} AS duree, ${t.heure} AS heure
         FROM ${t}
         WHERE ${t.typeJour} = ${typeJour}
@@ -84,25 +106,27 @@ export class HistoriqueTramService {
   }
 
   /** Volume de l'historique : nombre de passages, premier et dernier. */
-  async volume(): Promise<{ passages: number; premier: string | null; dernier: string | null }> {
+  async volume(mode: ModeTransport = 'tram'): Promise<{ passages: number; premier: string | null; dernier: string | null }> {
+    const passages = TABLES[mode].passages;
     const { rows } = await this.db.execute<{ passages: number; premier: string | null; dernier: string | null }>(sql`
-      SELECT count(*)::int AS passages, min(${tramPassage.heurePrevue}) AS premier,
-             max(${tramPassage.heurePrevue}) AS dernier
-      FROM ${tramPassage}
+      SELECT count(*)::int AS passages, min(${passages.heurePrevue}) AS premier,
+             max(${passages.heurePrevue}) AS dernier
+      FROM ${passages}
     `);
     return rows[0] ?? { passages: 0, premier: null, dernier: null };
   }
 
   /** Erreur des prévisions Ginko par horizon (80e centile), sur les `jours` derniers jours. */
-  async calibration(jours: number): Promise<CalibrationPrevision | undefined> {
+  async calibration(jours: number, mode: ModeTransport = 'tram'): Promise<CalibrationPrevision | undefined> {
+    const passages = TABLES[mode].passages;
     const { rows } = await this.db.execute<{ horizon: number; n: number; erreur: number }>(sql`
       SELECT e.horizon::int AS horizon, count(*)::int AS n,
              percentile_cont(0.8) WITHIN GROUP (
-               ORDER BY abs(extract(epoch FROM ${tramPassage.heurePrevue}) - e.prevue::float8)
+               ORDER BY abs(extract(epoch FROM ${passages.heurePrevue}) - e.prevue::float8)
              ) AS erreur
-      FROM ${tramPassage}
-      CROSS JOIN LATERAL jsonb_each_text(${tramPassage.previsions}) AS e(horizon, prevue)
-      WHERE ${tramPassage.heurePrevue} > now() - make_interval(days => ${jours}::int)
+      FROM ${passages}
+      CROSS JOIN LATERAL jsonb_each_text(${passages.previsions}) AS e(horizon, prevue)
+      WHERE ${passages.heurePrevue} > now() - make_interval(days => ${jours}::int)
       GROUP BY 1
       ORDER BY 1
     `);

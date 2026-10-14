@@ -36,6 +36,22 @@ export const PARAMETRES_TRAM = {
   incertitudePlancher: 5,
 } as const;
 
+/**
+ * Bus : pas d'historique des passages, et une marche bien plus irrégulière que le tram (trafic,
+ * feux sans priorité, arrêts à la demande). Les marges de repli sont donc plus larges.
+ */
+/** Réglages de l'estimation de position, tram ou bus. */
+export type ParametresPosition = { readonly [K in keyof typeof PARAMETRES_TRAM]: number };
+
+export const PARAMETRES_BUS: ParametresPosition = {
+  tempsArret: 10,
+  incertitudeMin: 20,
+  incertitudeRelative: 0.3,
+  incertitudeParSecondeDAge: 0.3,
+  ecartVitesse: 0.4,
+  incertitudePlancher: 10,
+};
+
 export interface TronconTram {
   /** Longueur du tracé entre les deux arrêts, en m. */
   longueur: number;
@@ -89,7 +105,7 @@ export function estimerPositionTram(
   restant: number,
   age = 0,
   calibration?: CalibrationPrevision,
-  parametres: typeof PARAMETRES_TRAM = PARAMETRES_TRAM,
+  parametres: ParametresPosition = PARAMETRES_TRAM,
 ): PositionTram {
   if (longueur < 0 || duree <= 0) throw new RangeError('Tronçon invalide');
   const roulage = (d: number) => d - Math.min(parametres.tempsArret, d / 2);

@@ -9,8 +9,20 @@ import type { ParcoursTram, ReseauTram } from '@voirie/schema';
 /** Contenu texte des fichiers du GTFS, par nom (`stops.txt`…). */
 export type FichiersGtfs = Record<string, string>;
 
-/** GTFS `route_type` du tramway. */
-const TYPE_TRAMWAY = '0';
+/**
+ * Mode de transport extrait du GTFS. `regroupement` : un parcours par ligne et par sens (tram,
+ * dont les variantes desservent les mêmes arrêts) ou un parcours par tracé (bus : jusqu'à huit
+ * tracés par ligne et par sens, qui ne desservent pas les mêmes arrêts).
+ */
+export interface ModeGtfs {
+  /** GTFS `route_type` retenus. */
+  types: string[];
+  regroupement: 'sens' | 'trace';
+}
+
+export const MODE_TRAM: ModeGtfs = { types: ['0'], regroupement: 'sens' };
+/** Bus réguliers (`3`) ; le transport à la demande (`715`) n'a pas d'horaires fixes. */
+export const MODE_BUS: ModeGtfs = { types: ['3'], regroupement: 'trace' };
 
 /**
  * Lit un fichier CSV GTFS (champs entre guillemets possibles, pas de retour à la ligne dans
@@ -96,6 +108,18 @@ export interface ReseauTramInterne {
   dureesTheoriques: Map<string, number>;
 }
 
+/**
+ * Couleurs d'une ligne. Quelques lignes périurbaines sont blanches à texte coloré : invisibles
+ * sur la carte, on les dessine dans la couleur de leur texte.
+ */
+function couleursLigne(fond = '', texte = ''): { couleur: string; couleurTexte: string } {
+  const couleur = fond || '888888';
+  const couleurTexte = texte || 'FFFFFF';
+  return /^f{6}$/i.test(couleur) && !/^f{6}$/i.test(couleurTexte)
+    ? { couleur: `#${couleurTexte}`, couleurTexte: '#FFFFFF' }
+    : { couleur: `#${couleur}`, couleurTexte: `#${couleurTexte}` };
+}
+
 function plusFrequent(valeurs: string[]): string | undefined {
   const comptes = new Map<string, number>();
   for (const valeur of valeurs) comptes.set(valeur, (comptes.get(valeur) ?? 0) + 1);
@@ -125,14 +149,26 @@ function lire(fichiers: FichiersGtfs, nom: string): string {
  * on garde la plus utilisée.
  */
 export function construireReseauTram(fichiers: FichiersGtfs): ReseauTramInterne {
+  return construireReseau(fichiers, MODE_TRAM);
+}
+
+/** Extrait du GTFS les lignes de bus, un parcours par tracé. */
+export function construireReseauBus(fichiers: FichiersGtfs): ReseauTramInterne {
+  return construireReseau(fichiers, MODE_BUS);
+}
+
+export function construireReseau(fichiers: FichiersGtfs, mode: ModeGtfs): ReseauTramInterne {
   const routes = new Map(
     lireCsv(lire(fichiers, 'routes.txt'))
-      .filter((route) => route.route_type === TYPE_TRAMWAY)
+      .filter((route) => mode.types.includes(route.route_type!))
       .map((route) => [route.route_id!, route]),
   );
   const trips = lireCsv(lire(fichiers, 'trips.txt')).filter((trip) => routes.has(trip.route_id!));
   const parcoursDeCourse = new Map(
-    trips.map((trip) => [trip.trip_id!, `${trip.route_id}-${trip.direction_id || '0'}`]),
+    trips.map((trip) => {
+      const sens = `${trip.route_id}-${trip.direction_id || '0'}`;
+      return [trip.trip_id!, mode.regroupement === 'trace' && trip.shape_id ? `${sens}-${trip.shape_id}` : sens];
+    }),
   );
 
   const horaires = grouper(
@@ -205,8 +241,7 @@ export function construireReseauTram(fichiers: FichiersGtfs): ReseauTramInterne 
     reseau.public.parcours.push({
       id: parcours,
       ligne: route.route_short_name ?? parcours,
-      couleur: `#${route.route_color || '888888'}`,
-      couleurTexte: `#${route.route_text_color || 'FFFFFF'}`,
+      ...couleursLigne(route.route_color, route.route_text_color),
       destination: plusFrequent(tripsDuParcours.map((trip) => trip.trip_headsign ?? '')) ?? '',
       coordonnees,
       arrets,

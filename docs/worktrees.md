@@ -81,15 +81,15 @@ Le manager est installé sous `/usr/lib/nevven-worktree-manager` ; ses projets s
 
 > 💡 **Appels extérieurs coupés par défaut dans les worktrees.** Au premier `db:prepare` d'un
 > worktree (son `.env` copié vise encore `voirie`), [prepare-db.ts](../apps/api/scripts/prepare-db.ts)
-> écrit `TRAM_COLLECTE=false` et `IA_PARALLELE=0` dans son `.env`. Pour un worktree qui
-> travaille sur le tram ou l'IA, remettre `true` / `2` à la main dans ce `.env` : les passages
+> écrit `TRAM_COLLECTE=false`, `BUS_COLLECTE=false` et `IA_PARALLELE=0` dans son `.env`. Pour un
+> worktree qui travaille sur le tram, le bus ou l'IA, remettre `true` / `2` à la main dans ce `.env` : les passages
 > suivants n'y touchent plus. Chaque API lancée appelle sinon d'elle-même :
 >
 > | Service | Déclencheur | Fréquence | Réglage |
 > |---|---|---|---|
-> | Ginko GTFS-RT (`api.ginko.voyage`, clé `GINKO_API_KEY`) | collecte tram au démarrage | toutes les 10 s, en continu | `TRAM_COLLECTE` |
+> | Ginko GTFS-RT (`api.ginko.voyage`, clé `GINKO_API_KEY`) | collecte tram et bus au démarrage | toutes les 10 s, en continu (une lecture pour les deux) | `TRAM_COLLECTE`, `BUS_COLLECTE` |
 > | Ginko GTFS-RT | carte temps réel ouverte | au plus 1 fois / 10 s (cache) | — |
-> | Ginko GTFS statique (`gtfs-ginko.zip`, public) | réseau tram demandé | 1 fois / 24 h (cache mémoire) | — |
+> | Ginko GTFS statique (`gtfs-ginko.zip`, public) | réseau tram ou bus demandé | 1 fois / 24 h (cache mémoire, partagé) | — |
 > | `claude -p` (abonnement Claude, coût par analyse) | file IA : au démarrage, puis veille toutes les 30 s | selon les demandes en attente **en base** | `IA_PARALLELE` (0 = aucune) |
 > | Orthophoto IGN WMS (`data.geopf.fr`, public) | chaque analyse IA | 1 image / analyse | — |
 > | Overpass (OSM) | `pnpm osm:import` à la main (cache `data/osm`) | ponctuel | `--refresh` |

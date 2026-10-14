@@ -98,8 +98,9 @@ if (process.env.VOIRIE_WORKTREE_SANDBOX && worktree) {
   // par défaut, main s'en charge. Réactivables ensuite à la main dans le .env du worktree.
   if (new URL(env.DATABASE_URL).pathname !== `/${base}`) {
     contenu = remplacerVariable(contenu, 'TRAM_COLLECTE', 'false');
+    contenu = remplacerVariable(contenu, 'BUS_COLLECTE', 'false');
     contenu = remplacerVariable(contenu, 'IA_PARALLELE', '0');
-    console.log(`Worktree « ${worktree} » : TRAM_COLLECTE=false, IA_PARALLELE=0`);
+    console.log(`Worktree « ${worktree} » : TRAM_COLLECTE=false, BUS_COLLECTE=false, IA_PARALLELE=0`);
   }
   contenu = remplacerVariable(contenu, 'DATABASE_URL', avecBase(env.DATABASE_URL, base));
   contenu = remplacerVariable(contenu, 'DATABASE_URL_TEST', avecBase(env.DATABASE_URL, `${base}_test`));

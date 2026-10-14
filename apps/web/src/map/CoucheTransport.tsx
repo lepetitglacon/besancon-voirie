@@ -16,8 +16,9 @@ import {
   type LineLayerSpecification,
   type SymbolLayerSpecification,
 } from 'react-map-gl/maplibre'
-import type { Coordonnees } from '@voirie/engine'
-import { Aide, PopupCarte } from '../ds'
+import { PARAMETRES_BUS, PARAMETRES_TRAM, type Coordonnees } from '@voirie/engine'
+import { Aide, EtiquetteVehicule, PopupCarte } from '../ds'
+import { fournirIcones, idIcone } from './iconesVehicules'
 import {
   positionnerRames,
   preparerReseau,
@@ -25,19 +26,42 @@ import {
   type SuiviRames,
 } from '../tram/positionsTrams'
 
-const ATTRIBUTION = 'Tram : <a href="https://api.ginko.voyage/">Ginko</a> (ODbL)'
+/** Réglages de dessin et d'estimation propres à chaque mode. */
+const STYLES = {
+  tram: {
+    attribution: 'Tram : <a href="https://api.ginko.voyage/">Ginko</a> (ODbL)',
+    vehicule: 'Rame',
+    largeurLigne: 3,
+    minzoomArrets: 12,
+    minzoomNoms: 14.5,
+    opaciteZone: 0.35,
+    parametres: PARAMETRES_TRAM,
+  },
+  bus: {
+    attribution: 'Bus : <a href="https://api.ginko.voyage/">Ginko</a> (ODbL)',
+    vehicule: 'Bus',
+    largeurLigne: 2,
+    minzoomArrets: 14,
+    minzoomNoms: 16,
+    // Sur une ligne de même couleur : plus marquée que celle du tram pour se détacher du tracé.
+    opaciteZone: 0.45,
+    parametres: PARAMETRES_BUS,
+  },
+} as const
+
+export type Transport = keyof typeof STYLES
 
 /** Données initiales des sources animées : la boucle d'animation les remplace à chaque image. */
 const VIDE = { type: 'FeatureCollection', features: [] } as const
 
 /**
  * Économie de rendu : chaque envoi de données redessine toute la carte (GPU). On n'envoie que si
- * une rame a bougé d'au moins ça à l'écran, et au moins une fois par intervalle (zones, textes).
+ * un véhicule a bougé d'au moins ça à l'écran, et au moins une fois par intervalle (zones, textes).
  */
 const DEPLACEMENT_MIN_PX = 0.5
 const ENVOI_MAX_MS = 1000
 
-/** Couches tram affichées. */
+/** Couches d'un mode affichées. */
 export interface CouchesTram {
   lignes: boolean
   arrets: boolean
@@ -47,71 +71,82 @@ export interface CouchesTram {
 
 const visibilite = (visible: boolean) => (visible ? 'visible' : 'none')
 
-const coucheLignes: LineLayerSpecification = {
-  id: 'tram-lignes',
-  type: 'line',
-  source: 'tram-lignes',
-  layout: { 'line-cap': 'round', 'line-join': 'round' },
-  paint: { 'line-color': ['get', 'couleur'], 'line-width': 3, 'line-opacity': 0.8 },
+function specifications(transport: Transport) {
+  const style = STYLES[transport]
+  const lignes: LineLayerSpecification = {
+    id: `${transport}-lignes`,
+    type: 'line',
+    source: `${transport}-lignes`,
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': ['get', 'couleur'], 'line-width': style.largeurLigne, 'line-opacity': 0.8 },
+  }
+  const arrets: CircleLayerSpecification = {
+    id: `${transport}-arrets`,
+    type: 'circle',
+    source: `${transport}-arrets`,
+    minzoom: style.minzoomArrets,
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], style.minzoomArrets, 2, 17, transport === 'tram' ? 6 : 4],
+      'circle-color': '#ffffff',
+      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], style.minzoomArrets, 1, 17, 2],
+      'circle-stroke-color': ['get', 'couleur'],
+    },
+  }
+  /** Noms des arrêts. Les quais des deux sens sont proches : la collision n'en garde qu'un. */
+  const nomsArrets: SymbolLayerSpecification = {
+    id: `${transport}-noms-arrets`,
+    type: 'symbol',
+    source: `${transport}-arrets`,
+    minzoom: style.minzoomNoms,
+    layout: {
+      'text-field': ['get', 'nom'],
+      'text-font': ['Noto Sans Regular'],
+      'text-size': 11,
+      'text-anchor': 'top',
+      'text-offset': [0, 0.8],
+    },
+    paint: { 'text-color': '#1d2330', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
+  }
+  /** Traînée : portion de voie où le véhicule peut se trouver. */
+  const zones: LineLayerSpecification = {
+    id: `${transport}-zones`,
+    type: 'line',
+    source: `${transport}-zones`,
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: {
+      'line-color': ['get', 'couleur'],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 12, 8, 17, 18],
+      'line-opacity': style.opaciteZone,
+    },
+  }
+  /**
+   * Véhicules : étiquette pictogramme + numéro de ligne (iconesVehicules), plus petite de loin.
+   * Toutes affichées, même superposées : un véhicule masqué serait un véhicule perdu.
+   */
+  const rames: SymbolLayerSpecification = {
+    id: `${transport}-rames`,
+    type: 'symbol',
+    source: `${transport}-rames`,
+    layout: {
+      'icon-image': ['concat', idIcone(transport, ''), ['get', 'ligne']],
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 11, transport === 'tram' ? 0.7 : 0.55, 15, 1, 18, 1.15],
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+      // Les véhicules en ligne devant ceux qui attendent au terminus.
+      'symbol-sort-key': ['match', ['get', 'etat'], 'au_terminus', 0, 1],
+    },
+    paint: { 'icon-opacity': ['match', ['get', 'etat'], 'au_terminus', 0.55, 1] },
+  }
+  return { lignes, arrets, nomsArrets, zones, rames }
 }
 
-const coucheArrets: CircleLayerSpecification = {
-  id: 'tram-arrets',
-  type: 'circle',
-  source: 'tram-arrets',
-  minzoom: 12,
-  paint: {
-    'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 2, 17, 6],
-    'circle-color': '#ffffff',
-    'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 12, 1, 17, 2],
-    'circle-stroke-color': ['get', 'couleur'],
-  },
-}
-
-/** Noms des arrêts. Les quais des deux sens sont proches : la collision n'en garde qu'un. */
-const coucheNomsArrets: SymbolLayerSpecification = {
-  id: 'tram-noms-arrets',
-  type: 'symbol',
-  source: 'tram-arrets',
-  minzoom: 14.5,
-  layout: {
-    'text-field': ['get', 'nom'],
-    'text-font': ['Noto Sans Regular'],
-    'text-size': 11,
-    'text-anchor': 'top',
-    'text-offset': [0, 0.8],
-  },
-  paint: { 'text-color': '#1d2330', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
-}
-
-/** Portion de voie où la rame peut se trouver. */
-const coucheZones: LineLayerSpecification = {
-  id: 'tram-zones',
-  type: 'line',
-  source: 'tram-zones',
-  layout: { 'line-cap': 'round', 'line-join': 'round' },
-  paint: {
-    'line-color': ['get', 'couleur'],
-    'line-width': ['interpolate', ['linear'], ['zoom'], 12, 8, 17, 18],
-    'line-opacity': 0.35,
-  },
-}
-
-const coucheRames: CircleLayerSpecification = {
-  id: 'tram-rames',
-  type: 'circle',
-  source: 'tram-rames',
-  paint: {
-    'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 5, 17, 9],
-    'circle-color': ['get', 'couleur'],
-    'circle-opacity': ['match', ['get', 'etat'], 'au_terminus', 0.5, 1],
-    'circle-stroke-width': 2,
-    'circle-stroke-color': '#ffffff',
-  },
-}
-
-/** Couches tram, de bas en haut, au-dessus de tout le reste : les rames en premier plan. */
+/** Couches des deux modes, de bas en haut, au-dessus de tout le reste : les trams en premier plan. */
 const ORDRE_COUCHES = [
+  'bus-lignes',
+  'bus-zones',
+  'bus-arrets',
+  'bus-noms-arrets',
+  'bus-rames',
   'tram-lignes',
   'tram-pertes',
   'tram-zones',
@@ -121,7 +156,8 @@ const ORDRE_COUCHES = [
 ]
 
 /**
- * Remet les couches tram dans l'ordre, au-dessus des autres. react-map-gl ajoute les couches au
+ * Remet les couches tram et bus dans l'ordre, au-dessus des autres. Les deux modes partagent cet
+ * ordre : chacun le rétablit sans défaire celui de l'autre. react-map-gl ajoute les couches au
  * fil des rendus sans garantir leur ordre (rechargement à chaud, couches ajoutées ensuite par un
  * autre composant) : un arrêt pourrait alors recouvrir la rame à quai.
  */
@@ -139,9 +175,15 @@ function duree(secondes: number): string {
   return `${Math.round(secondes / 60)} min`
 }
 
-function DetailRame({ rame, onFermer }: { rame: ProprietesRame; onFermer: () => void }) {
+function DetailRame({ rame, transport, onFermer }: { rame: ProprietesRame; transport: Transport; onFermer: () => void }) {
   return (
-    <PopupCarte taille="compacte" titre={`${rame.ligne} → ${rame.destination}`} soustitre={`Rame ${rame.vehicule}`} onFermer={onFermer}>
+    <PopupCarte
+      taille="compacte"
+      icone={<EtiquetteVehicule mode={transport} ligne={rame.ligne} couleur={rame.couleur} couleurTexte={rame.couleurTexte} />}
+      titre={`${rame.ligne} → ${rame.destination}`}
+      soustitre={`${STYLES[transport].vehicule} ${rame.vehicule}`}
+      onFermer={onFermer}
+    >
       {rame.etat === 'au_terminus' ? (
         <Text>
           Au terminus {rame.arretSuivant}, départ dans {duree(rame.restant)}
@@ -175,19 +217,23 @@ function DetailRame({ rame, onFermer }: { rame: ProprietesRame; onFermer: () => 
 }
 
 interface Props {
+  transport: Transport
   reseau: ReseauTram
+  /** Pour les bus, `trams` porte les bus (même estimation). */
   tempsReel: TramsTempsReel | undefined
   couches: CouchesTram
 }
 
 /**
- * Lignes de tram et rames en temps réel. Les positions sont estimées (packages/engine) et
- * recalculées à chaque image, hors de React : les sources MapLibre et la bulle de détail
- * sont mises à jour directement, React ne rafraîchit que le texte de la bulle, chaque seconde.
+ * Lignes de tram ou de bus et véhicules en temps réel. Les positions sont estimées
+ * (packages/engine) et recalculées à chaque image, hors de React : les sources MapLibre et la
+ * bulle de détail sont mises à jour directement, React ne rafraîchit que le texte de la bulle,
+ * chaque seconde. La traînée (zone probable) montre où le véhicule peut se trouver.
  */
-export function CoucheTrams({ reseau, tempsReel, couches }: Props) {
+export function CoucheTransport({ transport, reseau, tempsReel, couches }: Props) {
   const { current: carte } = useMap()
   const prepare = useMemo(() => preparerReseau(reseau), [reseau])
+  const specs = useMemo(() => specifications(transport), [transport])
   const [selection, setSelection] = useState<string>()
   const [detail, setDetail] = useState<ProprietesRame>()
 
@@ -212,12 +258,20 @@ export function CoucheTrams({ reseau, tempsReel, couches }: Props) {
   const rameAffichee = (vehicule: string | undefined) =>
     derniereImage.current?.rames.features.find((rame) => rame.properties.vehicule === vehicule)
 
+  // Étiquettes des véhicules, dessinées à la demande aux couleurs de chaque ligne.
+  useEffect(() => {
+    if (!carte) return
+    const lignes = new Map(reseau.parcours.map((p) => [p.ligne, p]))
+    return fournirIcones(carte.getMap(), transport, (ligne) => lignes.get(ligne))
+  }, [carte, reseau, transport])
+
   // Boucle d'animation : une estimation lissée par image, envoyée à la carte seulement si elle
   // change quelque chose à l'écran.
   useEffect(() => {
     if (!carte) return
     const carteMapLibre = carte.getMap()
     const suivi: SuiviRames = new Map()
+    const { parametres } = STYLES[transport]
     const envoi = { instant: 0, donnees: undefined as unknown, couches: undefined as unknown, rames: new Map<string, Coordonnees>() }
     const aBouge = (rames: ReturnType<typeof positionnerRames>['rames']) => {
       if (rames.features.length !== envoi.rames.size) return true
@@ -236,7 +290,7 @@ export function CoucheTrams({ reseau, tempsReel, couches }: Props) {
       const visibles = couchesVisibles.current
       if (!donnees.current || (!visibles.rames && !visibles.zones)) return
       const maintenant = Date.now()
-      const positions = positionnerRames(prepare, donnees.current, maintenant, suivi)
+      const positions = positionnerRames(prepare, donnees.current, maintenant, suivi, parametres)
       derniereImage.current = positions
       const rame = rameAffichee(choisie.current)
       if (rame) bulle.setLngLat(rame.geometry.coordinates)
@@ -247,8 +301,8 @@ export function CoucheTrams({ reseau, tempsReel, couches }: Props) {
         maintenant - envoi.instant < ENVOI_MAX_MS &&
         !aBouge(positions.rames)
       if (aJour) return
-      if (visibles.zones) carte.getSource<GeoJSONSource>('tram-zones')?.setData(positions.zones)
-      if (visibles.rames) carte.getSource<GeoJSONSource>('tram-rames')?.setData(positions.rames)
+      if (visibles.zones) carte.getSource<GeoJSONSource>(`${transport}-zones`)?.setData(positions.zones)
+      if (visibles.rames) carte.getSource<GeoJSONSource>(`${transport}-rames`)?.setData(positions.rames)
       envoi.instant = maintenant
       envoi.donnees = donnees.current
       envoi.couches = visibles
@@ -256,7 +310,7 @@ export function CoucheTrams({ reseau, tempsReel, couches }: Props) {
     }
     image = requestAnimationFrame(animer)
     return () => cancelAnimationFrame(image)
-  }, [carte, prepare, bulle])
+  }, [carte, prepare, bulle, transport])
 
   // Bulle de détail : ouverte sur la rame choisie, texte rafraîchi chaque seconde.
   useEffect(() => {
@@ -284,35 +338,35 @@ export function CoucheTrams({ reseau, tempsReel, couches }: Props) {
     }
     const survol = () => (carte.getCanvas().style.cursor = 'pointer')
     const sortie = () => (carte.getCanvas().style.cursor = '')
-    carte.on('click', 'tram-rames', auClic)
-    carte.on('mouseenter', 'tram-rames', survol)
-    carte.on('mouseleave', 'tram-rames', sortie)
+    const couche = `${transport}-rames`
+    carte.on('click', couche, auClic)
+    carte.on('mouseenter', couche, survol)
+    carte.on('mouseleave', couche, sortie)
     return () => {
-      carte.off('click', 'tram-rames', auClic)
-      carte.off('mouseenter', 'tram-rames', survol)
-      carte.off('mouseleave', 'tram-rames', sortie)
+      carte.off('click', couche, auClic)
+      carte.off('mouseenter', couche, survol)
+      carte.off('mouseleave', couche, sortie)
     }
-  }, [carte])
+  }, [carte, transport])
 
   return (
     <>
-      <Source id="tram-lignes" type="geojson" data={prepare.lignes} attribution={ATTRIBUTION}>
-        <Layer {...coucheLignes} layout={{ ...coucheLignes.layout, visibility: visibilite(couches.lignes) }} />
+      <Source id={`${transport}-lignes`} type="geojson" data={prepare.lignes} attribution={STYLES[transport].attribution}>
+        <Layer {...specs.lignes} layout={{ ...specs.lignes.layout, visibility: visibilite(couches.lignes) }} />
       </Source>
-      <Source id="tram-zones" type="geojson" data={VIDE}>
-        <Layer {...coucheZones} layout={{ ...coucheZones.layout, visibility: visibilite(couches.zones) }} />
+      <Source id={`${transport}-zones`} type="geojson" data={VIDE}>
+        <Layer {...specs.zones} layout={{ ...specs.zones.layout, visibility: visibilite(couches.zones) }} />
       </Source>
-      <Source id="tram-arrets" type="geojson" data={prepare.arrets}>
-        <Layer {...coucheArrets} layout={{ visibility: visibilite(couches.arrets) }} />
-        <Layer
-          {...coucheNomsArrets}
-          layout={{ ...coucheNomsArrets.layout, visibility: visibilite(couches.arrets) }}
-        />
+      <Source id={`${transport}-arrets`} type="geojson" data={prepare.arrets}>
+        <Layer {...specs.arrets} layout={{ visibility: visibilite(couches.arrets) }} />
+        <Layer {...specs.nomsArrets} layout={{ ...specs.nomsArrets.layout, visibility: visibilite(couches.arrets) }} />
       </Source>
-      <Source id="tram-rames" type="geojson" data={VIDE}>
-        <Layer {...coucheRames} layout={{ visibility: visibilite(couches.rames) }} />
+      <Source id={`${transport}-rames`} type="geojson" data={VIDE}>
+        <Layer {...specs.rames} layout={{ ...specs.rames.layout, visibility: visibilite(couches.rames) }} />
       </Source>
-      {selection !== undefined && detail && createPortal(<DetailRame rame={detail} onFermer={() => bulle.remove()} />, contenuBulle)}
+      {selection !== undefined &&
+        detail &&
+        createPortal(<DetailRame rame={detail} transport={transport} onFermer={() => bulle.remove()} />, contenuBulle)}
     </>
   )
 }

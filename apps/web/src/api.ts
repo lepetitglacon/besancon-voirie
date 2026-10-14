@@ -1,5 +1,6 @@
 import type { LonLat } from '@voirie/engine'
 import type {
+  BusTempsReel,
   AjoutTops,
   AnalyseIa,
   AnalyseIaDetail,
@@ -34,6 +35,7 @@ import type {
   NatureCarrefour,
   OptionsSumo,
   ProgrammeCarrefour,
+  ReseauBus,
   ReseauTram,
   TopsCarrefour,
   TramsTempsReel,
@@ -124,6 +126,9 @@ export const api = {
     requete<TopsCarrefour>(`/api/carrefours/${carrefourId}/tops/${id}`, { method: 'DELETE' }),
   reseauTram: () => requete<ReseauTram>('/api/tram/reseau'),
   tramsTempsReel: () => requete<TramsTempsReel>('/api/tram/temps-reel'),
+  reseauBus: () => requete<ReseauBus>('/api/bus/reseau'),
+  busTempsReel: () => requete<BusTempsReel>('/api/bus/temps-reel'),
+  historiqueBusEtat: () => requete<EtatHistoriqueTram>('/api/bus/historique/etat'),
   historiqueTroncons: (typeJour: TypeJour, heure: number | null) =>
     requete<HistoriqueTroncons>(
       `/api/tram/historique/troncons?typeJour=${typeJour}${heure === null ? '' : `&heure=${heure}`}`,

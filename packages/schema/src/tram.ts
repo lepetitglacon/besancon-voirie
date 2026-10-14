@@ -74,6 +74,21 @@ export interface TramsTempsReel {
   calibration?: CalibrationPrevision;
 }
 
+/**
+ * Réseau de bus : même forme que le tram, mais un parcours par tracé (`<route_id>-<direction_id>-<shape_id>`),
+ * les variantes d'une ligne ne desservant pas les mêmes arrêts.
+ */
+export type ReseauBus = ReseauTram;
+
+/** Bus en temps réel : même estimation que les rames, historique des passages compris. */
+export interface BusTempsReel {
+  /** Instant de production du flux GTFS-RT, en ms epoch. */
+  horodatage: number;
+  bus: TramEnCirculation[];
+  /** Absente tant que l'historique des bus est trop maigre. */
+  calibration?: CalibrationPrevision;
+}
+
 export const TypeJour = z.enum(['semaine', 'samedi', 'dimanche']);
 export type TypeJour = z.infer<typeof TypeJour>;
 

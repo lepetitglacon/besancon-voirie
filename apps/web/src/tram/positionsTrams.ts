@@ -2,9 +2,11 @@ import {
   estimerPositionTram,
   extraire,
   lisserDistance,
+  PARAMETRES_TRAM,
   pointADistance,
   preparerPolyligne,
   type Coordonnees,
+  type ParametresPosition,
   type Polyligne,
 } from '@voirie/engine'
 import type {
@@ -33,6 +35,7 @@ export interface ProprietesRame {
   vehicule: string
   ligne: string
   couleur: string
+  couleurTexte: string
   destination: string
   etat: TramEnCirculation['etat']
   arretPrecedent: string | null
@@ -95,7 +98,13 @@ export function preparerReseau(reseau: ReseauTram): ReseauPrepare {
 export type SuiviRames = Map<string, { parcours: string; distance: number; instant: number }>
 
 /** Position estimée d'une rame dans son tronçon, à l'instant `maintenant` (ms epoch). */
-function estimer(tram: TramEnCirculation, maintenant: number, age: number, calibration: TramsTempsReel['calibration']) {
+function estimer(
+  tram: TramEnCirculation,
+  maintenant: number,
+  age: number,
+  calibration: TramsTempsReel['calibration'],
+  parametres: ParametresPosition = PARAMETRES_TRAM,
+) {
   const restant = (tram.arrivee - maintenant) / 1000
   const position = estimerPositionTram(
     {
@@ -107,6 +116,7 @@ function estimer(tram: TramEnCirculation, maintenant: number, age: number, calib
     restant,
     age,
     calibration,
+    parametres,
   )
   return { restant, position }
 }
@@ -146,12 +156,14 @@ export function rames(reseau: ReseauPrepare, { horodatage, trams, calibration }:
 /**
  * Position estimée de chaque rame, et sa zone probable, à l'instant `maintenant` (ms epoch).
  * Avec `suivi`, la position affichée est lissée d'une image à l'autre, et `suivi` mis à jour.
+ * Sert aussi aux bus, avec leurs `parametres` ; un véhicule hors de `reseau` est ignoré.
  */
 export function positionnerRames(
   reseau: ReseauPrepare,
   { horodatage, trams, calibration }: TramsTempsReel,
   maintenant: number,
   suivi?: SuiviRames,
+  parametres?: ParametresPosition,
 ): { zones: Collection<Ligne, { couleur: string }>; rames: Collection<Point, ProprietesRame> } {
   const zones: Collection<Ligne, { couleur: string }> = { type: 'FeatureCollection', features: [] }
   const rames: Collection<Point, ProprietesRame> = { type: 'FeatureCollection', features: [] }
@@ -160,7 +172,7 @@ export function positionnerRames(
   for (const tram of trams) {
     const parcours = reseau.parcours.get(tram.parcours)
     if (!parcours) continue
-    const { restant, position } = estimer(tram, maintenant, age, calibration)
+    const { restant, position } = estimer(tram, maintenant, age, calibration, parametres)
     const debutZone = tram.debut + position.distanceMin
     const finZone = tram.debut + position.distanceMax
     if (tram.etat === 'en_ligne' && finZone - debutZone > 1) {
@@ -185,6 +197,7 @@ export function positionnerRames(
         vehicule: tram.vehicule,
         ligne: parcours.infos.ligne,
         couleur: parcours.infos.couleur,
+        couleurTexte: parcours.infos.couleurTexte,
         destination: parcours.infos.destination,
         etat: tram.etat,
         arretPrecedent: tram.arretPrecedent,

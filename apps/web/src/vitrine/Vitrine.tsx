@@ -26,6 +26,7 @@ import {
   Bascule,
   CarteEnTete,
   Case,
+  EtiquetteVehicule,
   Chiffre,
   Compteur,
   Indice,
@@ -84,6 +85,17 @@ function Exemple({ nom, children }: { nom: string; children: ReactNode }) {
     </Stack>
   )
 }
+
+/** Couleurs Ginko (GTFS) de quelques lignes. */
+const ETIQUETTES = [
+  { mode: 'tram', ligne: 'T1', couleur: '#00A5C2', couleurTexte: '#FFFFFF' },
+  { mode: 'tram', ligne: 'T2', couleur: '#006D78', couleurTexte: '#FFFFFF' },
+  { mode: 'bus', ligne: 'L3', couleur: '#006AB3', couleurTexte: '#FFFFFF' },
+  { mode: 'bus', ligne: 'L4', couleur: '#E2001A', couleurTexte: '#FFFFFF' },
+  { mode: 'bus', ligne: 'L6', couleur: '#FFE500', couleurTexte: '#000000' },
+  { mode: 'bus', ligne: '10', couleur: '#CECB00', couleurTexte: '#000000' },
+  { mode: 'bus', ligne: 'Ginko Citadelle', couleur: '#F26522', couleurTexte: '#FFFFFF' },
+] as const
 
 const NUANCIER = [
   ['Surfaces', ['bg.canvas', 'bg.panel', 'bg.subtle', 'bg.muted', 'bg.emphasized', 'bg.encre']],
@@ -451,6 +463,18 @@ function ComposantsProjet() {
         </Flex>
       </Exemple>
 
+      <Exemple nom="Étiquettes de véhicules (marqueurs de la carte)">
+        <Wrap gap="3" align="center" p="4" bg="bg.muted" borderRadius="l2">
+          {ETIQUETTES.map((e) => (
+            <EtiquetteVehicule key={`${e.mode}-${e.ligne}`} {...e} />
+          ))}
+        </Wrap>
+        <Aide>
+          Pictogramme et numéro aux couleurs GTFS de la ligne, bord blanc pour la photo aérienne. Tram : silhouette de
+          rame, bas plat et large, haut arrondi. Bus : carré. Estompée (55 %) au terminus.
+        </Aide>
+      </Exemple>
+
       <Exemple nom="Popups de la carte">
         <Flex gap="4" wrap="wrap" align="start" p="4" bg="bg.muted" borderRadius="l2">
           <PopupCarte
@@ -550,7 +574,13 @@ function ComposantsProjet() {
             </Section>
           </PopupCarte>
 
-          <PopupCarte taille="compacte" titre="T2 → Hauts du Chazal" soustitre="Rame 812" onFermer={() => {}}>
+          <PopupCarte
+            taille="compacte"
+            icone={<EtiquetteVehicule mode="tram" ligne="T2" couleur="#006D78" couleurTexte="#FFFFFF" />}
+            titre="T2 → Hauts du Chazal"
+            soustitre="Rame 812"
+            onFermer={() => {}}
+          >
             <Text>Chamars → Canot</Text>
             <Text>Arrivée prévue dans 2 min</Text>
             <Aide>Durée du tronçon : médiane de 214 passages observés</Aide>

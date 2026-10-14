@@ -27,12 +27,42 @@ export interface FluxTempsReel {
   courses: CourseTempsReel[];
 }
 
+/**
+ * Ginko omet par moments des courses de bus du flux, une à six lectures de suite (10 à 60 s),
+ * puis les remet. Sans mémoire, le bus disparaît de la carte et la collecte croit la course
+ * terminée, perdant les arrêts desservis pendant l'absence. On garde donc chaque course telle
+ * que lue la dernière fois, tant qu'elle n'a pas manqué plus de `absenceMax_s`.
+ */
+export class MemoireCourses {
+  private readonly vues = new Map<string, { course: CourseTempsReel; vue: number }>();
+  private horodatage = 0;
+
+  constructor(private readonly absenceMax_s: number) {}
+
+  /** Le flux, complété des courses absentes depuis peu. */
+  completer(flux: FluxTempsReel): FluxTempsReel {
+    if (flux.horodatage > this.horodatage) {
+      this.horodatage = flux.horodatage;
+      for (const course of flux.courses) this.vues.set(course.course, { course, vue: flux.horodatage });
+      for (const [id, { vue }] of this.vues) {
+        if (flux.horodatage - vue > this.absenceMax_s) this.vues.delete(id);
+      }
+    }
+    const presentes = new Set(flux.courses.map(({ course }) => course));
+    const absentes = [...this.vues.values()].filter(({ course }) => !presentes.has(course.course));
+    return absentes.length ? { ...flux, courses: [...flux.courses, ...absentes.map(({ course }) => course)] } : flux;
+  }
+}
+
 /** Historique utile au calcul des positions, pour le créneau en cours. */
 export interface HistoriqueCreneau {
   /** Par clé de tronçon (`cleTroncon`), les durées observées retenues pour le créneau. */
   troncons: Map<string, TronconObserve>;
   calibration?: CalibrationPrevision;
 }
+
+/** Clé d'un tronçon dans l'historique : `cleTroncon` pour le tram, couple d'arrêts pour le bus. */
+export type CleHistorique = (parcours: string, depart: string, arrivee: string) => string;
 
 /** Nombre de passages observés à partir duquel l'historique d'un tronçon fait foi. */
 export const ECHANTILLONS_MIN = 5;
@@ -41,11 +71,15 @@ export const ECHANTILLONS_MIN = 5;
  * Durées observées retenues pour chaque tronçon : celles de l'heure en cours si elles comptent
  * assez de passages, sinon celles de la journée entière (même type de jour).
  */
-export function choisirTroncons(heure: TronconObserve[], journee: TronconObserve[]): Map<string, TronconObserve> {
+export function choisirTroncons(
+  heure: TronconObserve[],
+  journee: TronconObserve[],
+  cle: CleHistorique = cleTroncon,
+): Map<string, TronconObserve> {
   const retenus = new Map<string, TronconObserve>();
   for (const troncon of [...journee, ...heure]) {
     if (troncon.n >= ECHANTILLONS_MIN) {
-      retenus.set(cleTroncon(troncon.parcours, troncon.depart, troncon.arrivee), troncon);
+      retenus.set(cle(troncon.parcours, troncon.depart, troncon.arrivee), troncon);
     }
   }
   return retenus;
@@ -94,6 +128,7 @@ export function positionnerTrams(
   flux: FluxTempsReel,
   maintenant_ms: number,
   historique?: HistoriqueCreneau,
+  cleHistorique: CleHistorique = cleTroncon,
 ): TramsTempsReel {
   const maintenant = maintenant_ms / 1000;
   const durees = dureesObservees(reseau, flux);
@@ -114,7 +149,7 @@ export function positionnerTrams(
     let candidat: TramEnCirculation;
     if (precedent !== undefined && debut !== undefined) {
       const cle = cleTroncon(statique.parcours, precedent, suivant.arret);
-      const observe = historique?.troncons.get(cle);
+      const observe = historique?.troncons.get(cleHistorique(statique.parcours, precedent, suivant.arret));
       const dureeFlux = durees.get(cle);
       candidat = {
         vehicule: vehicule ?? course,

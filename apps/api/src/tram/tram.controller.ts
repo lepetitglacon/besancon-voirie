@@ -47,6 +47,33 @@ export class TramController {
   /** GET /api/tram/historique/etat : volume de l'historique et état de la collecte. */
   @Get('historique/etat')
   async etat(): Promise<EtatHistoriqueTram> {
-    return { collecteActive: this.collecte.active, ...(await this.historique.volume()) };
+    return { collecteActive: this.collecte.active('tram'), ...(await this.historique.volume('tram')) };
+  }
+}
+
+@Controller('bus')
+export class BusController {
+  constructor(
+    private readonly tram: TramService,
+    private readonly historique: HistoriqueTramService,
+    private readonly collecte: CollecteTramService,
+  ) {}
+
+  /** GET /api/bus/reseau : tracés et arrêts des lignes de bus, un parcours par tracé (GTFS Ginko). */
+  @Get('reseau')
+  reseau() {
+    return this.tram.lireReseauBus();
+  }
+
+  /** GET /api/bus/temps-reel : dernier tronçon connu et arrivée prévue de chaque bus. */
+  @Get('temps-reel')
+  tempsReel() {
+    return this.tram.lireBusTempsReel();
+  }
+
+  /** GET /api/bus/historique/etat : volume de l'historique des bus et état de la collecte. */
+  @Get('historique/etat')
+  async etat(): Promise<EtatHistoriqueTram> {
+    return { collecteActive: this.collecte.active('bus'), ...(await this.historique.volume('bus')) };
   }
 }

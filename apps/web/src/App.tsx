@@ -6,6 +6,8 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } fro
 import { Layers, Map as MapIcon, Ruler } from 'lucide-react'
 import { useMap } from 'react-map-gl/maplibre'
 import { api } from './api'
+import { ChoixLignesBus } from './bus/ChoixLignesBus'
+import { CHOIX_LIGNES_BUS_DEFAUT, filtrerReseauBus, lignesBus, lignesMasquees, type ChoixLignesBus as Choix } from './bus/lignesBus'
 import { abandonnerBrouillons, useBrouillons, type BrouillonsCarrefour } from './configuration/brouillons'
 import { CarteSuivi } from './configuration/CarteSuivi'
 import { MENU_CONFIGURATION, type ActionConfiguration } from './configuration/actions'
@@ -45,7 +47,7 @@ import { useMesures } from './map/useMesures'
 import { CoucheMesuresEnregistrees } from './map/CoucheMesuresEnregistrees'
 import { ListeMesures } from './map/ListeMesures'
 import { CoucheFeuxTempsReel } from './map/CoucheFeuxTempsReel'
-import { CoucheTrams, type CouchesTram } from './map/CoucheTrams'
+import { CoucheTransport, type CouchesTram } from './map/CoucheTransport'
 import type { OptionsFond } from './map/FondDeCarte'
 import { usePreference } from './preferences'
 import { CoucheFlux } from './sumo/CoucheFlux'
@@ -58,7 +60,7 @@ import { carrefoursSurLeTrace, type ContexteTram } from './tempsReel/priorite'
 import { preparerReseau } from './tram/positionsTrams'
 import { PALIERS_PERTE } from './tram/pertes'
 
-/** Le flux Ginko est mis en cache 10 s par l'API. */
+/** Le flux Ginko est mis en cache 10 s par l'API ; trams et bus le partagent. */
 const RAFRAICHISSEMENT_TRAMS_MS = 15_000
 
 /** Les tops ajoutés en édition changent les décalages : relus de temps en temps. */
@@ -82,6 +84,11 @@ interface CouchesBrutes extends CouchesTram {
   carrefours: boolean
   /** Temps perdu par tronçon, tiré de l'historique des passages. */
   pertes: boolean
+  /** Couches bus, mêmes que pour le tram (CouchesTram). */
+  busLignes: boolean
+  busArrets: boolean
+  busZones: boolean
+  busRames: boolean
 }
 
 const FOND_DEFAUT: OptionsFond = {
@@ -100,7 +107,13 @@ const COUCHES_BRUTES_DEFAUT: CouchesBrutes = {
   zones: true,
   rames: true,
   pertes: true,
+  busLignes: true,
+  busArrets: true,
+  busZones: true,
+  busRames: true,
 }
+
+const AUCUNE_COUCHE: CouchesTram = { lignes: false, arrets: false, zones: false, rames: false }
 
 /** Carrefour choisi sur la carte, avec la position de son centre. */
 interface CarrefourChoisi {
@@ -148,6 +161,8 @@ function App() {
   const [panneauBrut, setPanneauBrut] = usePreference<boolean>('panneau-brut', true)
   const [fond, setFond] = usePreference<OptionsFond>('fond', FOND_DEFAUT)
   const [trams, setTrams] = usePreference<boolean>('trams', true)
+  const [bus, setBus] = usePreference<boolean>('bus', false)
+  const [choixLignesBus, setChoixLignesBus] = usePreference<Choix>('lignes-bus', CHOIX_LIGNES_BUS_DEFAUT)
   const [brut, setBrut] = usePreference<CouchesBrutes>('couches-brutes', COUCHES_BRUTES_DEFAUT)
   const [creneau, setCreneau] = useState<{ typeJour: TypeJour; heure: number | null }>(() => ({
     typeJour: typeJour(new Date()),
@@ -219,9 +234,16 @@ function App() {
     mode === 'brut'
       ? brut
       : sumo
-        ? { lignes: false, arrets: false, zones: false, rames: false }
+        ? AUCUNE_COUCHE
         : { lignes: trams, arrets: trams, zones: trams, rames: trams }
   const tramAffiche = Object.values(couchesTram).some(Boolean)
+  const couchesBus: CouchesTram =
+    mode === 'brut'
+      ? { lignes: brut.busLignes, arrets: brut.busArrets, zones: brut.busZones, rames: brut.busRames }
+      : sumo
+        ? AUCUNE_COUCHE
+        : { lignes: bus, arrets: bus, zones: bus, rames: bus }
+  const busAffiche = Object.values(couchesBus).some(Boolean)
   const pertes = mode === 'brut' && brut.pertes
 
   const sante = useQuery({ queryKey: ['sante'], queryFn: api.sante, retry: false })
@@ -392,9 +414,62 @@ function App() {
         : null,
     [reseauPrepare, surLeTrace, tramsTempsReel.data],
   )
+  const reseauBus = useQuery({
+    queryKey: ['bus', 'reseau'],
+    queryFn: api.reseauBus,
+    enabled: busAffiche,
+    staleTime: Infinity,
+  })
+  const busTempsReel = useQuery({
+    queryKey: ['bus', 'temps-reel'],
+    queryFn: api.busTempsReel,
+    enabled: (couchesBus.rames || couchesBus.zones) && reseauBus.isSuccess,
+    refetchInterval: RAFRAICHISSEMENT_TRAMS_MS,
+    placeholderData: (precedent) => precedent,
+  })
+  const lignesDuReseauBus = useMemo(() => (reseauBus.data ? lignesBus(reseauBus.data) : []), [reseauBus.data])
+  const busMasquees = useMemo(() => lignesMasquees(choixLignesBus, lignesDuReseauBus), [choixLignesBus, lignesDuReseauBus])
+  const reseauBusAffiche = useMemo(
+    () => reseauBus.data && filtrerReseauBus(reseauBus.data, busMasquees),
+    [reseauBus.data, busMasquees],
+  )
+  // Même estimation que les rames : les bus passent sous la forme attendue par la couche.
+  const busCommeTrams = useMemo(
+    () => busTempsReel.data && { horodatage: busTempsReel.data.horodatage, trams: busTempsReel.data.bus },
+    [busTempsReel.data],
+  )
+  /** Bus en ligne, par numéro de ligne. */
+  const busEnCirculation = useMemo(() => {
+    if (!reseauBus.data || !busTempsReel.data) return undefined
+    const ligneDuParcours = new Map(reseauBus.data.parcours.map((p) => [p.id, p.ligne]))
+    const comptes = new Map<string, number>()
+    for (const b of busTempsReel.data.bus) {
+      const ligne = ligneDuParcours.get(b.parcours)
+      if (ligne !== undefined && b.etat === 'en_ligne') comptes.set(ligne, (comptes.get(ligne) ?? 0) + 1)
+    }
+    return comptes
+  }, [reseauBus.data, busTempsReel.data])
+  const busEnLigne =
+    busEnCirculation && [...busEnCirculation].reduce((total, [ligne, n]) => total + (busMasquees.has(ligne) ? 0 : n), 0)
+  const choisirLignesBus = (masquees: Set<string>) => setChoixLignesBus({ masquees: [...masquees] })
+  const choixLignes = reseauBus.data && (
+    <ChoixLignesBus
+      lignes={lignesDuReseauBus}
+      masquees={busMasquees}
+      onChange={choisirLignesBus}
+      enCirculation={busEnCirculation}
+    />
+  )
+
   const etatHistorique = useQuery({
     queryKey: ['tram', 'historique', 'etat'],
     queryFn: api.historiqueEtat,
+    enabled: mode === 'brut',
+    refetchInterval: 60_000,
+  })
+  const etatHistoriqueBus = useQuery({
+    queryKey: ['bus', 'historique', 'etat'],
+    queryFn: api.historiqueBusEtat,
     enabled: mode === 'brut',
     refetchInterval: 60_000,
   })
@@ -631,8 +706,11 @@ function App() {
             <CouchePertes reseau={reseauTram.data} historique={historique.data} />
           )}
           {tempsReel && feuxTempsReel.data && <CoucheFeuxTempsReel tempsReel={feuxTempsReel.data} tram={contexteTram} />}
+          {busAffiche && reseauBusAffiche && (
+            <CoucheTransport transport="bus" reseau={reseauBusAffiche} tempsReel={busCommeTrams} couches={couchesBus} />
+          )}
           {tramAffiche && reseauTram.data && (
-            <CoucheTrams reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
+            <CoucheTransport transport="tram" reseau={reseauTram.data} tempsReel={tramsTempsReel.data} couches={couchesTram} />
           )}
           {outilZone && brouillonZone && (
             <CalqueZoneOsm
@@ -960,12 +1038,41 @@ function App() {
                 )}
                 {etatHistorique.data && (
                   <Aide>
-                    Historique : {etatHistorique.data.passages.toLocaleString('fr-FR')} passage(s)
+                    Historique tram : {etatHistorique.data.passages.toLocaleString('fr-FR')} passage(s)
                     {etatHistorique.data.premier &&
                       ` depuis le ${new Date(etatHistorique.data.premier).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`}
                     {!etatHistorique.data.collecteActive && ' · collecte arrêtée (TRAM_COLLECTE)'}
                   </Aide>
                 )}
+                <Bascule coche={brut.busLignes} onChange={basculer('busLignes')}>
+                  Bus : lignes (GTFS)
+                </Bascule>
+                <Bascule coche={brut.busArrets} onChange={basculer('busArrets')}>
+                  Bus : arrêts
+                </Bascule>
+                <Bascule coche={brut.busRames} onChange={basculer('busRames')}>
+                  Bus : véhicules, position estimée{busEnLigne !== undefined && ` (${busEnLigne} en ligne)`}
+                </Bascule>
+                <Bascule coche={brut.busZones} onChange={basculer('busZones')}>
+                  Bus : zones probables
+                </Bascule>
+                {busAffiche && (
+                  <Stack gap="1" ps="11">
+                    {choixLignes}
+                  </Stack>
+                )}
+                {etatHistoriqueBus.data && (
+                  <Aide>
+                    Historique bus : {etatHistoriqueBus.data.passages.toLocaleString('fr-FR')} passage(s)
+                    {etatHistoriqueBus.data.premier &&
+                      ` depuis le ${new Date(etatHistoriqueBus.data.premier).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}`}
+                    {!etatHistoriqueBus.data.collecteActive && ' · collecte arrêtée (BUS_COLLECTE)'}
+                    {' · tronçons regroupés par couple d’arrêts, toutes lignes confondues'}
+                  </Aide>
+                )}
+                {reseauBus.isError || busTempsReel.isError ? (
+                  <Message ton="erreur">Bus indisponibles : {(reseauBus.error ?? busTempsReel.error)?.message}</Message>
+                ) : null}
               </Stack>
             </Box>
           </CarteEnTete>
@@ -1018,6 +1125,15 @@ function App() {
                         {trams && enLigne !== undefined && (
                           <Aide>{enLigne} rame(s) en ligne · position estimée d'après les temps d'attente Ginko</Aide>
                         )}
+                        <Bascule coche={bus} onChange={setBus}>
+                          Bus en temps réel
+                        </Bascule>
+                        {bus && (
+                          <Stack gap="1" ps="11">
+                            {busEnLigne !== undefined && <Aide>{busEnLigne} bus en ligne sur les lignes choisies</Aide>}
+                            {choixLignes}
+                          </Stack>
+                        )}
                       </Stack>
                     ) : (
                       <Aide>Couches : dans le panneau ⊞ Données brutes, à droite.</Aide>
@@ -1027,6 +1143,9 @@ function App() {
                       <Message ton="erreur">
                         Trams indisponibles : {(reseauTram.error ?? tramsTempsReel.error)?.message}
                       </Message>
+                    )}
+                    {mode !== 'brut' && (reseauBus.isError || busTempsReel.isError) && (
+                      <Message ton="erreur">Bus indisponibles : {(reseauBus.error ?? busTempsReel.error)?.message}</Message>
                     )}
                     <Section libelle="Fond de carte" pt="2.5" borderTopWidth="1px" borderColor="border.muted">
                       <Segments
