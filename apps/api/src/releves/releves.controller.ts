@@ -1,5 +1,6 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
-import { EnvoiReleve } from '@voirie/schema';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, UseGuards } from '@nestjs/common';
+import { CorrectionReleve, EnvoiReleve } from '@voirie/schema';
+import { EditionGuard } from '../common/edition.guard.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { RelevesService } from './releves.service.js';
 
@@ -17,6 +18,13 @@ export class RelevesController {
   @Get('releves/:id')
   detail(@Param('id', ParseUUIDPipe) id: string) {
     return this.releves.detail(id);
+  }
+
+  /** PUT /api/releves/:id { saisies } : relevé recalé à la seconde ; synthèse refaite. */
+  @Put('releves/:id')
+  @UseGuards(EditionGuard)
+  corriger(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(CorrectionReleve)) { saisies }: CorrectionReleve) {
+    return this.releves.corriger(id, saisies);
   }
 
   @Get('carrefours/:id/releves')

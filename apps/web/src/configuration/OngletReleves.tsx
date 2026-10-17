@@ -1,20 +1,24 @@
 import { Badge, Button, HStack, Stack } from '@chakra-ui/react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   analyserReleve,
   debutsDeVert,
   planEnVigueur,
   vertsDansLeCycle,
   type ContexteProgramme,
+  type Intervalle,
   type ResultatProgramme,
+  type SaisieReleve,
 } from '@voirie/engine'
 import type { PlanEtapes, PlanSaisi, ReleveResume } from '@voirie/schema'
 import { useState } from 'react'
 import { api } from '../api'
-import { Aide, Chiffre, Message, Section, Selecteur } from '../ds'
+import { Aide, Chiffre, Compteur, Message, Section, Selecteur } from '../ds'
 import { Chronogramme } from './Chronogramme'
 import { proposerCorrections, type Correction } from './corrections'
 import { Lecture } from './Lecture'
+import { etirerEtape } from './programme'
+import { TimelineReleve } from './TimelineReleve'
 
 interface Props {
   carrefourId: string
@@ -35,6 +39,21 @@ const STATUTS: Record<ReleveResume['statut'], { libelle: string; couleur: string
   en_attente: { libelle: 'à relire', couleur: 'gray' },
   valide: { libelle: 'validé', couleur: 'green' },
   rejete: { libelle: 'rejeté', couleur: 'red' },
+}
+
+/** Verts relevés décalés de `d` secondes dans le cycle, découpés s'ils passent sa fin. */
+function decaler(mesures: Record<string, Intervalle[]>, d: number, cycle: number): Record<string, Intervalle[]> {
+  if (d === 0) return mesures
+  const modulo = (v: number) => ((v % cycle) + cycle) % cycle
+  return Object.fromEntries(
+    Object.entries(mesures).map(([ligne, intervalles]) => {
+      // Un vert à cheval sur la fin du cycle est en deux morceaux : on part du premier, sur toute sa longueur.
+      const longueur = intervalles.reduce((total, [a, b]) => total + b - a, 0)
+      const debut = modulo(intervalles[0]![0] + d)
+      const fin = debut + longueur
+      return [ligne, fin <= cycle ? [[debut, fin] as Intervalle] : [[debut, cycle] as Intervalle, [0, fin - cycle] as Intervalle]]
+    }),
+  )
 }
 
 const date = (iso: string) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
@@ -72,7 +91,20 @@ export function OngletReleves(props: Props) {
 }
 
 function Comparaison({ releveId, contexte, plans, onChanger, planActif, onPlanActif, resultat, instant, onInstant, vitesse, onVitesse }: Props & { releveId: string }) {
+  const queryClient = useQueryClient()
   const detail = useQuery({ queryKey: ['releve', releveId], queryFn: () => api.releve(releveId) })
+  /** Saisies recalées dans la timeline, pas encore enregistrées ; null : celles du relevé. */
+  const [recalees, setRecalees] = useState<SaisieReleve[] | null>(null)
+  /** Décalage du relevé sur le diagramme (s), pour l'aligner à l'œil. */
+  const [decalage, setDecalage] = useState(0)
+  const enregistrement = useMutation({
+    mutationFn: (saisies: SaisieReleve[]) => api.corrigerReleve(releveId, saisies),
+    onSuccess: (corrige) => {
+      queryClient.setQueryData(['releve', releveId], corrige)
+      setRecalees(null)
+      return queryClient.invalidateQueries({ queryKey: ['releves'] })
+    },
+  })
   if (detail.isPending) return <Aide>Chargement du relevé…</Aide>
   if (detail.isError) return <Message ton="erreur">{detail.error.message}</Message>
   const releve = detail.data
@@ -100,13 +132,18 @@ function Comparaison({ releveId, contexte, plans, onChanger, planActif, onPlanAc
   }
 
   const codes = contexte.lignes.map((l) => l.code)
-  const synthese = analyserReleve(releve.saisies, codes)
+  const saisies = recalees ?? releve.saisies
+  const synthese = analyserReleve(saisies, codes)
   // Calage : la ligne relevée le plus souvent, posée au début de son vert dans le programme.
   const reference = codes
     .filter((code) => (synthese.tops[code]?.length ?? 0) > 0 && (resultat.verts[code]?.length ?? 0) > 0)
     .sort((a, b) => synthese.tops[b]!.length - synthese.tops[a]!.length)[0]
   const debut = reference ? debutsDeVert(resultat.verts[reference]!, resultat.cycle_s)[0] : undefined
-  const mesures = reference && debut !== undefined ? vertsDansLeCycle(releve.saisies, { ligne: reference, debut_s: debut }, resultat.cycle_s) : {}
+  const mesures = decaler(
+    reference && debut !== undefined ? vertsDansLeCycle(saisies, { ligne: reference, debut_s: debut }, resultat.cycle_s) : {},
+    decalage,
+    resultat.cycle_s,
+  )
   const { corrections, remarques } = proposerCorrections(plan, resultat, synthese)
   const appliquer = (aAppliquer: Correction[]) =>
     onChanger(plans.map((p, i) => (i === planActif && p.mode === 'cycle' ? aAppliquer.reduce<PlanEtapes>((q, c) => c.appliquer(q), p) : p)))
@@ -120,12 +157,60 @@ function Comparaison({ releveId, contexte, plans, onChanger, planActif, onPlanAc
         <Chiffre valeur={synthese.cycle?.cycles ?? 0} libelle="cycles relevés" />
       </HStack>
 
+      <Section libelle="Relevé, seconde par seconde">
+        <TimelineReleve
+          saisies={saisies}
+          lignes={contexte.lignes.map((l) => ({ code: l.code, pieton: l.type === 'pieton' }))}
+          onChanger={setRecalees}
+        />
+        {recalees && (
+          <HStack gap="2">
+            <Message ton="avertissement" flex="1">
+              Relevé recalé, pas encore enregistré : la mesure et les corrections ci-dessous en tiennent déjà compte.
+            </Message>
+            <Button size="xs" variant="ghost" onClick={() => setRecalees(null)}>
+              Annuler
+            </Button>
+            <Button size="xs" variant="solid" loading={enregistrement.isPending} onClick={() => enregistrement.mutate(recalees)}>
+              Enregistrer le relevé
+            </Button>
+          </HStack>
+        )}
+        {enregistrement.error && <Message ton="erreur">{enregistrement.error.message}</Message>}
+      </Section>
+
       <Section libelle="Programme et relevé superposés">
-        <Lecture instant={instant} vitesse={vitesse} onVitesse={onVitesse} />
-        <Chronogramme chronologie={{ ...resultat, duree_s: resultat.cycle_s }} lignes={contexte.lignes} instant={instant} onInstant={onInstant} mesures={mesures} />
+        <HStack gap="3" wrap="wrap">
+          <Lecture instant={instant} vitesse={vitesse} onVitesse={onVitesse} />
+          <HStack gap="1.5">
+            <Aide>Décaler le relevé</Aide>
+            <Compteur
+              taille="xs"
+              aria-label="Décalage du relevé sur le diagramme"
+              min={-Math.round(resultat.cycle_s)}
+              max={Math.round(resultat.cycle_s)}
+              pas={0.5}
+              unite="s"
+              valeur={decalage}
+              onChange={(v) => setDecalage(v ?? 0)}
+            />
+          </HStack>
+        </HStack>
+        <Chronogramme
+          chronologie={{ ...resultat, duree_s: resultat.cycle_s }}
+          lignes={contexte.lignes}
+          instant={instant}
+          onInstant={onInstant}
+          mesures={mesures}
+          onEtirer={(index, finActuelle, finVoulue) =>
+            onChanger(plans.map((p, i) => (i === planActif && p.mode === 'cycle' ? etirerEtape(p, index, finActuelle, finVoulue) : p)))
+          }
+        />
         <Aide>
-          Barres : le programme. Cadres pointillés : les verts relevés
-          {reference ? `, calés sur le début du vert de ${reference}` : ' (aucune ligne relevée à caler sur le programme)'}.
+          Barres : le programme (tirer le bord d'une étape pour l'ajuster à la seconde, sur le brouillon). Cadres pointillés : les verts
+          relevés
+          {reference ? `, calés sur le début du vert de ${reference}` : ' (aucune ligne relevée à caler sur le programme)'}
+          {decalage !== 0 && `, décalés de ${decalage} s`}.
         </Aide>
       </Section>
 

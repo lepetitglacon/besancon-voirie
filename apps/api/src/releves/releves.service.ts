@@ -39,11 +39,15 @@ const resume = (r: LigneReleve): ReleveResume => ({
 export class RelevesService {
   constructor(@Inject(DRIZZLE) private readonly db: Db) {}
 
-  async recevoir({ carrefour_id, pseudo, saisies, site_web }: EnvoiReleve): Promise<ReleveResume> {
-    const { rows: carrefour } = await this.db.execute(sql`SELECT 1 FROM carrefour WHERE id = ${carrefour_id}`);
+  /**
+   * Saisies valables pour ce carrefour (lignes connues, au moins un changement de couleur), triées,
+   * et leur synthèse, refaite ici : celle qu'affichait le téléphone n'est pas reçue.
+   */
+  private async analyser(carrefourId: string, saisies: readonly SaisieReleve[]) {
+    const { rows: carrefour } = await this.db.execute(sql`SELECT 1 FROM carrefour WHERE id = ${carrefourId}`);
     if (carrefour.length === 0) throw new NotFoundException('Carrefour inconnu');
     const { rows: lignes } = await this.db.execute<{ code: string }>(sql`
-      SELECT code FROM ligne_feux WHERE carrefour_id = ${carrefour_id} ORDER BY code
+      SELECT code FROM ligne_feux WHERE carrefour_id = ${carrefourId} ORDER BY code
     `);
     const codes = lignes.map((l) => l.code);
 
@@ -51,14 +55,16 @@ export class RelevesService {
     const inconnues = [...new Set(saisies.flatMap((s) => (s.ligne && !codes.includes(s.ligne) ? [s.ligne] : [])))];
     if (inconnues.length > 0) throw new BadRequestException(`Pas de ligne ${inconnues.join(', ')} à ce carrefour`);
     if (!saisies.some((s) => 'couleur' in s)) throw new BadRequestException('Aucun changement de couleur relevé');
+    const triees = [...saisies].sort((a, b) => a.t - b.t);
+    return { triees, synthese: analyserReleve(triees, codes) };
+  }
+
+  async recevoir({ carrefour_id, pseudo, saisies, site_web }: EnvoiReleve): Promise<ReleveResume> {
     const maintenant = Date.now();
     if (saisies.some((s) => s.t < maintenant - ANCIENNETE_MAX_MS || s.t > maintenant + AVANCE_MAX_MS)) {
       throw new BadRequestException('Relevé daté de plus d’un mois, ou dans le futur');
     }
-
-    // La synthèse est refaite ici : celle qu'affichait le téléphone n'est pas reçue.
-    const triees = [...saisies].sort((a, b) => a.t - b.t);
-    const synthese = analyserReleve(triees, codes);
+    const { triees, synthese } = await this.analyser(carrefour_id, saisies);
     const releve: LigneReleve = {
       id: randomUUID(),
       pseudo: pseudo || null,
@@ -77,6 +83,26 @@ export class RelevesService {
         ${releve.cycles_observes}, ${releve.ecart_type_cycle_s}, ${releve.observe_le.toISOString()})
     `);
     return resume(releve);
+  }
+
+  /**
+   * Relevé corrigé à la seconde (timeline de l'onglet Relevés terrain) : les saisies remplacent les
+   * anciennes et la synthèse est refaite. Le statut ne change pas.
+   */
+  async corriger(id: string, saisies: readonly SaisieReleve[]): Promise<ReleveDetail> {
+    const { rows } = await this.db.execute<{ carrefour_id: string }>(sql`SELECT carrefour_id FROM releve WHERE id = ${id}`);
+    if (!rows[0]) throw new NotFoundException('Relevé inconnu');
+    const { triees, synthese } = await this.analyser(rows[0].carrefour_id, saisies);
+    await this.db.execute(sql`
+      UPDATE releve SET
+        brut = ${JSON.stringify(triees)}::jsonb,
+        synthese = ${JSON.stringify(synthese)}::jsonb,
+        cycles_observes = ${synthese.cycle?.cycles ?? 0},
+        ecart_type_cycle_s = ${synthese.cycle?.ecart_type_s ?? null},
+        observe_le = ${new Date(triees[0]!.t).toISOString()}
+      WHERE id = ${id}
+    `);
+    return this.detail(id);
   }
 
   /** Un relevé et ses saisies (relevé rejeté compris : la modération en a besoin). */

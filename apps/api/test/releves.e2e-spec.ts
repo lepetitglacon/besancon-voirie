@@ -87,6 +87,16 @@ describe('Relevés terrain (e2e)', () => {
     expect(detail.saisies[0]).toEqual(saisies[0]);
   });
 
+  it('remplace les saisies d’un relevé recalé, et refait sa synthèse', async () => {
+    const { body } = await http().post('/api/releves').send({ carrefour_id: carrefourA, saisies }).expect(202);
+    // Les rouges recalés 2 s plus tôt : 28 s de vert au lieu de 30.
+    const recalees = saisies.map((s) => ('couleur' in s && s.couleur === 'rouge' ? { ...s, t: s.t - 2000 } : s));
+    const corrige = (await http().put(`/api/releves/${body.id}`).send({ saisies: recalees }).expect(200)).body;
+    expect(corrige).toMatchObject({ id: body.id, verts: { F1: 28 }, statut: 'en_attente' });
+    expect(corrige.saisies).toHaveLength(saisies.length);
+    await http().put(`/api/releves/${body.id}`).send({ saisies: [{ t: debut, evenement: 'bus' }, { t: debut + 1, evenement: 'tram' }] }).expect(400);
+  });
+
   it('refuse une ligne inconnue, un relevé sans couleur ou daté de plus d’un mois', async () => {
     await http()
       .post('/api/releves')

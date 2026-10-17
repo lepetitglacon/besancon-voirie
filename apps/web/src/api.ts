@@ -40,6 +40,7 @@ import type {
   ProgrammeCarrefour,
   ReleveDetail,
   ReleveResume,
+  SaisieReleve,
   ReseauBus,
   ReseauTram,
   TopsCarrefour,
@@ -128,6 +129,8 @@ export const api = {
   envoyerReleve: (envoi: EnvoiReleve) => requete<ReleveResume>('/api/releves', { method: 'POST', body: JSON.stringify(envoi) }),
   relevesCarrefour: (carrefourId: string) => requete<ReleveResume[]>(`/api/carrefours/${carrefourId}/releves`),
   releve: (id: string) => requete<ReleveDetail>(`/api/releves/${id}`),
+  corrigerReleve: (id: string, saisies: SaisieReleve[]) =>
+    requete<ReleveDetail>(`/api/releves/${id}`, { method: 'PUT', body: JSON.stringify({ saisies }) }),
   tops: (carrefourId: string) => requete<TopsCarrefour>(`/api/carrefours/${carrefourId}/tops`),
   /** Débuts de vert relevés sur place, pour caler le cycle sur l'heure réelle. */
   ajouterTops: (carrefourId: string, ajout: AjoutTops) =>

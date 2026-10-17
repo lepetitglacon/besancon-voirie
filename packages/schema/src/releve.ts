@@ -28,6 +28,10 @@ export const EnvoiReleve = z.object({
 });
 export type EnvoiReleve = z.infer<typeof EnvoiReleve>;
 
+/** Saisies d'un relevé recalées à la seconde, au bureau : elles remplacent celles reçues. */
+export const CorrectionReleve = z.object({ saisies: z.array(SaisieReleve).min(2).max(SAISIES_RELEVE_MAX) });
+export type CorrectionReleve = z.infer<typeof CorrectionReleve>;
+
 export type StatutModeration = 'en_attente' | 'valide' | 'rejete';
 
 /** Un relevé tel que l'API le rend : sa synthèse, sans les saisies brutes. */
