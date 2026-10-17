@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { analyserReleve, type SyntheseReleve } from '@voirie/engine';
-import type { EnvoiReleve, ReleveResume, StatutModeration } from '@voirie/schema';
+import type { EnvoiReleve, ReleveDetail, ReleveResume, SaisieReleve, StatutModeration } from '@voirie/schema';
 import { DRIZZLE, type Db } from '../db/db.module.js';
 
 /** Un relevé ne peut pas dater de plus d'un mois (stocké hors ligne sur le téléphone entre-temps). */
@@ -74,6 +74,17 @@ export class RelevesService {
         ${releve.cycles_observes}, ${releve.ecart_type_cycle_s}, ${releve.observe_le.toISOString()})
     `);
     return resume(releve);
+  }
+
+  /** Un relevé et ses saisies (relevé rejeté compris : la modération en a besoin). */
+  async detail(id: string): Promise<ReleveDetail> {
+    const { rows } = await this.db.execute<LigneReleve & { carrefour_id: string; brut: SaisieReleve[] }>(sql`
+      SELECT id, carrefour_id, pseudo, observe_le, statut, cycles_observes, ecart_type_cycle_s, synthese, brut
+      FROM releve WHERE id = ${id}
+    `);
+    const releve = rows[0];
+    if (!releve) throw new NotFoundException('Relevé inconnu');
+    return { ...resume(releve), carrefour_id: releve.carrefour_id, saisies: releve.brut };
   }
 
   /** Relevés d'un carrefour, du plus récent au plus ancien ; les relevés rejetés n'apparaissent pas. */

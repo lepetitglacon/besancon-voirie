@@ -464,6 +464,13 @@ svg.chronogramme {
   fill: var(--chakra-colors-feu-vert);
 }
 
+.chronogramme .mesure {
+  fill: none;
+  stroke: var(--chakra-colors-fg);
+  stroke-width: 1.2;
+  stroke-dasharray: 3 2;
+}
+
 .chronogramme .jaune {
   fill: var(--chakra-colors-feu-orange);
 }

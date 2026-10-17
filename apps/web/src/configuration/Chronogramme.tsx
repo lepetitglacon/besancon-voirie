@@ -17,6 +17,8 @@ interface Props {
   onInstant: (t: number) => void
   /** Demandes d'un scénario de simulation, marquées sur la rangée de leur ligne. */
   demandes?: readonly Demande[]
+  /** Verts relevés sur le terrain, cadrés par-dessus ceux du diagramme. */
+  mesures?: Readonly<Record<string, readonly Intervalle[]>>
   /** Étire l'étape `index` pour que son vert finisse à `finVoulue` : rend le bord de chaque étape déplaçable. */
   onEtirer?: (index: number, finActuelle: number, finVoulue: number) => void
   /**
@@ -40,7 +42,7 @@ const HAUT_AXE = 16
  * vert, jaune et rouge, avec les étapes au-dessus. Cliquer ou glisser place le curseur de
  * lecture, que la carte reflète. Avec `onEtirer`, tirer le bord droit d'une étape change sa durée.
  */
-export function Chronogramme({ chronologie: resultat, lignes, instant, onInstant, demandes = [], onEtirer, largeur = LARGEUR }: Props) {
+export function Chronogramme({ chronologie: resultat, lignes, instant, onInstant, demandes = [], mesures, onEtirer, largeur = LARGEUR }: Props) {
   const { duree_s: cycle_s } = resultat
   const largeurUtile = largeur - MARGE_GAUCHE - MARGE_DROITE
   const x = (t: number) => MARGE_GAUCHE + (t / cycle_s) * largeurUtile
@@ -122,6 +124,13 @@ export function Chronogramme({ chronologie: resultat, lignes, instant, onInstant
             <rect key={`v${a}`} className="vert" x={x(a)} y={y(rang)} width={x(b) - x(a)} height={HAUT_LIGNE}>
               <title>
                 {ligne.code} au vert de {a} à {b} s ({Math.round((b - a) * 10) / 10} s)
+              </title>
+            </rect>
+          ))}
+          {(mesures?.[ligne.code] ?? []).map(([a, b]) => (
+            <rect key={`m${a}`} className="mesure" x={x(a)} y={y(rang) - 1.5} width={x(Math.min(b, cycle_s)) - x(a)} height={HAUT_LIGNE + 3} rx={2}>
+              <title>
+                {ligne.code} au vert de {a} à {b} s sur le terrain ({Math.round((b - a) * 10) / 10} s)
               </title>
             </rect>
           ))}

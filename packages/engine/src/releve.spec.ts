@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyserReleve, basculerLigne, couleurCourante, ecartsAuPlan, type SaisieReleve } from './releve.js';
+import { analyserReleve, basculerLigne, couleurCourante, ecartsAuPlan, vertsDansLeCycle, type SaisieReleve } from './releve.js';
 
 /** Un feu observé : F1 vert 30 s sur un cycle de 90 s, à partir de `debut` (s). */
 const cycles = (n: number, cycle_s = 90, vert_s = 30, debut = 0): SaisieReleve[] =>
@@ -50,5 +50,29 @@ describe('écarts avec le programme', () => {
 
   it('ne compare rien sans plan à cycle', () => {
     expect(ecartsAuPlan(releve, null)).toEqual([]);
+  });
+});
+
+describe('verts mesurés dans le cycle du programme', () => {
+  // F1 vert 30 s, puis F2 vert de 35 s à 80 s, sur un cycle relevé de 90 s.
+  const saisies: SaisieReleve[] = [
+    ...cycles(4),
+    ...Array.from({ length: 4 }, (_, i) => [
+      { t: (i * 90 + 35) * 1000, ligne: 'F2', couleur: 'vert' as const },
+      { t: (i * 90 + 80) * 1000, ligne: 'F2', couleur: 'rouge' as const },
+    ]).flat(),
+  ];
+
+  it('cale les verts sur le début de vert de la ligne de référence', () => {
+    expect(vertsDansLeCycle(saisies, { ligne: 'F1', debut_s: 0 }, 90)).toEqual({ F1: [[0, 30]], F2: [[35, 80]] });
+  });
+
+  it('découpe un vert qui passe la fin du cycle', () => {
+    expect(vertsDansLeCycle(saisies, { ligne: 'F1', debut_s: 70 }, 90).F1).toEqual([[70, 90], [0, 10]]);
+    expect(vertsDansLeCycle(saisies, { ligne: 'F1', debut_s: 70 }, 90).F2).toEqual([[15, 60]]);
+  });
+
+  it('ne place rien sans passage au vert de la ligne de référence', () => {
+    expect(vertsDansLeCycle(saisies, { ligne: 'F3', debut_s: 0 }, 90)).toEqual({});
   });
 });

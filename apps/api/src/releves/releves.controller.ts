@@ -14,6 +14,11 @@ export class RelevesController {
     return this.releves.recevoir(envoi);
   }
 
+  @Get('releves/:id')
+  detail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.releves.detail(id);
+  }
+
   @Get('carrefours/:id/releves')
   duCarrefour(@Param('id', ParseUUIDPipe) id: string) {
     return this.releves.duCarrefour(id);

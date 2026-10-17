@@ -495,9 +495,9 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       ? validerGraphe(plan.etapes, plan.arcs, contexte.lignes.map((l) => l.code)).some((c) => c.niveau === 'erreur')
       : false
 
-  // Ce que lisent le curseur et la carte : le cycle calculé (onglet Programme) ou la simulation (onglet Graphe).
+  // Ce que lisent le curseur et la carte : le cycle calculé (onglets Programme et Relevés) ou la simulation (onglet Graphe).
   const chronologie =
-    onglet === 'programme' && resultat ? { ...resultat, duree_s: resultat.cycle_s } : onglet === 'graphe' ? simulation : null
+    (onglet === 'programme' || onglet === 'releves') && resultat ? { ...resultat, duree_s: resultat.cycle_s } : onglet === 'graphe' ? simulation : null
   const cycle = chronologie?.duree_s ?? 0
   const instantCycle = cycle > 0 ? instant % cycle : 0
   const erreurProgramme = (resultat?.controles.some((c) => c.niveau === 'erreur') ?? false) || erreurGraphe

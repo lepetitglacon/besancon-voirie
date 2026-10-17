@@ -114,7 +114,7 @@ export interface EcartReleve {
  * Durée du vert d'une ligne dans le programme. Un vert à cheval sur la fin du cycle est découpé en
  * deux intervalles : ils n'en font qu'un. null si la ligne n'a pas exactement un vert par cycle.
  */
-function dureeDuVert(intervalles: ReadonlyArray<[number, number]>, cycle_s: number): number | null {
+export function dureeDuVert(intervalles: ReadonlyArray<readonly [number, number]>, cycle_s: number): number | null {
   const aCheval = intervalles.length === 2 && intervalles.some(([a]) => a <= 0) && intervalles.some(([, b]) => b >= cycle_s);
   if (intervalles.length !== 1 && !aCheval) return null;
   return arrondi(intervalles.reduce((total, [a, b]) => total + b - a, 0));
@@ -139,4 +139,43 @@ export function ecartsAuPlan(releve: SyntheseReleve, plan: PlanTheorique | null)
     }
   }
   return liste;
+}
+
+/**
+ * Verts mesurés placés dans le cycle du programme, pour les superposer au diagramme de feux. Le relevé
+ * n'a pas d'heure de référence : on cale chaque cycle relevé sur un passage au vert de la ligne de
+ * `reference`, posé au début de son vert dans le programme. Chaque ligne garde son vert médian (décalage
+ * et durée), découpé en deux s'il passe la fin du cycle.
+ */
+export function vertsDansLeCycle(
+  saisies: readonly SaisieReleve[],
+  reference: { ligne: string; debut_s: number },
+  cycle_s: number,
+): Record<string, Array<[number, number]>> {
+  const changements = saisies.filter(estChangementCouleur).sort((a, b) => a.t - b.t);
+  const reperes = changements.filter((c) => c.ligne === reference.ligne && c.couleur === 'vert').map((c) => c.t);
+  if (reperes.length === 0 || cycle_s <= 0) return {};
+  const lignes = [...new Set(changements.map((c) => c.ligne))];
+  const resultat: Record<string, Array<[number, number]>> = {};
+  for (const ligne of lignes) {
+    const siens = changements.filter((c) => c.ligne === ligne);
+    const decalages: number[] = [];
+    const durees: number[] = [];
+    siens.forEach((c, i) => {
+      const suivant = siens[i + 1];
+      const repere = reperes.filter((r) => r <= c.t).at(-1);
+      if (c.couleur !== 'vert' || suivant?.couleur !== 'rouge' || repere === undefined) return;
+      decalages.push((((c.t - repere) / 1000 + reference.debut_s) % cycle_s + cycle_s) % cycle_s);
+      durees.push((suivant.t - c.t) / 1000);
+    });
+    if (decalages.length === 0) continue;
+    // Des décalages de part et d'autre de la fin du cycle (101 s et 1 s) sont voisins : on les rapproche du premier.
+    const premier = decalages[0]!;
+    const proches = decalages.map((d) => (d - premier > cycle_s / 2 ? d - cycle_s : premier - d > cycle_s / 2 ? d + cycle_s : d));
+    const debut = ((mediane(proches)! % cycle_s) + cycle_s) % cycle_s;
+    const duree = Math.min(cycle_s, mediane(durees)!);
+    const fin = debut + duree;
+    resultat[ligne] = fin <= cycle_s ? [[arrondi(debut), arrondi(fin)]] : [[arrondi(debut), cycle_s], [0, arrondi(fin - cycle_s)]];
+  }
+  return resultat;
 }

@@ -1,21 +1,25 @@
 import { Box, Button, HStack, IconButton, Stack, Tabs } from '@chakra-ui/react'
+import { useQuery } from '@tanstack/react-query'
 import type { ComponentProps } from 'react'
 import { Link } from 'react-router'
+import { api } from '../api'
 import { Aide, IconeFeu, Message, PanneauBas, Pastille, Valeur } from '../ds'
 import { BandeChronogramme } from './BandeChronogramme'
 import { hauteurPanneau, largeurPanneau, type Disposition } from './disposition'
 import { OngletGraphe } from './OngletGraphe'
 import { OngletLignes } from './OngletLignes'
 import { OngletProgramme } from './OngletProgramme'
+import { OngletReleves } from './OngletReleves'
 import { etirerEtape } from './programme'
 
 /** Onglets du plan de feux, dans l'ordre où on les remplit. */
-export type Onglet = 'lignes' | 'programme' | 'graphe'
+export type Onglet = 'lignes' | 'programme' | 'graphe' | 'releves'
 
 const ONGLETS: Array<{ valeur: Onglet; libelle: string }> = [
   { valeur: 'lignes', libelle: 'Lignes de feux' },
   { valeur: 'programme', libelle: 'Programme' },
   { valeur: 'graphe', libelle: 'Graphe et simulation' },
+  { valeur: 'releves', libelle: 'Relevés terrain' },
 ]
 
 /** Où en est une étape du plan de feux, affiché sur son onglet. */
@@ -28,7 +32,10 @@ const ETATS: Record<EtatEtape, { couleur: string; libelle: string }> = {
   enregistre: { couleur: 'feu.vert', libelle: 'enregistré' },
 }
 
-function etatsEtapes({ lignesModifiees, alertesLignes, lignes, programmeModifie, erreurProgramme, plans }: Props): Record<Onglet, EtatEtape> {
+function etatsEtapes(
+  { lignesModifiees, alertesLignes, lignes, programmeModifie, erreurProgramme, plans }: Props,
+  releves: number,
+): Record<Onglet, EtatEtape> {
   const programme: EtatEtape = erreurProgramme ? 'erreur' : programmeModifie ? 'brouillon' : plans.length > 0 ? 'enregistre' : 'vide'
   // Le graphe fait partie du programme : il n'est « fait » que si un plan sert des étapes à la demande.
   const aLaDemande = plans.some((p) => p.mode === 'cycle' && (p.arcs.length > 0 || p.etapes.some((e) => e.appel || e.hors_cycle)))
@@ -36,6 +43,8 @@ function etatsEtapes({ lignesModifiees, alertesLignes, lignes, programmeModifie,
     lignes: alertesLignes.length > 0 ? 'erreur' : lignesModifiees ? 'brouillon' : lignes.lignes.length > 0 ? 'enregistre' : 'vide',
     programme,
     graphe: aLaDemande || programme === 'erreur' || programme === 'brouillon' ? programme : 'vide',
+    // Les relevés ne s'enregistrent pas ici : l'onglet dit seulement s'il y en a à comparer.
+    releves: releves > 0 ? 'enregistre' : 'vide',
   }
 }
 
@@ -93,7 +102,8 @@ interface Props {
 export function PlanDeFeux(props: Props) {
   const { disposition, onglet, onOnglet, onFermer, cycle, instant } = props
   const aDroite = disposition === 'droite'
-  const etats = etatsEtapes(props)
+  const releves = useQuery({ queryKey: ['releves', props.carrefourId], queryFn: () => api.relevesCarrefour(props.carrefourId) })
+  const etats = etatsEtapes(props, releves.data?.length ?? 0)
   const onglets = (
     <Tabs.Root value={onglet} fitted={aDroite} flexBasis={aDroite ? '100%' : undefined} onValueChange={(e) => onOnglet(e.value as Onglet)}>
       <Tabs.List>
@@ -219,10 +229,15 @@ function CorpsProgramme(props: Props) {
             Découpez le cycle en <strong>étapes</strong> : les lignes au vert ensemble, et pendant combien de temps. Le jaune et les rouges
             de dégagement s'ajoutent entre les étapes.
           </>
-        ) : (
+        ) : onglet === 'graphe' ? (
           <>
             Le <strong>graphe des étapes</strong> décrit les feux à la demande : étapes servies sur appel (bouton piéton, boucle), étapes
             prioritaires hors cycle (tram). La simulation le déroule sur un scénario.
+          </>
+        ) : (
+          <>
+            Les <strong>relevés terrain</strong> se superposent au plan en vigueur ; leurs écarts donnent des corrections à appliquer au
+            brouillon du programme.
           </>
         )}
       </Aide>
@@ -238,6 +253,20 @@ function CorpsProgramme(props: Props) {
         ))}
       {programmeEnChargement || !contexte ? (
         <Aide>Chargement…</Aide>
+      ) : onglet === 'releves' ? (
+        <OngletReleves
+          carrefourId={carrefourId}
+          contexte={contexte}
+          plans={plans}
+          onChanger={onPlans}
+          planActif={planActif}
+          onPlanActif={onPlanActif}
+          resultat={resultat}
+          instant={instant}
+          onInstant={onInstant}
+          vitesse={vitesse}
+          onVitesse={onVitesse}
+        />
       ) : onglet === 'graphe' ? (
         <OngletGraphe
           contexte={contexte}

@@ -44,3 +44,9 @@ export interface ReleveResume {
   verts: Record<string, number | null>;
   evenements: Record<z.infer<typeof EvenementReleve>, number>;
 }
+
+/** Un relevé avec ses saisies : de quoi le superposer au programme. */
+export interface ReleveDetail extends ReleveResume {
+  carrefour_id: string;
+  saisies: SaisieReleve[];
+}

@@ -81,6 +81,9 @@ describe('Relevés terrain (e2e)', () => {
     expect(rows[0].brut).toHaveLength(saisies.length);
     const liste: ReleveResume[] = (await http().get(`/api/carrefours/${carrefourA}/releves`).expect(200)).body;
     expect(liste.map((r) => r.id)).toEqual([body.id]);
+    const detail = (await http().get(`/api/releves/${body.id}`).expect(200)).body;
+    expect(detail).toMatchObject({ carrefour_id: carrefourA, cycle_s: 90 });
+    expect(detail.saisies[0]).toEqual(saisies[0]);
   });
 
   it('refuse une ligne inconnue, un relevé sans couleur ou daté de plus d’un mois', async () => {

@@ -37,6 +37,7 @@ import type {
   NatureCarrefour,
   OptionsSumo,
   ProgrammeCarrefour,
+  ReleveDetail,
   ReleveResume,
   ReseauBus,
   ReseauTram,
@@ -124,6 +125,7 @@ export const api = {
   carrefourTempsReel: (carrefourId: string) => requete<CarrefourTempsReel>(`/api/temps-reel/carrefours/${carrefourId}`),
   envoyerReleve: (envoi: EnvoiReleve) => requete<ReleveResume>('/api/releves', { method: 'POST', body: JSON.stringify(envoi) }),
   relevesCarrefour: (carrefourId: string) => requete<ReleveResume[]>(`/api/carrefours/${carrefourId}/releves`),
+  releve: (id: string) => requete<ReleveDetail>(`/api/releves/${id}`),
   tops: (carrefourId: string) => requete<TopsCarrefour>(`/api/carrefours/${carrefourId}/tops`),
   /** Débuts de vert relevés sur place, pour caler le cycle sur l'heure réelle. */
   ajouterTops: (carrefourId: string, ajout: AjoutTops) =>

@@ -3,7 +3,7 @@
 > **Objectif** : sortir le plan de feux du tiroir du bas, lui donner sa place dans la barre d'outils,
 > et l'adapter à ses deux usages : la conception au bureau et la correction devant le feu.
 > **Statut** : brouillon
-> **Dernière mise à jour** : 2026-10-17 (étapes 1 à 5 faites)
+> **Dernière mise à jour** : 2026-10-17 (étapes 1 à 6 faites)
 > **Worktree** : `refonte-plan-de-feux` (port 5427)
 
 ## Ce qui existe
@@ -124,7 +124,16 @@ Chaque étape se merge seule dans `main`.
   - écran Terrain : « Envoyer le relevé » (pseudo facultatif, retenu), une fois par séance ; le calage par tops
     devient l'action secondaire.
   Reste pour la mise en ligne : limite de débit (`@nestjs/throttler`, pas installé) et écran de modération.
-- [ ] **Étape 6 — Comparer et corriger** : superposition, détection des écarts, corrections vers le brouillon.
+- [x] **Étape 6 — Comparer et corriger** : onglet « 4. Relevés terrain » du plan de feux
+  ([OngletReleves](../apps/web/src/configuration/OngletReleves.tsx)), relevé choisi parmi ceux du carrefour :
+  - superposition : verts relevés en cadres pointillés sur le diagramme (`vertsDansLeCycle`, calés sur le début de
+    vert de la ligne la plus relevée) ; avertissement si le relevé date d'un autre plan que le plan affiché ;
+  - corrections ([corrections.ts](../apps/web/src/configuration/corrections.ts)) : durée de l'étape qui porte une
+    ligne au vert trop long ou trop court (écart moyen si plusieurs lignes), étape sur appel d'une ligne vue au vert
+    sur moins de 70 % des cycles ; « Appliquer » ou « Tout appliquer » écrivent le brouillon ;
+  - remarques sans correction automatique : vert sur plusieurs étapes, écart de cycle restant, bus ou tram vus
+    (priorité à ajouter dans le graphe), appels vus sans étape manquante.
+  API : `GET /api/releves/:id` rend le relevé avec ses saisies.
 
 ## Questions ouvertes
 
