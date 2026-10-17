@@ -1,14 +1,19 @@
-import { Badge, Button, HStack, Stack, Table, Text } from '@chakra-ui/react'
+import { Badge, HStack, Stack, Text } from '@chakra-ui/react'
+import { useQuery } from '@tanstack/react-query'
 import { planEnVigueur, positionCycle } from '@voirie/engine'
 import { typeLigne, type FicheCarrefour as Fiche, type FichePlan } from '@voirie/schema'
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router'
+import { useEffect, useState, type ReactNode } from 'react'
+import { api } from '../api'
 import { Chronogramme } from '../configuration/Chronogramme'
 import { Lecture } from '../configuration/Lecture'
 import { SIGNAUX } from '../configuration/libelles'
-import { Aide, Bascule, Chiffre, IconeFeu, Pastille, Section, Valeur } from '../ds'
+import { Aide, Bascule, Chiffre, Message, Pastille, Segments, Valeur } from '../ds'
+import { usePreference } from '../preferences'
 import { useMaintenant } from '../tempsReel/useMaintenant'
 import { libellePlage, NATURES, STATUTS } from './libelles'
+
+/** Thèmes de la fiche, dans la carte de gauche du mode Temps réel. */
+type Theme = 'maintenant' | 'plans' | 'carrefour' | 'releves'
 
 const MODES: Record<FichePlan['mode'], string> = {
   cycle: 'cycle par étapes',
@@ -22,120 +27,65 @@ const CONTROLEURS: Record<string, string> = {
   actue: 'actué',
 }
 
-/** Largeur du dessin, proche de sa largeur affichée dans la fiche : le texte garde sa taille. */
-const LARGEUR_DIAGRAMME = 640
-
 const date = (iso: string) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
 
+interface Props {
+  slug: string
+  /** Contenu du thème « Maintenant » : l'état des feux en temps réel. */
+  maintenant: ReactNode
+}
+
 /**
- * Fiche d'un carrefour (`/carrefours/:slug`) : ce qui est saisi (branches, lignes, plans), le diagramme
- * de feux de chaque plan, son calage sur l'heure réelle, et les relevés terrain.
+ * Fiche d'un carrefour (`/carrefours/:slug`), rangée par thème : l'état des feux maintenant, les plans
+ * de feux et leur diagramme, le carrefour (branches, lignes), les relevés terrain.
  */
-export function FicheCarrefour({ fiche }: { fiche: Fiche }) {
-  const { carrefour, branches, lignes, plans, releves } = fiche
-  const maintenant = useMaintenant(true, 10_000)
-  const enVigueur = planEnVigueur(plans, maintenant)
-  const [lon, lat] = carrefour.position
-  const mode = carrefour.controleur.mode && CONTROLEURS[carrefour.controleur.mode]
+export function FicheCarrefour({ slug, maintenant }: Props) {
+  const [theme, setTheme] = usePreference<Theme>('theme-fiche', 'maintenant')
+  const fiche = useQuery({ queryKey: ['fiche', slug], queryFn: () => api.fiche(slug) })
+  const nombre = (n: number | undefined) => (n ? ` · ${n}` : '')
 
   return (
-    <Stack gap="5">
-      <Stack gap="2">
-        <HStack gap="1.5" wrap="wrap">
-          <Pastille couleur={`statut.${carrefour.statut}`} />
-          <Text textStyle="sm" color="fg.secondary">
-            {NATURES[carrefour.nature]} · programmation {STATUTS[carrefour.statut]}
-          </Text>
-          {carrefour.pres_tram && <Badge colorPalette="orange">Tram à proximité</Badge>}
-          {mode && <Badge colorPalette="gray">Contrôleur {mode}</Badge>}
-        </HStack>
-        <HStack gap="2">
-          <Chiffre valeur={carrefour.nb_feux} libelle="feux" />
-          <Chiffre valeur={branches.length} libelle="branches" />
-          <Chiffre valeur={lignes.length} libelle="lignes de feux" />
-          <Chiffre valeur={releves.length} libelle="relevés" />
-        </HStack>
-        <HStack gap="2" wrap="wrap">
-          <Button asChild size="xs" variant="outline">
-            <Link to={`/#18/${lat}/${lon}`}>Voir sur la carte</Link>
-          </Button>
-          <Button asChild size="xs" variant="outline">
-            <Link to={`/terrain/${carrefour.id}`}>
-              <IconeFeu /> Relever ce carrefour
-            </Link>
-          </Button>
-        </HStack>
-      </Stack>
-
-      <Section libelle={`Plans de feux (${plans.length})`}>
-        {plans.length === 0 && <Aide>Programme pas encore saisi : il se déduit des relevés terrain, ou se saisit dans la configuration.</Aide>}
-        {plans.map((plan) => (
-          <Plan key={plan.code} plan={plan} lignes={lignes} enVigueur={plan.code === enVigueur?.code} />
-        ))}
-      </Section>
-
-      {branches.length > 0 && (
-        <Section libelle={`Branches (${branches.length})`}>
-          <Table.Root size="sm">
-            <Table.Header>
-              <Table.Row>
-                <Table.ColumnHeader>Branche</Table.ColumnHeader>
-                <Table.ColumnHeader textAlign="end">Voies entrantes</Table.ColumnHeader>
-                <Table.ColumnHeader textAlign="end">sortantes</Table.ColumnHeader>
-                <Table.ColumnHeader textAlign="end">Passages piétons</Table.ColumnHeader>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {branches.map((b) => (
-                <Table.Row key={b.code}>
-                  <Table.Cell>
-                    <Text as="span" fontWeight="semibold">
-                      {b.code}
-                    </Text>
-                    {b.nom && ` · ${b.nom}`}
-                  </Table.Cell>
-                  <Table.Cell textAlign="end">{b.entrantes}</Table.Cell>
-                  <Table.Cell textAlign="end">{b.sortantes}</Table.Cell>
-                  <Table.Cell textAlign="end">{b.passages}</Table.Cell>
-                </Table.Row>
-              ))}
-            </Table.Body>
-          </Table.Root>
-        </Section>
+    <Stack gap="3">
+      <Segments
+        size="xs"
+        aria-label="Thème de la fiche"
+        valeur={theme}
+        onChange={setTheme}
+        options={[
+          { valeur: 'maintenant', libelle: 'Maintenant' },
+          { valeur: 'plans', libelle: `Plans${nombre(fiche.data?.plans.length)}` },
+          { valeur: 'carrefour', libelle: 'Carrefour' },
+          { valeur: 'releves', libelle: `Relevés${nombre(fiche.data?.releves.length)}` },
+        ]}
+      />
+      {theme === 'maintenant' ? (
+        maintenant
+      ) : fiche.isPending ? (
+        <Aide>Chargement…</Aide>
+      ) : fiche.isError ? (
+        <Message ton="erreur">{fiche.error.message}</Message>
+      ) : theme === 'plans' ? (
+        <Plans fiche={fiche.data} />
+      ) : theme === 'carrefour' ? (
+        <Carrefour fiche={fiche.data} />
+      ) : (
+        <Releves fiche={fiche.data} />
       )}
+    </Stack>
+  )
+}
 
-      {lignes.length > 0 && (
-        <Section libelle={`Lignes de feux (${lignes.length})`}>
-          <Table.Root size="sm">
-            <Table.Body>
-              {lignes.map((l) => (
-                <Table.Row key={l.code}>
-                  <Table.Cell fontWeight="semibold">{l.code}</Table.Cell>
-                  <Table.Cell color="fg.secondary">{SIGNAUX[l.signal].libelle}</Table.Cell>
-                  <Table.Cell>{l.traverse ? `traverse ${l.traverse}` : l.mouvements.join(', ')}</Table.Cell>
-                  <Table.Cell textAlign="end" color="fg.muted">
-                    {l.feux === 0 ? '–' : `${l.feux} feu${l.feux > 1 ? 'x' : ''}`}
-                  </Table.Cell>
-                </Table.Row>
-              ))}
-            </Table.Body>
-          </Table.Root>
-        </Section>
-      )}
-
-      <Section libelle={`Relevés terrain (${releves.length})`}>
-        {releves.length === 0 && <Aide>Aucun relevé : « Relever ce carrefour » sur un téléphone, devant le feu.</Aide>}
-        {releves.map((r) => (
-          <HStack key={r.id} gap="2" textStyle="xs">
-            <Text flex="1">
-              {date(r.observe_le)}
-              {r.pseudo && ` · ${r.pseudo}`}
-            </Text>
-            <Valeur>{r.cycle_s ? `cycle ${r.cycle_s} s · ${r.cycles_observes} cycles` : 'cycle non mesuré'}</Valeur>
-            <Badge colorPalette={r.statut === 'valide' ? 'green' : 'gray'}>{r.statut === 'valide' ? 'validé' : 'à relire'}</Badge>
-          </HStack>
-        ))}
-      </Section>
+function Plans({ fiche }: { fiche: Fiche }) {
+  const maintenant = useMaintenant(true, 10_000)
+  const enVigueur = planEnVigueur(fiche.plans, maintenant)
+  if (fiche.plans.length === 0) {
+    return <Aide>Programme pas encore saisi : il se déduit des relevés terrain, ou se saisit en mode Édition.</Aide>
+  }
+  return (
+    <Stack gap="3">
+      {fiche.plans.map((plan) => (
+        <Plan key={plan.code} plan={plan} lignes={fiche.lignes} enVigueur={plan.code === enVigueur?.code} />
+      ))}
     </Stack>
   )
 }
@@ -163,24 +113,26 @@ function Plan({ plan, lignes, enVigueur }: { plan: FichePlan; lignes: Fiche['lig
   }, [cycle, vitesse, heureReelle, decalage])
 
   return (
-    <Stack gap="2" p="3" borderWidth="1px" borderColor={enVigueur ? 'feu.vert' : 'border.subtle'} borderRadius="l2">
+    <Stack gap="1.5" pb="3" borderBottomWidth="1px" borderColor="border.muted" _last={{ borderBottomWidth: 0, pb: 0 }}>
       <HStack gap="1.5" wrap="wrap">
-        <Text fontWeight="semibold">« {plan.code} »</Text>
-        {enVigueur && <Badge colorPalette="green">en vigueur</Badge>}
-        <Text textStyle="xs" color="fg.secondary">
-          {MODES[plan.mode]}
-          {plan.cycle_s ? ` · cycle ${Math.round(plan.cycle_s * 10) / 10} s` : ''}
+        <Text textStyle="sm" fontWeight="semibold">
+          « {plan.code} »
         </Text>
+        {enVigueur && <Badge colorPalette="green">en vigueur</Badge>}
         {plan.synchro && plan.synchro.confiance !== 'inconnue' && (
           <Badge colorPalette={plan.synchro.confiance === 'synchronisee' ? 'green' : 'blue'}>
-            {plan.synchro.confiance === 'synchronisee' ? 'calé sur l’heure réelle' : 'calage estimé'}
+            {plan.synchro.confiance === 'synchronisee' ? 'calé' : 'calage estimé'}
           </Badge>
         )}
+        <Text textStyle="xs" color="fg.secondary">
+          {MODES[plan.mode]}
+          {plan.cycle_s ? ` · ${Math.round(plan.cycle_s * 10) / 10} s` : ''}
+        </Text>
       </HStack>
       <Aide>{plan.plages.map(libellePlage).join(' · ')}</Aide>
       {(plan.appels.length > 0 || plan.priorites.length > 0) && (
         <Aide>
-          {plan.appels.length > 0 && `Étapes sur appel : ${plan.appels.join(', ')}. `}
+          {plan.appels.length > 0 && `Sur appel : ${plan.appels.join(', ')}. `}
           {plan.priorites.length > 0 && `Priorité hors cycle : ${plan.priorites.join(', ')}.`}
         </Aide>
       )}
@@ -189,7 +141,7 @@ function Plan({ plan, lignes, enVigueur }: { plan: FichePlan; lignes: Fiche['lig
           <HStack gap="3" wrap="wrap">
             {!heureReelle && <Lecture instant={instant} vitesse={vitesse} onVitesse={setVitesse} />}
             {decalage !== null && (
-              <Bascule coche={heureReelle} onChange={(coche) => (setHeureReelle(coche), setVitesse(null))}>
+              <Bascule size="sm" coche={heureReelle} onChange={(coche) => (setHeureReelle(coche), setVitesse(null))}>
                 Heure réelle
               </Bascule>
             )}
@@ -199,10 +151,89 @@ function Plan({ plan, lignes, enVigueur }: { plan: FichePlan; lignes: Fiche['lig
             lignes={lignes.map((l) => ({ code: l.code, type: typeLigne(l.signal) }))}
             instant={instant}
             onInstant={(t) => (setHeureReelle(false), setInstant(t))}
-            largeur={LARGEUR_DIAGRAMME}
           />
         </>
       )}
+    </Stack>
+  )
+}
+
+function Carrefour({ fiche }: { fiche: Fiche }) {
+  const { carrefour, branches, lignes } = fiche
+  const mode = carrefour.controleur.mode && CONTROLEURS[carrefour.controleur.mode]
+  return (
+    <Stack gap="3">
+      <HStack gap="1.5" wrap="wrap">
+        <Pastille couleur={`statut.${carrefour.statut}`} />
+        <Text textStyle="xs" color="fg.secondary">
+          {NATURES[carrefour.nature]} · programmation {STATUTS[carrefour.statut]}
+        </Text>
+        {carrefour.pres_tram && <Badge colorPalette="orange">Tram à proximité</Badge>}
+        {mode && <Badge colorPalette="gray">Contrôleur {mode}</Badge>}
+      </HStack>
+      <HStack gap="2">
+        <Chiffre valeur={carrefour.nb_feux} libelle="feux" />
+        <Chiffre valeur={branches.length} libelle="branches" />
+        <Chiffre valeur={lignes.length} libelle="lignes" />
+      </HStack>
+
+      {branches.length > 0 && (
+        <Stack gap="1">
+          <Text textStyle="overline" color="fg.muted">
+            Branches
+          </Text>
+          {branches.map((b) => (
+            <HStack key={b.code} gap="2" textStyle="xs" align="baseline">
+              <Text fontWeight="semibold" minW="7">
+                {b.code}
+              </Text>
+              <Text flex="1" truncate title={b.nom ?? undefined}>
+                {b.nom ?? '–'}
+              </Text>
+              <Valeur color="fg.secondary" title="voies entrantes / sortantes · passages piétons">
+                {b.entrantes}↘ {b.sortantes}↗{b.passages > 0 && ` · ${b.passages} passage${b.passages > 1 ? 's' : ''}`}
+              </Valeur>
+            </HStack>
+          ))}
+        </Stack>
+      )}
+
+      {lignes.length > 0 && (
+        <Stack gap="1">
+          <Text textStyle="overline" color="fg.muted">
+            Lignes de feux
+          </Text>
+          {lignes.map((l) => (
+            <HStack key={l.code} gap="2" textStyle="xs" align="baseline">
+              <Text fontWeight="semibold" minW="7">
+                {l.code}
+              </Text>
+              <Text flex="1" truncate title={l.traverse ? `traverse ${l.traverse}` : l.mouvements.join(', ')}>
+                {l.traverse ? `traverse ${l.traverse}` : l.mouvements.join(', ')}
+              </Text>
+              <Text color="fg.secondary">{SIGNAUX[l.signal].libelle}</Text>
+            </HStack>
+          ))}
+        </Stack>
+      )}
+    </Stack>
+  )
+}
+
+function Releves({ fiche }: { fiche: Fiche }) {
+  if (fiche.releves.length === 0) return <Aide>Aucun relevé : « Relever » sur un téléphone, devant le feu.</Aide>
+  return (
+    <Stack gap="1.5">
+      {fiche.releves.map((r) => (
+        <HStack key={r.id} gap="2" textStyle="xs">
+          <Text flex="1">
+            {date(r.observe_le)}
+            {r.pseudo && ` · ${r.pseudo}`}
+          </Text>
+          <Valeur>{r.cycle_s ? `${r.cycle_s} s · ${r.cycles_observes} cycles` : 'cycle non mesuré'}</Valeur>
+          <Badge colorPalette={r.statut === 'valide' ? 'green' : 'gray'}>{r.statut === 'valide' ? 'validé' : 'à relire'}</Badge>
+        </HStack>
+      ))}
     </Stack>
   )
 }

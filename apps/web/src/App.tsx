@@ -5,7 +5,7 @@ import { Badge, Box, Button, HStack, Kbd, Popover, Portal, Stack, Text } from '@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { Layers, Map as MapIcon, Ruler } from 'lucide-react'
 import { useMap } from 'react-map-gl/maplibre'
-import { Link } from 'react-router'
+import { Link, useLocation, useMatch, useNavigate } from 'react-router'
 import { api } from './api'
 import { ChoixLignesBus } from './bus/ChoixLignesBus'
 import { CHOIX_LIGNES_BUS_DEFAUT, filtrerReseauBus, lignesBus, lignesMasquees, type ChoixLignesBus as Choix } from './bus/lignesBus'
@@ -63,6 +63,7 @@ import { CoucheSumo } from './sumo/CoucheSumo'
 import { CoucheVehicules } from './sumo/CoucheVehicules'
 import { ModeSumo } from './sumo/ModeSumo'
 import { FicheTempsReel } from './tempsReel/FicheTempsReel'
+import { FicheCarrefour } from './carrefour/FicheCarrefour'
 import { FIABILITES } from './tempsReel/libelles'
 import { carrefoursSurLeTrace, type ContexteTram } from './tempsReel/priorite'
 import { preparerReseau } from './tram/positionsTrams'
@@ -289,6 +290,38 @@ function App() {
     }
     if (suivant !== 'temps_reel') setFicheTempsReel(null)
   }
+
+  // La fiche ouverte en Temps réel et l'adresse /carrefours/:slug se suivent : l'adresse se partage,
+  // et le bouton Précédent referme la fiche.
+  const slugAdresse = useMatch('/carrefours/:slug')?.params.slug ?? null
+  const { pathname } = useLocation()
+  const naviguer = useNavigate()
+  const ficheAdresse = useQuery({ queryKey: ['fiche', slugAdresse], queryFn: () => api.fiche(slugAdresse!), enabled: slugAdresse !== null })
+  /** Slug que l'adresse et la carte ouverte partagent : chacune ne suit l'autre que s'il change. */
+  const slugSynchro = useRef<string | null>(null)
+  const ouvrirDepuisAdresse = useEffectEvent(() => {
+    if (slugAdresse === null) {
+      // Retour à la carte seule (Précédent) : la fiche se referme.
+      if (pathname === '/' && slugSynchro.current !== null) {
+        slugSynchro.current = null
+        setFicheTempsReel(null)
+      }
+      return
+    }
+    if (slugAdresse === slugSynchro.current || !ficheAdresse.data) return
+    slugSynchro.current = slugAdresse
+    const { carrefour } = ficheAdresse.data
+    changerMode('temps_reel')
+    setFicheTempsReel({ carrefour, position: carrefour.position })
+    carte?.flyTo({ center: carrefour.position, zoom: Math.max(carte.getZoom(), 17) })
+  })
+  useEffect(() => ouvrirDepuisAdresse(), [slugAdresse, pathname, ficheAdresse.data])
+  useEffect(() => {
+    const slug = ficheTempsReel?.carrefour.slug ?? null
+    if (slug === slugSynchro.current) return
+    slugSynchro.current = slug
+    naviguer(avecVue(slug ? cheminFiche(slug) : '/'))
+  }, [ficheTempsReel, naviguer])
 
   const placerFeu = useCallback(
     async (id: string, position: LonLat | null) => {
@@ -805,7 +838,7 @@ function App() {
           top="3"
           left="3"
           zIndex="2"
-          w="340px"
+          w={ficheTempsReel ? '400px' : '340px'}
           maxW="calc(var(--ecran-w) - 24px)"
           surtitre={ficheTempsReel ? 'Temps réel' : 'Besançon Voirie'}
           titre={ficheTempsReel ? ficheTempsReel.carrefour.nom : 'Feux et trams en temps réel'}
@@ -817,10 +850,7 @@ function App() {
               )}
               {ficheTempsReel && (
                 <>
-                  <Button asChild size="2xs" variant="ghost" ms="auto" title="Fiche du carrefour : plans, diagrammes, relevés">
-                    <Link to={avecVue(cheminFiche(ficheTempsReel.carrefour.slug))}>Fiche</Link>
-                  </Button>
-                  <Button asChild size="2xs" variant="outline" title="Relever ce carrefour sur place : cycle, verts, déclenchements">
+                  <Button asChild size="2xs" variant="outline" ms="auto" title="Relever ce carrefour sur place : cycle, verts, déclenchements">
                     <Link to={`/terrain/${ficheTempsReel.carrefour.id}`}>
                       <IconeFeu /> Relever
                     </Link>
@@ -833,9 +863,13 @@ function App() {
             </>
           }
         >
-          <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
+          <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted" maxH="calc(var(--ecran-h) - 150px)" overflowY="auto">
             {ficheTempsReel ? (
-              <FicheTempsReel carrefour={carrefourTempsReel} tram={contexteTram} />
+              <FicheCarrefour
+                key={ficheTempsReel.carrefour.slug}
+                slug={ficheTempsReel.carrefour.slug}
+                maintenant={<FicheTempsReel carrefour={carrefourTempsReel} tram={contexteTram} />}
+              />
             ) : (
               <Aide>
                 Les feux des carrefours programmés sont rejoués sur l'heure légale, calés par des tops relevés sur place.

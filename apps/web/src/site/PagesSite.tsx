@@ -1,18 +1,14 @@
 import { CloseButton, Dialog } from '@chakra-ui/react'
-import { useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
-import { Route, Routes, useNavigate, useParams } from 'react-router'
+import { Route, Routes, useNavigate } from 'react-router'
 import { Accessibilite } from '../accessibilite/Accessibilite'
-import { api } from '../api'
-import { FicheCarrefour } from '../carrefour/FicheCarrefour'
-import { Aide, Message } from '../ds'
 import { APropos } from './APropos'
 import { Connexion } from './Connexion'
 import { MentionsLegales } from './MentionsLegales'
 import { avecVue, PAGES } from './pages'
 
 /** Fenêtre d'une page du site ; la fermer revient à la carte (« / »). */
-function Page({ titre, taille = 'lg', children }: { titre: string; taille?: 'sm' | 'lg' | 'xl'; children: ReactNode }) {
+function Page({ titre, taille = 'lg', children }: { titre: string; taille?: 'sm' | 'lg'; children: ReactNode }) {
   const naviguer = useNavigate()
   return (
     <Dialog.Root open size={taille} scrollBehavior="inside" onOpenChange={(e) => !e.open && naviguer(avecVue('/'))}>
@@ -71,26 +67,8 @@ export function PagesSite() {
           </Page>
         }
       />
-      <Route path="/carrefours/:slug" element={<PageFiche />} />
       {/* Toute autre adresse : la carte seule. */}
       <Route path="*" element={null} />
     </Routes>
-  )
-}
-
-/** Fiche d'un carrefour, par-dessus la carte. */
-function PageFiche() {
-  const { slug = '' } = useParams()
-  const fiche = useQuery({ queryKey: ['fiche', slug], queryFn: () => api.fiche(slug) })
-  return (
-    <Page titre={fiche.data?.carrefour.nom ?? 'Carrefour'} taille="xl">
-      {fiche.isPending ? (
-        <Aide>Chargement…</Aide>
-      ) : fiche.isError ? (
-        <Message ton="erreur">{fiche.error.message}</Message>
-      ) : (
-        <FicheCarrefour fiche={fiche.data} />
-      )}
-    </Page>
   )
 }
