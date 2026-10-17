@@ -13,7 +13,8 @@ import { useMaintenant } from '../tempsReel/useMaintenant'
 import { libellePlage, NATURES, STATUTS } from './libelles'
 
 /** Thèmes de la fiche, dans la carte de gauche du mode Temps réel. */
-type Theme = 'maintenant' | 'plans' | 'carrefour' | 'releves'
+type Theme = 'feux' | 'carrefour' | 'releves'
+const THEMES: readonly string[] = ['feux', 'carrefour', 'releves'] satisfies Theme[]
 
 const MODES: Record<FichePlan['mode'], string> = {
   cycle: 'cycle par étapes',
@@ -29,20 +30,36 @@ const CONTROLEURS: Record<string, string> = {
 
 const date = (iso: string) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
 
+/** Ce que le thème Carrefour demande à la carte : le calque des voies, et la ligne de feux à mettre en avant. */
+export interface CalqueFiche {
+  ligne: string | null
+}
+
 interface Props {
   slug: string
-  /** Contenu du thème « Maintenant » : l'état des feux en temps réel. */
+  /** En tête du thème « Feux » : l'état des feux en temps réel. */
   maintenant: ReactNode
+  /** Le thème Carrefour s'ouvre (calque à dessiner) ou se ferme (null). */
+  onCalque: (calque: CalqueFiche | null) => void
 }
 
 /**
- * Fiche d'un carrefour (`/carrefours/:slug`), rangée par thème : l'état des feux maintenant, les plans
- * de feux et leur diagramme, le carrefour (branches, lignes), les relevés terrain.
+ * Fiche d'un carrefour (`/carrefours/:slug`), rangée par thème : les feux (état maintenant, plans et
+ * leur diagramme), le carrefour (branches, lignes de feux, dessinées sur la carte), les relevés terrain.
  */
-export function FicheCarrefour({ slug, maintenant }: Props) {
-  const [theme, setTheme] = usePreference<Theme>('theme-fiche', 'maintenant')
+export function FicheCarrefour({ slug, maintenant, onCalque }: Props) {
+  const [themeLu, setTheme] = usePreference<Theme>('theme-fiche', 'feux')
+  // Thème d'une version précédente (« maintenant », « plans ») : les feux.
+  const theme: Theme = THEMES.includes(themeLu) ? themeLu : 'feux'
   const fiche = useQuery({ queryKey: ['fiche', slug], queryFn: () => api.fiche(slug) })
   const nombre = (n: number | undefined) => (n ? ` · ${n}` : '')
+  /** Ligne de feux choisie (clic) ou survolée dans le thème Carrefour : la carte met ses liaisons en avant. */
+  const [ligneChoisie, setLigneChoisie] = useState<string | null>(null)
+  const [ligneSurvolee, setLigneSurvolee] = useState<string | null>(null)
+  const ligne = ligneSurvolee ?? ligneChoisie
+
+  useEffect(() => onCalque(theme === 'carrefour' ? { ligne } : null), [onCalque, theme, ligne])
+  useEffect(() => () => onCalque(null), [onCalque])
 
   return (
     <Stack gap="3">
@@ -52,22 +69,25 @@ export function FicheCarrefour({ slug, maintenant }: Props) {
         valeur={theme}
         onChange={setTheme}
         options={[
-          { valeur: 'maintenant', libelle: 'Maintenant' },
-          { valeur: 'plans', libelle: `Plans${nombre(fiche.data?.plans.length)}` },
+          { valeur: 'feux', libelle: 'Feux' },
           { valeur: 'carrefour', libelle: 'Carrefour' },
           { valeur: 'releves', libelle: `Relevés${nombre(fiche.data?.releves.length)}` },
         ]}
       />
-      {theme === 'maintenant' ? (
-        maintenant
-      ) : fiche.isPending ? (
+      {theme === 'feux' && maintenant}
+      {fiche.isPending ? (
         <Aide>Chargement…</Aide>
       ) : fiche.isError ? (
         <Message ton="erreur">{fiche.error.message}</Message>
-      ) : theme === 'plans' ? (
+      ) : theme === 'feux' ? (
         <Plans fiche={fiche.data} />
       ) : theme === 'carrefour' ? (
-        <Carrefour fiche={fiche.data} />
+        <Carrefour
+          fiche={fiche.data}
+          ligne={ligne}
+          onChoisir={(code) => setLigneChoisie((actuelle) => (actuelle === code ? null : code))}
+          onSurvoler={setLigneSurvolee}
+        />
       ) : (
         <Releves fiche={fiche.data} />
       )}
@@ -82,7 +102,10 @@ function Plans({ fiche }: { fiche: Fiche }) {
     return <Aide>Programme pas encore saisi : il se déduit des relevés terrain, ou se saisit en mode Édition.</Aide>
   }
   return (
-    <Stack gap="3">
+    <Stack gap="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
+      <Text textStyle="overline" color="fg.muted">
+        Plans de feux
+      </Text>
       {fiche.plans.map((plan) => (
         <Plan key={plan.code} plan={plan} lignes={fiche.lignes} enVigueur={plan.code === enVigueur?.code} />
       ))}
@@ -158,7 +181,15 @@ function Plan({ plan, lignes, enVigueur }: { plan: FichePlan; lignes: Fiche['lig
   )
 }
 
-function Carrefour({ fiche }: { fiche: Fiche }) {
+interface PropsCarrefour {
+  fiche: Fiche
+  /** Ligne de feux mise en avant sur la carte. */
+  ligne: string | null
+  onChoisir: (code: string) => void
+  onSurvoler: (code: string | null) => void
+}
+
+function Carrefour({ fiche, ligne, onChoisir, onSurvoler }: PropsCarrefour) {
   const { carrefour, branches, lignes } = fiche
   const mode = carrefour.controleur.mode && CONTROLEURS[carrefour.controleur.mode]
   return (
@@ -203,8 +234,28 @@ function Carrefour({ fiche }: { fiche: Fiche }) {
           <Text textStyle="overline" color="fg.muted">
             Lignes de feux
           </Text>
+          <Aide>Survoler ou cliquer une ligne : la carte montre ses mouvements.</Aide>
           {lignes.map((l) => (
-            <HStack key={l.code} gap="2" textStyle="xs" align="baseline">
+            <HStack
+              key={l.code}
+              as="button"
+              gap="2"
+              textStyle="xs"
+              align="baseline"
+              textAlign="start"
+              px="1.5"
+              py="0.5"
+              borderRadius="l1"
+              cursor="pointer"
+              bg={ligne === l.code ? 'brand.subtle' : undefined}
+              _hover={{ bg: ligne === l.code ? 'brand.subtle' : 'bg.muted' }}
+              aria-pressed={ligne === l.code}
+              onClick={() => onChoisir(l.code)}
+              onMouseEnter={() => onSurvoler(l.code)}
+              onMouseLeave={() => onSurvoler(null)}
+              onFocus={() => onSurvoler(l.code)}
+              onBlur={() => onSurvoler(null)}
+            >
               <Text fontWeight="semibold" minW="7">
                 {l.code}
               </Text>
