@@ -50,6 +50,7 @@ import {
   Selecteur,
   IconeFeu,
   TeteDeFeu,
+  TiroirBas,
   Valeur,
   type EtatLampe,
 } from '../ds'
@@ -66,6 +67,19 @@ const FEUX_EXEMPLE: Array<{ lignes: string[]; position: [number, number]; etat: 
 
 /** Espace utile du même carrefour : ses feux et 25 m autour. */
 const EMPRISE_EXEMPLE = empriseCarrefour([], FEUX_EXEMPLE.map((f) => f.position))!
+
+/** Tiroir du bas dans un cadre de téléphone : appui ou glisser sur la poignée. */
+function TiroirExemple() {
+  const [ouvert, setOuvert] = useState(false)
+  return (
+    <Box position="relative" h="300px" maxW="360px" mx="auto" overflow="hidden" bg="bg.muted" borderRadius="l3">
+      <Aide p="3">Contenu de la page : les boutons restent au-dessus du tiroir fermé.</Aide>
+      <TiroirBas titre="Plan du carrefour" ouvert={ouvert} onOuvert={setOuvert} position="absolute">
+        <Box h="180px" bg="bg.subtle" borderRadius="l2" />
+      </TiroirBas>
+    </Box>
+  )
+}
 
 /** Vitrine du design system : chaque composant, dans ses états, en clair comme en sombre. */
 export default function Vitrine() {
@@ -503,6 +517,10 @@ function ComposantsProjet() {
             ))}
           </MiniCarte>
         </Stack>
+      </Exemple>
+
+      <Exemple nom="Tiroir du bas (pour le pouce)">
+        <TiroirExemple />
       </Exemple>
 
       <Exemple nom="Barre d'outils">

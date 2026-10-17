@@ -15,7 +15,8 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api } from '../api'
 import { PlanCarrefour } from '../carrefour/PlanCarrefour'
-import { Aide, Chiffre, IconeFeu, Message, Section, Valeur } from '../ds'
+import { Aide, Chiffre, HAUTEUR_POIGNEE_TIROIR, IconeFeu, Message, Section, TiroirBas, Valeur } from '../ds'
+import { usePreference } from '../preferences'
 import { useMaintenant } from '../tempsReel/useMaintenant'
 import { ecrirePseudo, lirePseudo, useSeance } from './seance'
 
@@ -65,7 +66,8 @@ export function ReleveTerrain() {
 
   return (
     <Box minH="100dvh" bg="bg" color="fg">
-      <Stack gap="5" maxW="560px" mx="auto" px="4" py="3">
+      {/* En bas, la place de la poignée du plan, pour que rien ne reste dessous. */}
+      <Stack gap="5" maxW="560px" mx="auto" px="4" pt="3" pb={`${HAUTEUR_POIGNEE_TIROIR + 16}px`}>
         {carrefour.isPending ? (
           <Aide>Chargement…</Aide>
         ) : carrefour.isError ? (
@@ -93,6 +95,8 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
 
   /** Ligne dont on a touché un feu sur le plan : son bouton est mis en avant. */
   const [ligneVue, setLigneVue] = useState<string | null>(null)
+  /** Plan du carrefour sorti ou rangé : mémorisé d'un relevé à l'autre. */
+  const [planOuvert, setPlanOuvert] = usePreference<boolean>('plan-releve-ouvert', false)
   const etatsReleves = new Map(codes.map((code) => [code, couleurCourante(saisies, code)] as const))
 
   const saisir = (suivantes: SaisieReleve[]) => {
@@ -161,15 +165,6 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
         <Message ton="avertissement">Ce carrefour n’a pas encore de lignes de feux : elles se déclarent dans la configuration.</Message>
       ) : (
         <Section libelle="Lignes de feux · un appui à chaque changement">
-          <PlanCarrefour
-            carrefourId={carrefour.id}
-            h="auto"
-            aspectRatio="1"
-            ligne={ligneVue}
-            onLigne={(code) => setLigneVue((actuelle) => (actuelle === code ? null : code))}
-            etats={etatsReleves}
-          />
-          <Aide>Toucher un feu sur le plan : son bouton s'entoure ci-dessous.</Aide>
           <Grid templateColumns="repeat(2, minmax(0, 1fr))" gap="2.5">
             {carrefour.lignes.map((ligne) => {
               const couleur = couleurCourante(saisies, ligne.code)
@@ -357,6 +352,21 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
           Nouveau relevé
         </Button>
       </Stack>
+      {codes.length > 0 && (
+        <TiroirBas titre="Plan du carrefour" ouvert={planOuvert} onOuvert={setPlanOuvert} maxW="560px">
+          <PlanCarrefour
+            carrefourId={carrefour.id}
+            h="auto"
+            aspectRatio="1"
+            // Pas plus haut que l'écran moins la place des boutons du haut.
+            maxH="calc(100dvh - 180px)"
+            ligne={ligneVue}
+            onLigne={(code) => setLigneVue((actuelle) => (actuelle === code ? null : code))}
+            etats={etatsReleves}
+          />
+          <Aide mt="1.5">Toucher un feu : le bouton de sa ligne s'entoure.</Aide>
+        </TiroirBas>
+      )}
     </>
   )
 }
