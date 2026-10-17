@@ -63,7 +63,7 @@ import { CoucheSumo } from './sumo/CoucheSumo'
 import { CoucheVehicules } from './sumo/CoucheVehicules'
 import { ModeSumo } from './sumo/ModeSumo'
 import { FicheTempsReel } from './tempsReel/FicheTempsReel'
-import { FicheCarrefour, type CalqueFiche } from './carrefour/FicheCarrefour'
+import { FicheCarrefour } from './carrefour/FicheCarrefour'
 import { FIABILITES } from './tempsReel/libelles'
 import { carrefoursSurLeTrace, type ContexteTram } from './tempsReel/priorite'
 import { preparerReseau } from './tram/positionsTrams'
@@ -290,25 +290,6 @@ function App() {
     }
     if (suivant !== 'temps_reel') setFicheTempsReel(null)
   }
-
-  // Thème Carrefour de la fiche : le calque de l'édition, en lecture seule, et la ligne de feux mise en avant.
-  const [calqueFiche, setCalqueFiche] = useState<CalqueFiche | null>(null)
-  const idCalque = tempsReel && calqueFiche ? (ficheTempsReel?.carrefour.id ?? null) : null
-  const branchesCalque = useQuery({ queryKey: ['branches', idCalque], queryFn: () => api.branches(idCalque!), enabled: idCalque !== null })
-  const ficheCalque = useQuery({
-    queryKey: ['fiche', ficheTempsReel?.carrefour.slug],
-    queryFn: () => api.fiche(ficheTempsReel!.carrefour.slug),
-    enabled: idCalque !== null,
-  })
-  const apercu = useMemo(() => {
-    if (!idCalque || !branchesCalque.data) return null
-    const { branches, connexions, chainages, anneau } = branchesCalque.data
-    const mouvements = new Set(ficheCalque.data?.lignes.find((l) => l.code === calqueFiche?.ligne)?.mouvements ?? [])
-    const surlignees = new Set(
-      connexions.filter((c) => mouvements.has(`${c.de.split(':')[0]}>${c.vers.split(':')[0]}`)).map((c) => `${c.de}>${c.vers}`),
-    )
-    return { branches, connexions, chainages, anneau, surlignees }
-  }, [idCalque, branchesCalque.data, ficheCalque.data, calqueFiche?.ligne])
 
   // La fiche ouverte en Temps réel et l'adresse /carrefours/:slug se suivent : l'adresse se partage,
   // et le bouton Précédent referme la fiche.
@@ -733,7 +714,6 @@ function App() {
             })
           }
           onOuvrir={sumo ? () => {} : tempsReel ? setFicheTempsReel : configurer}
-          apercu={apercu}
           configuration={
             configuration && {
               carrefourId: configuration.carrefour.id,
@@ -889,7 +869,6 @@ function App() {
                 key={ficheTempsReel.carrefour.slug}
                 slug={ficheTempsReel.carrefour.slug}
                 maintenant={<FicheTempsReel carrefour={carrefourTempsReel} tram={contexteTram} />}
-                onCalque={setCalqueFiche}
               />
             ) : (
               <Aide>

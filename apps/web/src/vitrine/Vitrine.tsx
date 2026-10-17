@@ -20,6 +20,7 @@ import {
 } from '@chakra-ui/react'
 import { ArrowLeft } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
+import { Marker } from 'react-map-gl/maplibre'
 import { Link, useLocation } from 'react-router'
 import {
   Aide,
@@ -28,6 +29,7 @@ import {
   Bascule,
   CarteEnTete,
   Case,
+  EtiquetteFeu,
   EtiquetteVehicule,
   Chiffre,
   Compteur,
@@ -35,6 +37,7 @@ import {
   LibelleSection,
   LigneConflit,
   MenuContextuel,
+  MiniCarte,
   Message,
   ModeCouleur,
   PanneauBas,
@@ -51,6 +54,14 @@ import {
 } from '../ds'
 import { ChoixLignesBus } from '../bus/ChoixLignesBus'
 import type { LigneBus } from '../bus/lignesBus'
+
+/** Feux du carrefour Foch × Helvétie × Denfert-Rochereau, pour la mini-carte. */
+const FEUX_EXEMPLE: Array<{ lignes: string[]; position: [number, number]; etat: EtatLampe | null }> = [
+  { lignes: ['F1'], position: [6.0259917, 47.2427229], etat: 'vert' },
+  { lignes: ['F2'], position: [6.0259519, 47.2428918], etat: 'rouge' },
+  { lignes: ['F3'], position: [6.0254684, 47.2427661], etat: 'rouge' },
+  { lignes: ['F4', 'F5'], position: [6.0257, 47.2425], etat: null },
+]
 
 /** Vitrine du design system : chaque composant, dans ses états, en clair comme en sombre. */
 export default function Vitrine() {
@@ -469,6 +480,25 @@ function ComposantsProjet() {
           </Flex>
         </Exemple>
       </Grid>
+
+      <Exemple nom="Mini-carte et étiquettes de feu (plan d'un carrefour)">
+        <Stack gap="3">
+          <HStack gap="2" wrap="wrap">
+            <EtiquetteFeu lignes={['F1']} />
+            <EtiquetteFeu lignes={['F2']} etat="vert" />
+            <EtiquetteFeu lignes={['P1']} etat="rouge" />
+            <EtiquetteFeu lignes={['F3', 'F4']} actif />
+            <EtiquetteFeu lignes={[]} />
+          </HStack>
+          <MiniCarte points={FEUX_EXEMPLE.map((f) => f.position)} h="220px">
+            {FEUX_EXEMPLE.map((f) => (
+              <Marker key={f.lignes.join()} longitude={f.position[0]} latitude={f.position[1]}>
+                <EtiquetteFeu lignes={f.lignes} etat={f.etat} />
+              </Marker>
+            ))}
+          </MiniCarte>
+        </Stack>
+      </Exemple>
 
       <Exemple nom="Barre d'outils">
         <Flex justify="center" py="4" bg="bg.muted" borderRadius="l2">

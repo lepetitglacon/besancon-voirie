@@ -1,6 +1,6 @@
 import { Badge, Box, Button } from '@chakra-ui/react'
 import type { LonLat } from '@voirie/engine'
-import type { Anneau, Bbox, Branche, CarrefourResume, CarrefoursGeoJson, Chainage, Connexion, EmpriseIa, FeuResume, FeuxGeoJson } from '@voirie/schema'
+import type { Bbox, CarrefourResume, CarrefoursGeoJson, EmpriseIa, FeuResume, FeuxGeoJson } from '@voirie/schema'
 import { AttributionControl, type Map as CarteMapLibre, type MapGeoJSONFeature } from 'maplibre-gl'
 import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from 'react'
 import Map, {
@@ -61,19 +61,6 @@ function useMajEnfoncee(): boolean {
 /** Popup d'un feu libre (les carrefours s'affichent dans la carte d'en-tête). */
 type Bulle = { longitude: number; latitude: number; feu: FeuResume }
 
-/** Ce que la fiche d'un carrefour dessine sur la carte : le calque de l'édition, sans poignées ni clics. */
-export interface ApercuCarrefour {
-  branches: Branche[]
-  connexions: Connexion[]
-  chainages: Chainage[]
-  anneau: Anneau | null
-  /** Liaisons mises en avant (« de>vers ») : celles de la ligne de feux survolée ou choisie. */
-  surlignees: ReadonlySet<string>
-}
-
-const rien = () => {}
-const AUCUN_FEU_PLACABLE: FeuPlacable[] = []
-
 interface Props {
   carrefours: CarrefoursGeoJson | undefined
   afficherCarrefours: boolean
@@ -94,8 +81,6 @@ interface Props {
   onOuvrir: (choix: { carrefour: CarrefourResume; position: [number, number] }) => void
   /** Carrefour en cours de configuration : voies et connexions dessinées, bulles désactivées. */
   configuration: (AffichageConfiguration & { carrefourId: string; position: [number, number] }) | null
-  /** Voies et liaisons d'un carrefour ouvert hors configuration (fiche), en lecture seule. */
-  apercu?: ApercuCarrefour | null
   /** Clic sur un feu pendant la configuration : choix des feux d'une ligne, ou popup du feu. */
   onClicFeuConfiguration: (feu: FeuResume, position: LonLat) => void
   /** Clic ailleurs pendant la configuration : ferme la popup ouverte. */
@@ -210,7 +195,7 @@ function ClicDroit({ onMenu }: { onMenu: (position: LonLat, point: { x: number; 
 const ZOOM_CONFIGURATION = 18.3
 
 export function CarteCarrefours(props: Props) {
-  const { carrefours, edition, configuration, apercu, afficherCarrefours, fond, children, onCiblePopup } = props
+  const { carrefours, edition, configuration, afficherCarrefours, fond, children, onCiblePopup } = props
   const carte = useRef<MapRef>(null)
 
   // Feux du carrefour configuré, déplaçables ; celui qu'on tire est dessiné à sa nouvelle place.
@@ -444,21 +429,6 @@ export function CarteCarrefours(props: Props) {
           onClic={props.onClicCalque}
           selection={configuration.selection}
           cadrePhoto={configuration.cadreIa}
-        />
-      )}
-      {apercu && !configuration && (
-        <CalqueCarrefour
-          branches={apercu.branches}
-          connexions={apercu.connexions}
-          chainages={apercu.chainages}
-          anneau={apercu.anneau}
-          mode={null}
-          surlignees={apercu.surlignees}
-          onDeplacer={rien}
-          onConnecter={rien}
-          feuxPlacables={AUCUN_FEU_PLACABLE}
-          onPlacerFeu={async () => {}}
-          onApercuFeu={rien}
         />
       )}
       {configuration?.ancre && (

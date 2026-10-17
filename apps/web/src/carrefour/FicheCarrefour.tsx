@@ -11,6 +11,7 @@ import { Aide, Bascule, Chiffre, Message, Pastille, Segments, Valeur } from '../
 import { usePreference } from '../preferences'
 import { useMaintenant } from '../tempsReel/useMaintenant'
 import { libellePlage, NATURES, STATUTS } from './libelles'
+import { PlanCarrefour } from './PlanCarrefour'
 
 /** Thèmes de la fiche, dans la carte de gauche du mode Temps réel. */
 type Theme = 'feux' | 'carrefour' | 'releves'
@@ -30,36 +31,26 @@ const CONTROLEURS: Record<string, string> = {
 
 const date = (iso: string) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
 
-/** Ce que le thème Carrefour demande à la carte : le calque des voies, et la ligne de feux à mettre en avant. */
-export interface CalqueFiche {
-  ligne: string | null
-}
-
 interface Props {
   slug: string
   /** En tête du thème « Feux » : l'état des feux en temps réel. */
   maintenant: ReactNode
-  /** Le thème Carrefour s'ouvre (calque à dessiner) ou se ferme (null). */
-  onCalque: (calque: CalqueFiche | null) => void
 }
 
 /**
  * Fiche d'un carrefour (`/carrefours/:slug`), rangée par thème : les feux (état maintenant, plans et
- * leur diagramme), le carrefour (branches, lignes de feux, dessinées sur la carte), les relevés terrain.
+ * leur diagramme), le carrefour (plan, branches, lignes de feux), les relevés terrain.
  */
-export function FicheCarrefour({ slug, maintenant, onCalque }: Props) {
+export function FicheCarrefour({ slug, maintenant }: Props) {
   const [themeLu, setTheme] = usePreference<Theme>('theme-fiche', 'feux')
   // Thème d'une version précédente (« maintenant », « plans ») : les feux.
   const theme: Theme = THEMES.includes(themeLu) ? themeLu : 'feux'
   const fiche = useQuery({ queryKey: ['fiche', slug], queryFn: () => api.fiche(slug) })
   const nombre = (n: number | undefined) => (n ? ` · ${n}` : '')
-  /** Ligne de feux choisie (clic) ou survolée dans le thème Carrefour : la carte met ses liaisons en avant. */
+  /** Ligne de feux choisie (clic) ou survolée dans le thème Carrefour : le plan met ses liaisons en avant. */
   const [ligneChoisie, setLigneChoisie] = useState<string | null>(null)
   const [ligneSurvolee, setLigneSurvolee] = useState<string | null>(null)
   const ligne = ligneSurvolee ?? ligneChoisie
-
-  useEffect(() => onCalque(theme === 'carrefour' ? { ligne } : null), [onCalque, theme, ligne])
-  useEffect(() => () => onCalque(null), [onCalque])
 
   return (
     <Stack gap="3">
@@ -183,7 +174,7 @@ function Plan({ plan, lignes, enVigueur }: { plan: FichePlan; lignes: Fiche['lig
 
 interface PropsCarrefour {
   fiche: Fiche
-  /** Ligne de feux mise en avant sur la carte. */
+  /** Ligne de feux mise en avant sur le plan. */
   ligne: string | null
   onChoisir: (code: string) => void
   onSurvoler: (code: string | null) => void
@@ -207,6 +198,7 @@ function Carrefour({ fiche, ligne, onChoisir, onSurvoler }: PropsCarrefour) {
         <Chiffre valeur={branches.length} libelle="branches" />
         <Chiffre valeur={lignes.length} libelle="lignes" />
       </HStack>
+      <PlanCarrefour carrefourId={carrefour.id} ligne={ligne} onLigne={onChoisir} />
 
       {branches.length > 0 && (
         <Stack gap="1">
@@ -234,7 +226,7 @@ function Carrefour({ fiche, ligne, onChoisir, onSurvoler }: PropsCarrefour) {
           <Text textStyle="overline" color="fg.muted">
             Lignes de feux
           </Text>
-          <Aide>Survoler ou cliquer une ligne : la carte montre ses mouvements.</Aide>
+          <Aide>Survoler ou cliquer une ligne (ou un feu sur le plan) : le plan montre ses mouvements et ses feux.</Aide>
           {lignes.map((l) => (
             <HStack
               key={l.code}

@@ -14,6 +14,7 @@ import type { CarrefourTempsReel } from '@voirie/schema'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api } from '../api'
+import { PlanCarrefour } from '../carrefour/PlanCarrefour'
 import { Aide, Chiffre, IconeFeu, Message, Section, Valeur } from '../ds'
 import { useMaintenant } from '../tempsReel/useMaintenant'
 import { ecrirePseudo, lirePseudo, useSeance } from './seance'
@@ -90,6 +91,10 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
     instants.filter((t) => !seance.envoyes.includes(t)).map((t) => ({ ligne, t })),
   )
 
+  /** Ligne dont on a touché un feu sur le plan : son bouton est mis en avant. */
+  const [ligneVue, setLigneVue] = useState<string | null>(null)
+  const etatsReleves = new Map(codes.map((code) => [code, couleurCourante(saisies, code)] as const))
+
   const saisir = (suivantes: SaisieReleve[]) => {
     navigator.vibrate?.(15)
     modifier((s) => ({ ...s, saisies: suivantes }))
@@ -156,6 +161,14 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
         <Message ton="avertissement">Ce carrefour n’a pas encore de lignes de feux : elles se déclarent dans la configuration.</Message>
       ) : (
         <Section libelle="Lignes de feux · un appui à chaque changement">
+          <PlanCarrefour
+            carrefourId={carrefour.id}
+            h="220px"
+            ligne={ligneVue}
+            onLigne={(code) => setLigneVue((actuelle) => (actuelle === code ? null : code))}
+            etats={etatsReleves}
+          />
+          <Aide>Toucher un feu sur le plan : son bouton s'entoure ci-dessous.</Aide>
           <Grid templateColumns="repeat(2, minmax(0, 1fr))" gap="2.5">
             {carrefour.lignes.map((ligne) => {
               const couleur = couleurCourante(saisies, ligne.code)
@@ -171,6 +184,9 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
                   bg={couleur === 'vert' ? 'feu.vert' : couleur === 'rouge' ? 'feu.rouge' : 'bg.muted'}
                   color={couleur ? 'white' : 'fg'}
                   aria-label={`${ligne.code}${couleur ? ` au ${couleur}` : ''} : passe au ${prochaine}`}
+                  outline={ligneVue === ligne.code ? '3px solid' : undefined}
+                  outlineColor="brand.solid"
+                  outlineOffset="2px"
                   onClick={() => saisir(basculerLigne(saisies, ligne.code, Date.now()))}
                 >
                   <Text textStyle="2xl" fontWeight="bold">
