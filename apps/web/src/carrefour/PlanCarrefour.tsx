@@ -62,7 +62,8 @@ interface PropsEtiquettes {
 /** Étiquette de chaque feu physique, à sa position, sur la carte qui l'entoure. */
 export function EtiquettesFeux({ feux, ligne, etats, onLigne }: PropsEtiquettes) {
   return feux.map((f) => (
-    <Marker key={f.id} longitude={f.position[0]} latitude={f.position[1]}>
+    // Au-dessus du calque des voies (z-index 1), qui recouvrirait sinon les étiquettes.
+    <Marker key={f.id} longitude={f.position[0]} latitude={f.position[1]} style={{ zIndex: 2 }}>
       <EtiquetteFeu
         lignes={f.lignes}
         deduit={f.deduit}
