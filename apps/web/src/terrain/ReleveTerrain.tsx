@@ -7,6 +7,8 @@ import {
   couleurSuivante,
   ecartsAuPlan,
   estChangementCouleur,
+  estEvenement,
+  estFin,
   fixerCouleur,
   planEnVigueur,
   type CouleurReleve,
@@ -40,7 +42,7 @@ const LAMPE: Record<CouleurReleve | 'aucune', EtatLampe | null> = { vert: 'vert'
  * bouton, les lignes de tram et bus d'abord pour un tram ou un bus.
  */
 function ordrePourEvenement(lignes: CarrefourTempsReel['lignes'], saisie: SaisieReleve | undefined) {
-  const evenement = saisie && !estChangementCouleur(saisie) ? saisie.evenement : null
+  const evenement = saisie && estEvenement(saisie) ? saisie.evenement : null
   const enTete = (l: CarrefourTempsReel['lignes'][number]) =>
     evenement === 'pieton' ? l.pieton : evenement === 'tram' || evenement === 'bus' ? l.tc : false
   return [...lignes.filter(enTete), ...lignes.filter((l) => !enTete(l))]
@@ -123,7 +125,7 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
   const termine = seance.termine !== undefined
   const rattacher = (t: number, ligne: string | null) => {
     if (ligne) {
-      modifier((s) => ({ ...s, saisies: s.saisies.map((x) => (x.t === t && !estChangementCouleur(x) ? { ...x, ligne } : x)) }))
+      modifier((s) => ({ ...s, saisies: s.saisies.map((x) => (x.t === t && estEvenement(x) ? { ...x, ligne } : x)) }))
     }
     setEvenementEnAttente(null)
   }
@@ -300,7 +302,9 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
               Dernière saisie {heure(derniere.t)} :{' '}
               {estChangementCouleur(derniere)
                 ? `${derniere.ligne} au ${derniere.couleur}`
-                : `${EVENEMENTS.find((e) => e.type === derniere.evenement)?.libelle}${derniere.ligne ? ` pour ${derniere.ligne}` : ''}`}
+                : estEvenement(derniere)
+                  ? `${EVENEMENTS.find((e) => e.type === derniere.evenement)?.libelle}${derniere.ligne ? ` pour ${derniere.ligne}` : ''}`
+                  : 'fin du relevé'}
             </Aide>
             <Button size="xs" variant="ghost" onClick={() => modifier((s) => ({ ...s, saisies: s.saisies.slice(0, -1) }))}>
               Annuler
@@ -363,7 +367,11 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
               {saisies[0] && ` · ${Math.round((seance.termine! - saisies[0].t) / 60000)} min`} : vérifiez la mesure, puis envoyez.
             </Message>
             {!seance.releve && (
-              <Button size="xs" variant="ghost" onClick={() => modifier(({ termine: _fin, ...s }) => s)}>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => modifier(({ termine: _fin, ...s }) => ({ ...s, saisies: s.saisies.filter((x) => !estFin(x)) }))}
+              >
                 Reprendre
               </Button>
             )}
@@ -375,7 +383,8 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
             disabled={!saisies.some(estChangementCouleur)}
             onClick={() => {
               setEvenementEnAttente(null)
-              modifier((s) => ({ ...s, termine: Date.now() }))
+              const fin = Date.now()
+              modifier((s) => ({ ...s, termine: fin, saisies: [...s.saisies, { t: fin, fin: true }] }))
             }}
           >
             J’ai fini

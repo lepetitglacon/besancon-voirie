@@ -4,6 +4,7 @@ import {
   analyserReleve,
   calculerProgramme,
   debutsDeVert,
+  degagementsMesures,
   degagementsRetenus,
   planEnVigueur,
   programmeDepuisReleve,
@@ -171,13 +172,17 @@ function Comparaison(props: Props & { releveId: string }) {
   const programmeReleve = programmeDepuisReleve(saisies, codes)
   const etapesReleve = programmeReleve?.etapes.map((e) => ({ lignes: e.lignes, duree_s: Math.max(1, Math.round(e.duree_s)) })) ?? []
   const jauneReleve = programmeReleve?.jaune_s == null ? plan.jaune_s : Math.min(6, Math.max(2, Math.round(programmeReleve.jaune_s)))
+  // Entre-verts mesurés à la place des dégagements : le cycle retombe sur le cycle relevé (comme à la validation).
+  const degagementsReleve = programmeReleve
+    ? { ...plan.degagements, ...degagementsMesures(programmeReleve.verts, programmeReleve.cycle_s, jauneReleve, contexte.degagements) }
+    : plan.degagements
   const calculReleve =
     etapesReleve.length > 0
       ? calculerProgramme({
           ...contexte,
           etapes: etapesReleve,
           jaune_s: jauneReleve,
-          degagements: degagementsRetenus(contexte.degagements, plan.degagements),
+          degagements: degagementsRetenus(contexte.degagements, degagementsReleve),
         })
       : null
   const valide = detail.data.statut === 'valide'
@@ -232,7 +237,7 @@ function Comparaison(props: Props & { releveId: string }) {
           <>
             <Aide>
               {etapesReleve.map((e, i) => `É${i + 1} ${e.lignes.join('+')} ${e.duree_s} s`).join(' · ')} · jaune {jauneReleve} s · cycle
-              {` ${Math.round(calculReleve.cycle_s * 10) / 10} s`} avec les dégagements du carrefour (mesuré {programmeReleve.cycle_s} s)
+              {` ${Math.round(calculReleve.cycle_s * 10) / 10} s`} avec les entre-verts mesurés (relevé {programmeReleve.cycle_s} s)
             </Aide>
             <Chronogramme
               chronologie={{ ...calculReleve, duree_s: calculReleve.cycle_s }}
@@ -250,7 +255,9 @@ function Comparaison(props: Props & { releveId: string }) {
                   disabled={recalees !== null || programmeModifie}
                   loading={validation.isPending}
                   onClick={() =>
-                    window.confirm(`Remplacer les étapes du plan « ${plan.code} » par celles du relevé ? Ses plages et ses dégagements restent.`) &&
+                    window.confirm(
+                      `Remplacer les étapes du plan « ${plan.code} » par celles du relevé ? Ses rouges de dégagement prennent les entre-verts mesurés ; ses plages restent.`,
+                    ) &&
                     validation.mutate(plan.code)
                   }
                 >

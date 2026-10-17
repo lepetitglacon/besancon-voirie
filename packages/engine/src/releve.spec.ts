@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   analyserReleve,
+  arrondirALaSeconde,
   basculerLigne,
+  degagementsMesures,
+  finDuReleve,
   couleurCourante,
   ecartsAuPlan,
   fixerCouleur,
@@ -155,5 +158,29 @@ describe('programme reconstruit d’un relevé', () => {
 
   it('ne propose rien avant deux cycles', () => {
     expect(programmeDepuisReleve(saisies.slice(0, 6), ['F1', 'F2'])).toBeNull();
+  });
+});
+
+describe('fin, arrondi et dégagements mesurés', () => {
+  it('cale les saisies à la seconde depuis la première, fin comprise', () => {
+    const saisies: SaisieReleve[] = [
+      { t: 10_000, ligne: 'F1', couleur: 'vert' },
+      { t: 12_400, ligne: 'F1', couleur: 'jaune' },
+      { t: 15_600, evenement: 'bus', ligne: 'F1' },
+      { t: 20_499, fin: true },
+    ];
+    expect(arrondirALaSeconde(saisies).map((s) => s.t)).toEqual([10_000, 12_000, 16_000, 20_000]);
+    expect(finDuReleve(saisies)).toBe(20_499);
+  });
+
+  it('ignore la fin dans la synthèse', () => {
+    const r = analyserReleve([...cycles(3), { t: 300_000, fin: true }], ['F1']);
+    expect(r.evenements).toEqual({ bus: 0, tram: 0, boucle: 0, pieton: 0 });
+    expect(r.cycle?.cycle_s).toBe(90);
+  });
+
+  it('mesure le rouge de dégagement d’un couple : entre-vert moins le jaune', () => {
+    const verts = { F1: [[0, 30]] as Array<[number, number]>, F2: [[36, 80]] as Array<[number, number]> };
+    expect(degagementsMesures(verts, 90, 3, [{ de: 'F1', vers: 'F2' }, { de: 'F2', vers: 'F1' }])).toEqual({ 'F1>F2': 3, 'F2>F1': 7 });
   });
 });

@@ -1,3 +1,4 @@
+import { cleDegagement } from './degagement.js';
 import { etapesDepuisDiagramme, type EtapeProposee } from './programme.js';
 
 /**
@@ -13,14 +14,29 @@ export type EvenementReleve = 'bus' | 'tram' | 'boucle' | 'pieton';
 export type CouleurReleve = 'vert' | 'jaune' | 'rouge';
 
 /**
- * Une saisie, horodatée par le téléphone (ms epoch) : un changement de couleur d'une ligne, ou un
- * événement, rattaché à la ligne qu'il concerne quand on l'a indiquée.
+ * Une saisie, horodatée par le téléphone (ms epoch) : un changement de couleur d'une ligne, un
+ * événement (rattaché à la ligne qu'il concerne quand on l'a indiquée), ou la fin du relevé.
  */
 export type SaisieReleve =
   | { t: number; ligne: string; couleur: CouleurReleve }
-  | { t: number; evenement: EvenementReleve; ligne?: string };
+  | { t: number; evenement: EvenementReleve; ligne?: string }
+  | { t: number; fin: true };
 
 export const estChangementCouleur = (s: SaisieReleve): s is Extract<SaisieReleve, { couleur: CouleurReleve }> => 'couleur' in s;
+export const estEvenement = (s: SaisieReleve): s is Extract<SaisieReleve, { evenement: EvenementReleve }> => 'evenement' in s;
+export const estFin = (s: SaisieReleve): s is Extract<SaisieReleve, { fin: true }> => 'fin' in s;
+
+/** Fin du relevé (ms epoch), posée par « J'ai fini » ou à la relecture ; null si elle manque. */
+export const finDuReleve = (saisies: readonly SaisieReleve[]): number | null => saisies.filter(estFin).at(-1)?.t ?? null;
+
+/**
+ * Saisies calées à la seconde depuis la première : un appui au doigt n'est pas plus précis, et les
+ * changements quasi simultanés de plusieurs lignes retombent sur le même instant.
+ */
+export function arrondirALaSeconde(saisies: readonly SaisieReleve[]): SaisieReleve[] {
+  const t0 = Math.min(...saisies.map((s) => s.t));
+  return saisies.map((s) => ({ ...s, t: t0 + Math.round((s.t - t0) / 1000) * 1000 }));
+}
 
 /** Couleur d'une ligne d'après la dernière saisie ; null tant qu'on ne l'a pas vue changer. */
 export function couleurCourante(saisies: readonly SaisieReleve[], ligne: string): CouleurReleve | null {
@@ -117,7 +133,7 @@ export function analyserReleve(saisies: readonly SaisieReleve[], lignes: readonl
   const evenements: Record<EvenementReleve, number> = { bus: 0, tram: 0, boucle: 0, pieton: 0 };
   const evenementsParLigne: Record<string, Partial<Record<EvenementReleve, number>>> = {};
   for (const s of saisies) {
-    if (estChangementCouleur(s)) continue;
+    if (!estEvenement(s)) continue;
     evenements[s.evenement]++;
     if (s.ligne) {
       const siens = (evenementsParLigne[s.ligne] ??= {});
@@ -249,4 +265,29 @@ export function programmeDepuisReleve(saisies: readonly SaisieReleve[], lignes: 
   const jaunes = Object.values(releve.jaunes).filter((j): j is number => j !== null);
   const jaune = mediane(jaunes);
   return { cycle_s, etapes, jaune_s: jaune === null ? null : arrondi(jaune), verts };
+}
+
+/**
+ * Rouges de dégagement mesurés : pour chaque couple de lignes en conflit (`de` s'arrête, `vers`
+ * démarre), l'entre-vert relevé, de la fin du vert de `de` au début de celui de `vers`, moins le jaune,
+ * à la seconde. Repris dans le plan, ils font retomber son cycle sur le cycle mesuré. Un couple dont
+ * l'entre-vert dépasse la moitié du cycle ne se suit pas : rien pour lui.
+ */
+export function degagementsMesures(
+  verts: Readonly<Record<string, ReadonlyArray<readonly [number, number]>>>,
+  cycle_s: number,
+  jaune_s: number,
+  paires: ReadonlyArray<{ de: string; vers: string }>,
+): Record<string, number> {
+  const resultat: Record<string, number> = {};
+  for (const { de, vers } of paires) {
+    const fin = verts[de]?.at(-1)?.[1];
+    // Un vert à cheval sur la fin du cycle commence au début de son premier morceau non nul.
+    const debut = verts[vers]?.find(([a]) => a > 0)?.[0] ?? verts[vers]?.[0]?.[0];
+    if (fin === undefined || debut === undefined) continue;
+    const entreVert = (((debut - fin) % cycle_s) + cycle_s) % cycle_s;
+    if (entreVert > cycle_s / 2) continue;
+    resultat[cleDegagement(de, vers)] = Math.max(0, Math.round(entreVert - jaune_s));
+  }
+  return resultat;
 }

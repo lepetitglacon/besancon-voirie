@@ -12,6 +12,8 @@ const Instant = z.number().int().positive();
 export const SaisieReleve = z.union([
   z.strictObject({ t: Instant, ligne: CodeLigne, couleur: z.enum(['vert', 'jaune', 'rouge']) }),
   z.strictObject({ t: Instant, evenement: EvenementReleve, ligne: CodeLigne.optional() }),
+  /** Fin du relevé : « J'ai fini », ou posée à la relecture. */
+  z.strictObject({ t: Instant, fin: z.literal(true) }),
 ]);
 export type SaisieReleve = z.infer<typeof SaisieReleve>;
 

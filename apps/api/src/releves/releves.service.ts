@@ -1,7 +1,14 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import { analyserReleve, planEnVigueur, programmeDepuisReleve, type SyntheseReleve } from '@voirie/engine';
+import {
+  analyserReleve,
+  arrondirALaSeconde,
+  degagementsMesures,
+  planEnVigueur,
+  programmeDepuisReleve,
+  type SyntheseReleve,
+} from '@voirie/engine';
 import type { EnvoiReleve, PlanSaisi, ProgrammeCarrefour, ReleveDetail, ReleveResume, SaisieReleve, StatutModeration } from '@voirie/schema';
 import { DRIZZLE, type Db } from '../db/db.module.js';
 import { ProgrammeService } from '../programme/programme.service.js';
@@ -56,10 +63,11 @@ export class RelevesService {
     const codes = lignes.map((l) => l.code);
 
     // Changements de couleur et événements rattachés : la ligne doit exister.
-    const inconnues = [...new Set(saisies.flatMap((s) => (s.ligne && !codes.includes(s.ligne) ? [s.ligne] : [])))];
+    const inconnues = [...new Set(saisies.flatMap((s) => ('ligne' in s && s.ligne && !codes.includes(s.ligne) ? [s.ligne] : [])))];
     if (inconnues.length > 0) throw new BadRequestException(`Pas de ligne ${inconnues.join(', ')} à ce carrefour`);
     if (!saisies.some((s) => 'couleur' in s)) throw new BadRequestException('Aucun changement de couleur relevé');
-    const triees = [...saisies].sort((a, b) => a.t - b.t);
+    // Calées à la seconde : un appui n'est pas plus précis, et les changements simultanés se rejoignent.
+    const triees = arrondirALaSeconde(saisies).sort((a, b) => a.t - b.t);
     return { triees, synthese: analyserReleve(triees, codes) };
   }
 
@@ -110,10 +118,10 @@ export class RelevesService {
   }
 
   /**
-   * Valide un relevé : son programme (cycle, étapes, jaune mesurés) remplace un plan à cycle du
-   * carrefour, par défaut celui en vigueur au moment du relevé. Plages et rouges de dégagement saisis
-   * du plan restent ; ses arcs, qui visent les anciennes étapes, tombent. Le relevé passe « validé »
-   * et le plan garde sa source.
+   * Valide un relevé : son programme (étapes, jaune et entre-verts mesurés) remplace un plan à cycle
+   * du carrefour, par défaut celui en vigueur au moment du relevé. Les plages du plan restent ; ses
+   * rouges de dégagement prennent les valeurs mesurées ; ses arcs, qui visent les anciennes étapes,
+   * tombent. Le relevé passe « validé » et le plan garde sa source.
    */
   async valider(id: string, codePlan?: string): Promise<ProgrammeCarrefour> {
     const releve = await this.detail(id);
@@ -129,10 +137,16 @@ export class RelevesService {
     if (!vise) throw new BadRequestException(codePlan ? `Pas de plan ${codePlan} à ce carrefour` : 'Aucun plan en vigueur au moment du relevé');
     if (vise.mode !== 'cycle') throw new BadRequestException(`Le plan ${vise.code} n’est pas un plan à cycle`);
 
+    const jaune_s = programmeReleve.jaune_s === null ? vise.jaune_s : Math.min(6, Math.max(2, Math.round(programmeReleve.jaune_s)));
     const remplace: PlanSaisi = {
       ...vise,
-      jaune_s: programmeReleve.jaune_s === null ? vise.jaune_s : Math.min(6, Math.max(2, Math.round(programmeReleve.jaune_s))),
+      jaune_s,
       etapes: programmeReleve.etapes.map((e) => ({ lignes: e.lignes, duree_s: Math.max(1, Math.round(e.duree_s)) })),
+      // Entre-verts mesurés : le cycle du plan retombe sur le cycle relevé.
+      degagements: {
+        ...vise.degagements,
+        ...degagementsMesures(programmeReleve.verts, programmeReleve.cycle_s, jaune_s, actuel.degagements),
+      },
       arcs: [],
     };
     const programme = await this.programme.enregistrer(releve.carrefour_id, {
