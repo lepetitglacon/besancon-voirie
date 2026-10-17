@@ -97,6 +97,22 @@ describe('Relevés terrain (e2e)', () => {
     await http().put(`/api/releves/${body.id}`).send({ saisies: [{ t: debut, evenement: 'bus' }, { t: debut + 1, evenement: 'tram' }] }).expect(400);
   });
 
+  it('valide un relevé : son programme remplace le plan en vigueur, le relevé est validé', async () => {
+    await http()
+      .put(`/api/carrefours/${carrefourA}/programme`)
+      .send({ plans: [{ code: 'jour', mode: 'cycle', plages: [{ jours: 'tous', de: '00:00', a: '00:00' }], etapes: [{ lignes: ['F1'], duree_s: 20 }] }] })
+      .expect(200);
+    const { body } = await http().post('/api/releves').send({ carrefour_id: carrefourA, saisies }).expect(202);
+    const programme = (await http().post(`/api/releves/${body.id}/valider`).send({}).expect(200)).body;
+    expect(programme.plans[0]).toMatchObject({ code: 'jour', etapes: [{ lignes: ['F1'], duree_s: 30 }] });
+    const { rows } = await client.query(
+      `SELECT r.statut, p.source_releve FROM releve r JOIN plan_feux p ON p.carrefour_id = r.carrefour_id WHERE r.id = $1`,
+      [body.id],
+    );
+    expect(rows[0]).toEqual({ statut: 'valide', source_releve: body.id });
+    await http().post(`/api/releves/${body.id}/valider`).send({ plan: 'nuit' }).expect(400);
+  });
+
   it('refuse une ligne inconnue, un relevé sans couleur ou daté de plus d’un mois', async () => {
     await http()
       .post('/api/releves')

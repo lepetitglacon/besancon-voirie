@@ -28,6 +28,10 @@ export const EnvoiReleve = z.object({
 });
 export type EnvoiReleve = z.infer<typeof EnvoiReleve>;
 
+/** Validation d'un relevé : le plan qu'il remplace (par défaut, celui en vigueur au moment du relevé). */
+export const ValidationReleve = z.object({ plan: z.string().min(1).max(32).optional() });
+export type ValidationReleve = z.infer<typeof ValidationReleve>;
+
 /** Saisies d'un relevé recalées à la seconde, au bureau : elles remplacent celles reçues. */
 export const CorrectionReleve = z.object({ saisies: z.array(SaisieReleve).min(2).max(SAISIES_RELEVE_MAX) });
 export type CorrectionReleve = z.infer<typeof CorrectionReleve>;

@@ -2,8 +2,11 @@ import { Badge, Button, HStack, Stack } from '@chakra-ui/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   analyserReleve,
+  calculerProgramme,
   debutsDeVert,
+  degagementsRetenus,
   planEnVigueur,
+  programmeDepuisReleve,
   vertsDansLeCycle,
   type ContexteProgramme,
   type Intervalle,
@@ -16,6 +19,7 @@ import { api } from '../api'
 import { Aide, Chiffre, Compteur, Message, Section, Selecteur } from '../ds'
 import { Chronogramme } from './Chronogramme'
 import { proposerCorrections, type Correction } from './corrections'
+import { BandeBas } from './BandeBas'
 import { Lecture } from './Lecture'
 import { etirerEtape } from './programme'
 import { TimelineReleve } from './TimelineReleve'
@@ -33,6 +37,11 @@ interface Props {
   onInstant: (t: number) => void
   vitesse: number | null
   onVitesse: (vitesse: number | null) => void
+  /** Brouillon du programme en cours : valider un relevé l'écraserait. */
+  programmeModifie: boolean
+  /** Panneau à droite : la timeline du relevé passe dans la bande sous la carte. */
+  diagrammeEnBande: boolean
+  onHauteurBande: (hauteur: number) => void
 }
 
 const STATUTS: Record<ReleveResume['statut'], { libelle: string; couleur: string }> = {
@@ -90,7 +99,9 @@ export function OngletReleves(props: Props) {
   )
 }
 
-function Comparaison({ releveId, contexte, plans, onChanger, planActif, onPlanActif, resultat, instant, onInstant, vitesse, onVitesse }: Props & { releveId: string }) {
+function Comparaison(props: Props & { releveId: string }) {
+  const { releveId, carrefourId, contexte, plans, onChanger, planActif, onPlanActif, resultat, instant, onInstant, vitesse, onVitesse } = props
+  const { programmeModifie, diagrammeEnBande, onHauteurBande } = props
   const queryClient = useQueryClient()
   const detail = useQuery({ queryKey: ['releve', releveId], queryFn: () => api.releve(releveId) })
   /** Saisies recalées dans la timeline, pas encore enregistrées ; null : celles du relevé. */
@@ -103,6 +114,17 @@ function Comparaison({ releveId, contexte, plans, onChanger, planActif, onPlanAc
       queryClient.setQueryData(['releve', releveId], corrige)
       setRecalees(null)
       return queryClient.invalidateQueries({ queryKey: ['releves'] })
+    },
+  })
+  const validation = useMutation({
+    mutationFn: (plan: string) => api.validerReleve(releveId, plan),
+    onSuccess: async (programme) => {
+      queryClient.setQueryData(['programme', carrefourId], programme)
+      await Promise.all(
+        [['releve', releveId], ['releves'], ['fiche'], ['feux-temps-reel'], ['carrefour-temps-reel']].map((queryKey) =>
+          queryClient.invalidateQueries({ queryKey }),
+        ),
+      )
     },
   })
   if (detail.isPending) return <Aide>Chargement du relevé…</Aide>
@@ -145,6 +167,44 @@ function Comparaison({ releveId, contexte, plans, onChanger, planActif, onPlanAc
     resultat.cycle_s,
   )
   const { corrections, remarques } = proposerCorrections(plan, resultat, synthese)
+  // Le relevé comme programme à part entière : ses étapes et son jaune, transitions recalculées sur la géométrie.
+  const programmeReleve = programmeDepuisReleve(saisies, codes)
+  const etapesReleve = programmeReleve?.etapes.map((e) => ({ lignes: e.lignes, duree_s: Math.max(1, Math.round(e.duree_s)) })) ?? []
+  const jauneReleve = programmeReleve?.jaune_s == null ? plan.jaune_s : Math.min(6, Math.max(2, Math.round(programmeReleve.jaune_s)))
+  const calculReleve =
+    etapesReleve.length > 0
+      ? calculerProgramme({
+          ...contexte,
+          etapes: etapesReleve,
+          jaune_s: jauneReleve,
+          degagements: degagementsRetenus(contexte.degagements, plan.degagements),
+        })
+      : null
+  const valide = detail.data.statut === 'valide'
+
+  const timeline = (
+    <>
+      <TimelineReleve
+        saisies={saisies}
+        lignes={contexte.lignes.map((l) => ({ code: l.code, pieton: l.type === 'pieton' }))}
+        onChanger={setRecalees}
+      />
+      {recalees && (
+        <HStack gap="2">
+          <Message ton="avertissement" flex="1">
+            Relevé recalé, pas encore enregistré : la mesure et les corrections en tiennent déjà compte.
+          </Message>
+          <Button size="xs" variant="ghost" onClick={() => setRecalees(null)}>
+            Annuler
+          </Button>
+          <Button size="xs" variant="solid" loading={enregistrement.isPending} onClick={() => enregistrement.mutate(recalees)}>
+            Enregistrer le relevé
+          </Button>
+        </HStack>
+      )}
+      {enregistrement.error && <Message ton="erreur">{enregistrement.error.message}</Message>}
+    </>
+  )
   const appliquer = (aAppliquer: Correction[]) =>
     onChanger(plans.map((p, i) => (i === planActif && p.mode === 'cycle' ? aAppliquer.reduce<PlanEtapes>((q, c) => c.appliquer(q), p) : p)))
 
@@ -157,26 +217,55 @@ function Comparaison({ releveId, contexte, plans, onChanger, planActif, onPlanAc
         <Chiffre valeur={synthese.cycle?.cycles ?? 0} libelle="cycles relevés" />
       </HStack>
 
-      <Section libelle="Relevé, seconde par seconde">
-        <TimelineReleve
-          saisies={saisies}
-          lignes={contexte.lignes.map((l) => ({ code: l.code, pieton: l.type === 'pieton' }))}
-          onChanger={setRecalees}
-        />
-        {recalees && (
-          <HStack gap="2">
-            <Message ton="avertissement" flex="1">
-              Relevé recalé, pas encore enregistré : la mesure et les corrections ci-dessous en tiennent déjà compte.
-            </Message>
-            <Button size="xs" variant="ghost" onClick={() => setRecalees(null)}>
-              Annuler
-            </Button>
-            <Button size="xs" variant="solid" loading={enregistrement.isPending} onClick={() => enregistrement.mutate(recalees)}>
-              Enregistrer le relevé
-            </Button>
-          </HStack>
+      {diagrammeEnBande ? (
+        <BandeBas titre={`Relevé du ${date(releve.observe_le)}, seconde par seconde`} onHauteur={onHauteurBande}>
+          <Stack gap="2">{timeline}</Stack>
+        </BandeBas>
+      ) : (
+        <Section libelle="Relevé, seconde par seconde">{timeline}</Section>
+      )}
+
+      <Section libelle="Programme relevé">
+        {!programmeReleve || !calculReleve ? (
+          <Aide>Il faut deux cycles complets d’une même ligne pour reconstruire un programme.</Aide>
+        ) : (
+          <>
+            <Aide>
+              {etapesReleve.map((e, i) => `É${i + 1} ${e.lignes.join('+')} ${e.duree_s} s`).join(' · ')} · jaune {jauneReleve} s · cycle
+              {` ${Math.round(calculReleve.cycle_s * 10) / 10} s`} avec les dégagements du carrefour (mesuré {programmeReleve.cycle_s} s)
+            </Aide>
+            <Chronogramme
+              chronologie={{ ...calculReleve, duree_s: calculReleve.cycle_s }}
+              lignes={contexte.lignes}
+              instant={instant % calculReleve.cycle_s}
+              onInstant={onInstant}
+            />
+            {valide ? (
+              <Message ton="ok">Relevé validé : son programme a remplacé un plan.</Message>
+            ) : (
+              <HStack gap="2" wrap="wrap">
+                <Button
+                  size="sm"
+                  variant="solid"
+                  disabled={recalees !== null || programmeModifie}
+                  loading={validation.isPending}
+                  onClick={() =>
+                    window.confirm(`Remplacer les étapes du plan « ${plan.code} » par celles du relevé ? Ses plages et ses dégagements restent.`) &&
+                    validation.mutate(plan.code)
+                  }
+                >
+                  Valider : remplacer le plan « {plan.code} »
+                </Button>
+                {(recalees !== null || programmeModifie) && (
+                  <Aide>
+                    {recalees !== null ? 'Enregistrez d’abord le relevé recalé.' : 'Le programme a des modifications non enregistrées : enregistrez-les ou annulez-les d’abord.'}
+                  </Aide>
+                )}
+              </HStack>
+            )}
+            {validation.error && <Message ton="erreur">{validation.error.message}</Message>}
+          </>
         )}
-        {enregistrement.error && <Message ton="erreur">{enregistrement.error.message}</Message>}
       </Section>
 
       <Section libelle="Programme et relevé superposés">

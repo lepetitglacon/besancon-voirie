@@ -256,6 +256,9 @@ function CorpsProgramme(props: Props) {
       ) : onglet === 'releves' ? (
         <OngletReleves
           carrefourId={carrefourId}
+          programmeModifie={programmeModifie}
+          diagrammeEnBande={disposition === 'droite'}
+          onHauteurBande={props.onHauteurBande}
           contexte={contexte}
           plans={plans}
           onChanger={onPlans}

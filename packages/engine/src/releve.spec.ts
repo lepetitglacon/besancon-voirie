@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { analyserReleve, basculerLigne, couleurCourante, ecartsAuPlan, fixerCouleur, vertsDansLeCycle, type SaisieReleve } from './releve.js';
+import {
+  analyserReleve,
+  basculerLigne,
+  couleurCourante,
+  ecartsAuPlan,
+  fixerCouleur,
+  programmeDepuisReleve,
+  vertsDansLeCycle,
+  type SaisieReleve,
+} from './releve.js';
 
 /** Un feu observé : F1 vert 30 s sur un cycle de 90 s, à partir de `debut` (s). */
 const cycles = (n: number, cycle_s = 90, vert_s = 30, debut = 0): SaisieReleve[] =>
@@ -117,5 +126,34 @@ describe('verts mesurés dans le cycle du programme', () => {
 
   it('ne place rien sans passage au vert de la ligne de référence', () => {
     expect(vertsDansLeCycle(saisies, { ligne: 'F3', debut_s: 0 }, 90)).toEqual({});
+  });
+});
+
+describe('programme reconstruit d’un relevé', () => {
+  // F1 vert 30 s puis jaune 3 s ; F2 vert de 38 s à 80 s puis jaune 3 s ; cycle de 90 s, 4 cycles.
+  const saisies: SaisieReleve[] = Array.from({ length: 4 }, (_, i) => {
+    const d = i * 90;
+    return [
+      { t: d * 1000, ligne: 'F1', couleur: 'vert' as const },
+      { t: (d + 30) * 1000, ligne: 'F1', couleur: 'jaune' as const },
+      { t: (d + 33) * 1000, ligne: 'F1', couleur: 'rouge' as const },
+      { t: (d + 38) * 1000, ligne: 'F2', couleur: 'vert' as const },
+      { t: (d + 80) * 1000, ligne: 'F2', couleur: 'jaune' as const },
+      { t: (d + 83) * 1000, ligne: 'F2', couleur: 'rouge' as const },
+    ];
+  }).flat();
+
+  it('déduit le cycle, les étapes et leur durée, et le jaune', () => {
+    const programme = programmeDepuisReleve(saisies, ['F1', 'F2'])!;
+    expect(programme.cycle_s).toBe(90);
+    expect(programme.etapes).toEqual([
+      { lignes: ['F1'], duree_s: 30 },
+      { lignes: ['F2'], duree_s: 42 },
+    ]);
+    expect(programme.jaune_s).toBe(3);
+  });
+
+  it('ne propose rien avant deux cycles', () => {
+    expect(programmeDepuisReleve(saisies.slice(0, 6), ['F1', 'F2'])).toBeNull();
   });
 });

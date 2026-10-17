@@ -129,6 +129,8 @@ export const api = {
   envoyerReleve: (envoi: EnvoiReleve) => requete<ReleveResume>('/api/releves', { method: 'POST', body: JSON.stringify(envoi) }),
   relevesCarrefour: (carrefourId: string) => requete<ReleveResume[]>(`/api/carrefours/${carrefourId}/releves`),
   releve: (id: string) => requete<ReleveDetail>(`/api/releves/${id}`),
+  validerReleve: (id: string, plan: string) =>
+    requete<ProgrammeCarrefour>(`/api/releves/${id}/valider`, { method: 'POST', body: JSON.stringify({ plan }) }),
   corrigerReleve: (id: string, saisies: SaisieReleve[]) =>
     requete<ReleveDetail>(`/api/releves/${id}`, { method: 'PUT', body: JSON.stringify({ saisies }) }),
   tops: (carrefourId: string) => requete<TopsCarrefour>(`/api/carrefours/${carrefourId}/tops`),

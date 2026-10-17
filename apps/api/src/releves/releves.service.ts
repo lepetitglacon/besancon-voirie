@@ -1,9 +1,10 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import { analyserReleve, type SyntheseReleve } from '@voirie/engine';
-import type { EnvoiReleve, ReleveDetail, ReleveResume, SaisieReleve, StatutModeration } from '@voirie/schema';
+import { analyserReleve, planEnVigueur, programmeDepuisReleve, type SyntheseReleve } from '@voirie/engine';
+import type { EnvoiReleve, PlanSaisi, ProgrammeCarrefour, ReleveDetail, ReleveResume, SaisieReleve, StatutModeration } from '@voirie/schema';
 import { DRIZZLE, type Db } from '../db/db.module.js';
+import { ProgrammeService } from '../programme/programme.service.js';
 
 /** Un relevé ne peut pas dater de plus d'un mois (stocké hors ligne sur le téléphone entre-temps). */
 const ANCIENNETE_MAX_MS = 31 * 86_400_000;
@@ -37,7 +38,10 @@ const resume = (r: LigneReleve): ReleveResume => ({
 /** Relevés terrain : réception anonyme, en attente de modération (docs/ARCHITECTURE.md §7, §12). */
 @Injectable()
 export class RelevesService {
-  constructor(@Inject(DRIZZLE) private readonly db: Db) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Db,
+    private readonly programme: ProgrammeService,
+  ) {}
 
   /**
    * Saisies valables pour ce carrefour (lignes connues, au moins un changement de couleur), triées,
@@ -103,6 +107,42 @@ export class RelevesService {
       WHERE id = ${id}
     `);
     return this.detail(id);
+  }
+
+  /**
+   * Valide un relevé : son programme (cycle, étapes, jaune mesurés) remplace un plan à cycle du
+   * carrefour, par défaut celui en vigueur au moment du relevé. Plages et rouges de dégagement saisis
+   * du plan restent ; ses arcs, qui visent les anciennes étapes, tombent. Le relevé passe « validé »
+   * et le plan garde sa source.
+   */
+  async valider(id: string, codePlan?: string): Promise<ProgrammeCarrefour> {
+    const releve = await this.detail(id);
+    const { rows: lignes } = await this.db.execute<{ code: string }>(sql`
+      SELECT code FROM ligne_feux WHERE carrefour_id = ${releve.carrefour_id} ORDER BY code
+    `);
+    const programmeReleve = programmeDepuisReleve(releve.saisies, lignes.map((l) => l.code));
+    if (!programmeReleve) throw new BadRequestException('Relevé trop court : il faut deux cycles complets d’une même ligne');
+
+    const actuel = await this.programme.lire(releve.carrefour_id);
+    const plans: PlanSaisi[] = actuel.plans.map(({ cycle_s: _cycle, etapes_deduites: _deduites, ...plan }) => plan);
+    const vise = codePlan ? plans.find((p) => p.code === codePlan) : planEnVigueur(plans, Date.parse(releve.observe_le));
+    if (!vise) throw new BadRequestException(codePlan ? `Pas de plan ${codePlan} à ce carrefour` : 'Aucun plan en vigueur au moment du relevé');
+    if (vise.mode !== 'cycle') throw new BadRequestException(`Le plan ${vise.code} n’est pas un plan à cycle`);
+
+    const remplace: PlanSaisi = {
+      ...vise,
+      jaune_s: programmeReleve.jaune_s === null ? vise.jaune_s : Math.min(6, Math.max(2, Math.round(programmeReleve.jaune_s))),
+      etapes: programmeReleve.etapes.map((e) => ({ lignes: e.lignes, duree_s: Math.max(1, Math.round(e.duree_s)) })),
+      arcs: [],
+    };
+    const programme = await this.programme.enregistrer(releve.carrefour_id, {
+      plans: plans.map((p) => (p.code === vise.code ? remplace : p)),
+    });
+    await this.db.execute(sql`UPDATE releve SET statut = 'valide', motif_rejet = NULL WHERE id = ${id}`);
+    await this.db.execute(sql`
+      UPDATE plan_feux SET source_releve = ${id} WHERE carrefour_id = ${releve.carrefour_id} AND code = ${vise.code}
+    `);
+    return programme;
   }
 
   /** Un relevé et ses saisies (relevé rejeté compris : la modération en a besoin). */

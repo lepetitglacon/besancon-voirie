@@ -1,3 +1,5 @@
+import { etapesDepuisDiagramme, type EtapeProposee } from './programme.js';
+
 /**
  * Relevé terrain d'un carrefour : ce qu'on tape devant le feu (changements de couleur d'une ligne,
  * événements qui peuvent déclencher une étape) et ce qu'on en tire, sans effet de bord. Le téléphone
@@ -216,4 +218,35 @@ export function vertsDansLeCycle(
     resultat[ligne] = fin <= cycle_s ? [[arrondi(debut), arrondi(fin)]] : [[arrondi(debut), cycle_s], [0, arrondi(fin - cycle_s)]];
   }
   return resultat;
+}
+
+/** Programme tel qu'un relevé le décrit : de quoi remplacer un plan à cycle. */
+export interface ProgrammeReleve {
+  /** Cycle mesuré (s). */
+  cycle_s: number;
+  /** Étapes : les lignes au vert ensemble et leur durée, dans l'ordre du cycle. */
+  etapes: EtapeProposee[];
+  /** Jaune médian relevé (s), null si aucun jaune n'a été saisi. */
+  jaune_s: number | null;
+  /** Diagramme relevé, calé sur le passage au vert de la ligne la plus suivie au début du cycle. */
+  verts: Record<string, Array<[number, number]>>;
+}
+
+/**
+ * Programme reconstruit d'un relevé : cycle mesuré, diagramme des verts médians, étapes qui s'en
+ * déduisent (les périodes sans vert ou de simple chevauchement sont des transitions) et jaune.
+ * null tant que le relevé ne mesure pas de cycle (deux cycles complets d'une même ligne).
+ */
+export function programmeDepuisReleve(saisies: readonly SaisieReleve[], lignes: readonly string[]): ProgrammeReleve | null {
+  const releve = analyserReleve(saisies, lignes);
+  if (!releve.cycle) return null;
+  const reference = [...lignes].sort((a, b) => (releve.tops[b]?.length ?? 0) - (releve.tops[a]?.length ?? 0))[0];
+  if (!reference) return null;
+  const { cycle_s } = releve.cycle;
+  const verts = vertsDansLeCycle(saisies, { ligne: reference, debut_s: 0 }, cycle_s);
+  const etapes = etapesDepuisDiagramme(verts, cycle_s);
+  if (etapes.length === 0) return null;
+  const jaunes = Object.values(releve.jaunes).filter((j): j is number => j !== null);
+  const jaune = mediane(jaunes);
+  return { cycle_s, etapes, jaune_s: jaune === null ? null : arrondi(jaune), verts };
 }
