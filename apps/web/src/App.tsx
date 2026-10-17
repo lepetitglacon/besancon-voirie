@@ -10,6 +10,7 @@ import { api } from './api'
 import { ChoixLignesBus } from './bus/ChoixLignesBus'
 import { CHOIX_LIGNES_BUS_DEFAUT, filtrerReseauBus, lignesBus, lignesMasquees, type ChoixLignesBus as Choix } from './bus/lignesBus'
 import { MenuSite } from './site/MenuSite'
+import { avecVue, cheminFiche } from './site/pages'
 import { PagesSite } from './site/PagesSite'
 import { abandonnerBrouillons, useBrouillons, type BrouillonsCarrefour } from './configuration/brouillons'
 import { CarteSuivi } from './configuration/CarteSuivi'
@@ -816,7 +817,10 @@ function App() {
               )}
               {ficheTempsReel && (
                 <>
-                  <Button asChild size="2xs" variant="outline" ms="auto" title="Relever ce carrefour sur place : cycle, verts, déclenchements">
+                  <Button asChild size="2xs" variant="ghost" ms="auto" title="Fiche du carrefour : plans, diagrammes, relevés">
+                    <Link to={avecVue(cheminFiche(ficheTempsReel.carrefour.slug))}>Fiche</Link>
+                  </Button>
+                  <Button asChild size="2xs" variant="outline" title="Relever ce carrefour sur place : cycle, verts, déclenchements">
                     <Link to={`/terrain/${ficheTempsReel.carrefour.id}`}>
                       <IconeFeu /> Relever
                     </Link>

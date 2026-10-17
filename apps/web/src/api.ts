@@ -31,6 +31,7 @@ import type {
   LancerEssaiSumo,
   FeuxGeoJson,
   FeuxTempsReel,
+  FicheCarrefour,
   HistoriqueTroncons,
   LignesCarrefour,
   ModifierCarrefour,
@@ -122,6 +123,7 @@ export const api = {
     }),
   /** Carrefours programmés de l'emprise : de quoi rejouer leurs feux à l'heure réelle. */
   feuxTempsReel: (bbox: Bbox) => requete<FeuxTempsReel>(`/api/temps-reel/feux?bbox=${parametreBbox(bbox)}`),
+  fiche: (slug: string) => requete<FicheCarrefour>(`/api/carrefours/${encodeURIComponent(slug)}`),
   carrefourTempsReel: (carrefourId: string) => requete<CarrefourTempsReel>(`/api/temps-reel/carrefours/${carrefourId}`),
   envoyerReleve: (envoi: EnvoiReleve) => requete<ReleveResume>('/api/releves', { method: 'POST', body: JSON.stringify(envoi) }),
   relevesCarrefour: (carrefourId: string) => requete<ReleveResume[]>(`/api/carrefours/${carrefourId}/releves`),

@@ -598,7 +598,7 @@ Public :
 | GET | `/api/temps-reel/carrefours/:id` | La même chose pour un carrefour, même sans plan (relevé terrain) |
 | GET | `/api/carrefours/:id/releves` | Relevés du carrefour hors rejetés : synthèse (cycle, verts, événements), statut |
 | GET | `/api/releves/:id` | Un relevé et ses saisies horodatées (superposition au programme) |
-| GET | `/api/carrefours/:slug` | Carrefour complet : branches, lignes, plans, synthèse des relevés validés |
+| GET | `/api/carrefours/:slug` | Fiche : carrefour, branches, lignes, plans avec diagramme calculé et calage, relevés hors rejetés |
 | GET | `/api/corridors` | Liste + géométrie |
 | GET | `/api/corridors/:slug` | Corridor, carrefours ordonnés, distances, plans, décalages actuels |
 | POST | `/api/releves` | 202 : relevé enregistré `en_attente` |

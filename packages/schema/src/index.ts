@@ -7,5 +7,6 @@ export * from './tram.js';
 export * from './analyses-ia.js';
 export * from './temps-reel.js';
 export * from './releve.js';
+export * from './fiche.js';
 export * from './sumo.js';
 export * from './zone-osm.js';

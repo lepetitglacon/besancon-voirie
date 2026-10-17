@@ -8,6 +8,9 @@ export const PAGES = {
   designSystem: { chemin: '/design-system', titre: 'Design system' },
 } as const
 
+/** Fiche publique d'un carrefour. */
+export const cheminFiche = (slug: string) => `/carrefours/${slug}`
+
 export const DEPOT = 'https://github.com/lepetitglacon/besancon-voirie'
 
 /**

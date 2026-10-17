@@ -535,9 +535,9 @@ métropole. Un simple mail au service Mobilité peut les obtenir, facultatif. Le
 - [x] Configuration, étape 3 : plans de feux et plages horaires, programme par étapes, jaune et rouges de dégagement calculés sur la géométrie, diagramme de feux, lecture du cycle sur la carte.
 - [x] Configuration, étape 4 : graphe des étapes (étapes sur appel, priorité tram, arcs conditionnels) et simulation d'un scénario de demandes (attentes, journal, lecture sur la carte).
 - [x] Giratoires à feux, par nœuds comme dans TM:PE : nœuds posés sur la photo (ou détectés dans OSM), liaisons à chaque nœud, feux d'anneau, conflits d'insertion — voir [docs/CONFIGURATION.md §7](docs/CONFIGURATION.md#7-giratoires).
-- [ ] Comparer le diagramme de feux aux relevés terrain (après le chrono).
+- [x] Comparer le diagramme de feux aux relevés terrain : onglet « Relevés terrain » du plan de feux, corrections vers le brouillon — voir [docs/refonte-plan-de-feux.md](docs/refonte-plan-de-feux.md).
 - [x] Carte MapLibre : carrefours colorés par statut, bulle avec nom, nature et tram.
-- [ ] Fiche carrefour avec diagramme de feux ; calcul des branches (`ST_Azimuth`).
+- [x] Fiche carrefour (`/carrefours/:slug`) : branches, lignes, diagramme de feux de chaque plan (lu à l'heure réelle s'il est calé), relevés.
 - [ ] `engine/` : capacité par ligne, contrôles de cohérence avec les relevés (phases et rouges de dégagement : faits à l'étape 3).
 - [ ] Chrono de feux (PWA hors-ligne) → `POST /api/releves` → modération.
 - [ ] **Pilote** : relever entièrement **un axe de 4 à 6 carrefours consécutifs**, pour préparer la phase 1 bis.

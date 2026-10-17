@@ -5,5 +5,6 @@ import { TempsReelService } from './temps-reel.service.js';
 @Module({
   controllers: [TempsReelController],
   providers: [TempsReelService],
+  exports: [TempsReelService],
 })
 export class TempsReelModule {}

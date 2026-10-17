@@ -74,6 +74,20 @@ export class ProgrammeService {
 
   /** Plans de feux du carrefour, avec leurs étapes (saisies, ou reconstruites depuis le diagramme). */
   async lire(carrefourId: string): Promise<ProgrammeCarrefour> {
+    return (await this.charger(carrefourId)).programme;
+  }
+
+  /** Les plans, et le calcul (diagramme de feux) de chaque plan à cycle qui a des étapes, par code. */
+  async avecDiagrammes(carrefourId: string): Promise<{ programme: ProgrammeCarrefour; diagrammes: Map<string, ResultatProgramme> }> {
+    const { contexte, programme } = await this.charger(carrefourId);
+    const diagrammes = new Map<string, ResultatProgramme>();
+    for (const plan of programme.plans) {
+      if (plan.mode === 'cycle' && plan.etapes.length > 0) diagrammes.set(plan.code, this.calculer(contexte, plan));
+    }
+    return { programme, diagrammes };
+  }
+
+  private async charger(carrefourId: string): Promise<{ contexte: ContexteProgramme; programme: ProgrammeCarrefour }> {
     const contexte = await this.contexte(carrefourId);
     const { rows } = await this.db.execute<LignePlan>(sql`
       SELECT code, mode, plages, cycle_s, jaune_s, lignes, etapes, degagements, arcs
@@ -99,7 +113,7 @@ export class ProgrammeService {
         ? this.erreurs(contexte, plan, this.calculer(contexte, plan)).map((c) => `Plan ${plan.code} : ${c.message}`)
         : [],
     );
-    return { plans, degagements: contexte.degagements, alertes };
+    return { contexte, programme: { plans, degagements: contexte.degagements, alertes } };
   }
 
   /**
