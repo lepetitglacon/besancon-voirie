@@ -14,6 +14,7 @@ import { Chronogramme } from './Chronogramme'
 import { GrapheEtapes } from './GrapheEtapes'
 import { Lecture } from './Lecture'
 import { ajouterArc, ajouterPriorite, basculerHorsCycle, changerAppel, modifierArc, retirerArc } from './programme'
+import { colonnes } from './disposition'
 
 export interface Scenario {
   demandes: Demande[]
@@ -81,7 +82,7 @@ export function OngletGraphe(props: Props) {
     onScenario({ ...scenario, demandes: scenario.demandes.map((d, j) => (j === k ? demande : d)) })
 
   return (
-    <Grid templateColumns={{ base: '1fr', lg: 'minmax(0, 1fr) minmax(0, 1fr)' }} gap="6" alignItems="start">
+    <Grid {...colonnes('minmax(0, 1fr) minmax(0, 1fr)')} gap="6" alignItems="start">
       <Stack gap="3">
         {selecteur}
         <GrapheEtapes

@@ -1,4 +1,4 @@
-import { Badge, Box, Button, HStack, IconButton, Kbd, Spinner, Stack, Tabs } from '@chakra-ui/react'
+import { Badge, Box, Button, HStack, IconButton, Kbd, Spinner, Stack, useBreakpointValue } from '@chakra-ui/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   calculerProgramme,
@@ -37,18 +37,19 @@ import { useMap } from 'react-map-gl/maplibre'
 import { api } from '../api'
 import { NATURES } from '../carrefour/libelles'
 import { ResumeCarrefour } from '../carrefour/ResumeCarrefour'
-import { Aide, BandeauMode, BarreOutils, BAS_BARRE_OUTILS, CarteEnTete, Chiffre, HAUTEUR_BARRE_OUTILS, Indice, Message, notifications, PanneauBas, Valeur, type EtatLampe } from '../ds'
+import { Aide, BandeauMode, BarreOutils, BAS_BARRE_OUTILS, CarteEnTete, Chiffre, HAUTEUR_BARRE_OUTILS, IconeFeu, Indice, Message, notifications, type EtatLampe } from '../ds'
 import { demanderNotificationsSysteme, enFile, useAnalysesIa } from './analysesIa'
 import { lireBrouillons, modifierBrouillons, useBrouillonsCarrefour, type ModificationsBrouillons } from './brouillons'
 import { Chrono } from './FileIa'
 import type { ClicCalque, ModeEdition, SousOutil } from './calque/CalqueCarrefour'
 import type { EtatFeu } from './calque/elements'
 import { basculerChainage, basculerConnexion, deplacerPoignee, enleverVoie, poserNoeud, poserTraversee, retirerTraversee, tracerVoie, type Brouillon, type Poignee, voiesDe } from './modele'
-import { OngletGraphe, type Scenario } from './OngletGraphe'
-import { OngletLignes, type BrouillonLignes } from './OngletLignes'
-import { OngletProgramme } from './OngletProgramme'
+import type { Scenario } from './OngletGraphe'
+import type { BrouillonLignes } from './OngletLignes'
 import { OUTILS, RACCOURCIS, type ActionConfiguration, type OutilCarte } from './actions'
 import { PopupBranche, PopupFeu, PopupLiaison, PopupNoeud, PopupVoie, ReglageAnneau } from './PopupsConfiguration'
+import { emprisePanneau, hauteurPanneau, largeurPanneau, type Disposition } from './disposition'
+import { PlanDeFeux, type Onglet } from './PlanDeFeux'
 import { feuxDesLignes, geometrieEnregistree, lignesPourMoteur, plansSaisis } from './programme'
 
 /** Références stables : un `[]` littéral relancerait les effets de synchronisation à chaque rendu. */
@@ -58,6 +59,7 @@ const AUCUN_CHAINAGE: Chainage[] = []
 const AUCUN_FEU: string[] = []
 const AUCUNE_LIGNE: never[] = []
 const AUCUNE_SOURCE: Record<string, SourceBranche> = {}
+const AUCUNE_ALERTE: string[] = []
 
 /** Ce qui s'enregistre : sans les champs déduits (sens des branches). */
 const pourEnregistrer = (brouillon: Brouillon) => ({
@@ -95,9 +97,6 @@ export interface AffichageConfiguration {
   /** Zone de la photo envoyée à l'IA, pendant qu'on la dessine ; null : aucune. */
   cadreIa: { emprise: EmpriseIa; libelle: string } | null
 }
-
-/** Onglets du panneau bas « Plan de feux ». */
-type Onglet = 'lignes' | 'programme' | 'graphe'
 
 type Popup =
   | { type: 'voie'; cle: string; position: LonLat }
@@ -165,10 +164,6 @@ const CONSIGNES_SOUS_OUTILS: Record<OutilAvecSousOutils, Record<SousOutil, { tit
   },
 }
 
-/** Hauteur du panneau bas « Plan de feux », en % de la fenêtre. */
-const HAUTEUR_PANNEAU_VH = 44
-export const hauteurPanneau = `calc(var(--ecran-h) * ${HAUTEUR_PANNEAU_VH / 100})`
-
 /** Plus grand côté de l'image envoyée à l'IA (px) : la résolution baisse quand la zone grandit. */
 const TAILLE_PHOTO_IA_PX = 1024
 
@@ -215,8 +210,8 @@ interface Props {
   onPlacerFeu: (id: string, position: LonLat | null) => Promise<void>
   /** Proposition IA à charger à l'ouverture (« Ouvrir » d'une notification). Un nouvel objet la recharge. */
   ouvrirAnalyseIa?: { id: string } | null
-  /** Le panneau bas s'ouvre ou se ferme : les cartes flottantes du bas se posent au-dessus. */
-  onPanneauBas: (ouvert: boolean) => void
+  /** Le plan de feux s'ouvre (en bas ou à droite) ou se ferme (null) : les contrôles flottants s'écartent. */
+  onPanneau: (disposition: Disposition | null) => void
   /** Revient au choix des feux du carrefour. */
   onModifierFeux: () => void
   onSupprimer: () => void
@@ -234,7 +229,7 @@ const focusLibre = () => {
   return !actif || actif === document.body || actif.classList.contains('maplibregl-canvas')
 }
 
-export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneauBas, onModifierFeux, onSupprimer, onFermer }: Props) {
+export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneau, onModifierFeux, onSupprimer, onFermer }: Props) {
   const queryClient = useQueryClient()
   const [outil, setOutil] = useState<OutilCarte>('selection')
   const [sousOutils, setSousOutils] = useState<Record<OutilAvecSousOutils, SousOutil>>({ ajuster: 'deplacer', pieton: 'deplacer' })
@@ -244,10 +239,13 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   const [popup, setPopup] = useState<Popup | null>(null)
   const [panneauOuvert, setPanneauOuvert] = useState(false)
   const [ongletBas, setOngletBas] = useState<Onglet>('programme')
-  /** Onglet du panneau bas affiché, null panneau fermé : pilote la lecture et la simulation. */
+  /** Onglet du plan de feux affiché, null panneau fermé : pilote la lecture et la simulation. */
   const onglet: Onglet | null = panneauOuvert ? ongletBas : null
-  useEffect(() => onPanneauBas(panneauOuvert), [onPanneauBas, panneauOuvert])
-  useEffect(() => () => onPanneauBas(false), [onPanneauBas])
+  const disposition: Disposition = useBreakpointValue<Disposition>({ base: 'bas', xl: 'droite' }) ?? 'bas'
+  /** Où est posé le plan de feux ; null : fermé. */
+  const panneau = panneauOuvert ? disposition : null
+  useEffect(() => onPanneau(panneau), [onPanneau, panneau])
+  useEffect(() => () => onPanneau(null), [onPanneau])
 
   // Brouillons des trois étapes, conservés hors de la configuration (voir brouillons.ts).
   const brouillons = useBrouillonsCarrefour(carrefour.id)
@@ -721,21 +719,22 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
     executer,
   }))
 
-  // Le panneau bas occupe le bas de l'écran : la carte recentre le carrefour dans ce qui reste.
-  // Seulement quand le panneau s'ouvre ou se ferme : au montage, un easeTo interromprait le vol
-  // vers le carrefour (qui remet lui-même le décalage à zéro, voir CarteCarrefours).
+  // Le plan de feux occupe le bas ou la droite de l'écran : la carte recentre le carrefour dans ce qui reste.
+  // Seulement quand le panneau s'ouvre, se ferme ou change de côté : au montage, un easeTo interromprait
+  // le vol vers le carrefour (qui remet lui-même le décalage à zéro, voir CarteCarrefours).
   const { carte } = useMap()
-  const panneauPrecedent = useRef(false)
+  const panneauPrecedent = useRef<Disposition | null>(null)
   useEffect(() => {
-    if (panneauPrecedent.current === panneauOuvert) return
-    panneauPrecedent.current = panneauOuvert
-    const bas = panneauOuvert ? (window.innerHeight * HAUTEUR_PANNEAU_VH) / 100 : 0
-    if (!carte || (carte.getPadding().bottom ?? 0) === bas) return
-    carte.easeTo({ padding: { top: 0, right: 0, left: 0, bottom: bas }, duration: 300 })
-  }, [carte, panneauOuvert])
+    if (panneauPrecedent.current === panneau) return
+    panneauPrecedent.current = panneau
+    const { right, bottom } = panneau ? emprisePanneau(panneau) : { right: 0, bottom: 0 }
+    const actuel = carte?.getPadding()
+    if (!carte || ((actuel?.bottom ?? 0) === bottom && (actuel?.right ?? 0) === right)) return
+    carte.easeTo({ padding: { top: 0, left: 0, right, bottom }, duration: 300 })
+  }, [carte, panneau])
   useEffect(
     () => () => {
-      if (carte && (carte.getPadding().bottom ?? 0) > 0) carte.easeTo({ padding: { top: 0, right: 0, bottom: 0, left: 0 } })
+      if (carte && ((carte.getPadding().bottom ?? 0) > 0 || (carte.getPadding().right ?? 0) > 0)) carte.easeTo({ padding: { top: 0, right: 0, bottom: 0, left: 0 } })
     },
     [carte],
   )
@@ -814,8 +813,10 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       : avecSousOutils(outil)
         ? CONSIGNES_SOUS_OUTILS[outil][sousOutil]
         : CONSIGNES[outil]
-  // Barres du bas : outils, sous-outils au-dessus, puis la consigne. Au-dessus du panneau ouvert.
-  const basBarre = panneauOuvert ? `calc(${hauteurPanneau} + 16px)` : BAS_BARRE_OUTILS
+  // Barres du bas : outils, sous-outils au-dessus, puis la consigne. Au-dessus du plan de feux posé
+  // en bas ; centrées sur ce qui reste de la carte quand il est à droite.
+  const basBarre = panneau === 'bas' ? `calc(${hauteurPanneau} + 16px)` : BAS_BARRE_OUTILS
+  const centreBarres = panneau === 'droite' ? `calc((var(--ecran-w) - ${largeurPanneau}) / 2)` : '50%'
   const sousOutilsAffiches = avecSousOutils(outil) && !cadrage
 
   return (
@@ -940,7 +941,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
           position="fixed"
           // Au-dessus de la barre d'outils, et de celle des sous-outils quand elle est affichée.
           bottom={`calc(${basBarre} + ${HAUTEUR_BARRE_OUTILS} * ${sousOutilsAffiches ? 2 : 1})`}
-          left="50%"
+          left={centreBarres}
           transform="translateX(-50%)"
           zIndex="2"
           titre={consigne.titre}
@@ -957,7 +958,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       {sousOutilsAffiches && (
         <BarreOutils.Root
           position="fixed"
-          left="50%"
+          left={centreBarres}
           transform="translateX(-50%)"
           bottom={`calc(${basBarre} + ${HAUTEUR_BARRE_OUTILS})`}
           zIndex="3"
@@ -992,7 +993,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
 
       <BarreOutils.Root
         position="fixed"
-        left="50%"
+        left={centreBarres}
         transform="translateX(-50%)"
         bottom={basBarre}
         zIndex="3"
@@ -1012,9 +1013,10 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         />
         <BarreOutils.Outil glyphe="⇪" libelle="JSON" title="Importer un JSON { branches, connexions }" onClick={() => champImport.current?.click()} />
         <BarreOutils.Outil
-          glyphe="▭"
+          glyphe={<IconeFeu />}
           libelle="Plan"
           raccourci="⇥"
+          title="Plan de feux (Tab)"
           actif={panneauOuvert}
           onClick={() => setPanneauOuvert((ouvert) => !ouvert)}
         />
@@ -1033,131 +1035,44 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
       </BarreOutils.Root>
 
       {panneauOuvert && (
-        <PanneauBas.Root position="fixed" left="0" right="0" bottom="0" h={hauteurPanneau} zIndex="2">
-          <PanneauBas.Entete titre="Plan de feux">
-            <Tabs.Root value={ongletBas} fitted={false} onValueChange={(e) => ouvrirOnglet(e.value as Onglet)}>
-              <Tabs.List>
-                <Tabs.Trigger value="lignes">Lignes de feux</Tabs.Trigger>
-                <Tabs.Trigger value="programme">Programme</Tabs.Trigger>
-                <Tabs.Trigger value="graphe">Graphe et simulation</Tabs.Trigger>
-              </Tabs.List>
-            </Tabs.Root>
-            {brouillonLignes && <Badge colorPalette="orange">Lignes non enregistrées</Badge>}
-            {brouillonProgramme && <Badge colorPalette="orange">Programme non enregistré</Badge>}
-            {erreurProgramme && <Badge colorPalette="red">Programme en erreur</Badge>}
-            <Box flex="1" />
-            {chronologie && (
-              <Valeur color="fg.secondary">
-                t = {Math.floor(instantCycle)} s / {Math.round(cycle)} s
-              </Valeur>
-            )}
-            <IconButton aria-label="Fermer le plan de feux" title="Fermer (Tab)" onClick={() => setPanneauOuvert(false)}>
-              ×
-            </IconButton>
-          </PanneauBas.Entete>
-          <PanneauBas.Corps>
-            {ongletBas === 'lignes' ? (
-              <Stack gap="3">
-                <Aide>
-                  Regroupez les mouvements par <strong>ligne de feux</strong> (les feux qui changent toujours ensemble) et
-                  indiquez les feux physiques qui les affichent.
-                </Aide>
-                {brouillonBranches && (
-                  <Message ton="avertissement">
-                    Les branches ont des modifications non enregistrées : les lignes utilisent la version enregistrée.
-                  </Message>
-                )}
-                {lignesEnregistrees.data?.alertes.map((alerte) => (
-                  <Message key={alerte} ton="erreur">
-                    {alerte}
-                  </Message>
-                ))}
-                {lignesEnregistrees.isPending ? (
-                  <Aide>Chargement…</Aide>
-                ) : (
-                  enregistre && (
-                    <OngletLignes
-                      configuration={enregistre}
-                      brouillon={lignes}
-                      onChanger={setBrouillonLignes}
-                      ligneActive={ligneActive}
-                      onActiver={setLigneActive}
-                    />
-                  )
-                )}
-              </Stack>
-            ) : (
-              <Stack gap="3">
-                <Aide>
-                  {ongletBas === 'programme' ? (
-                    <>
-                      Découpez le cycle en <strong>étapes</strong> : les lignes au vert ensemble, et pendant combien de temps.
-                      Le jaune et les rouges de dégagement s'ajoutent entre les étapes.
-                    </>
-                  ) : (
-                    <>
-                      Le <strong>graphe des étapes</strong> décrit les feux à la demande : étapes servies sur appel (bouton
-                      piéton, boucle), étapes prioritaires hors cycle (tram). La simulation le déroule sur un scénario.
-                    </>
-                  )}
-                </Aide>
-                {brouillonLignes && (
-                  <Message ton="avertissement">
-                    Les lignes ont des modifications non enregistrées : le programme utilise la version enregistrée.
-                  </Message>
-                )}
-                {!brouillonProgramme && programmeData?.plans[planActif]?.etapes_deduites && (
-                  <Aide>Étapes reconstruites à partir du diagramme de feux enregistré.</Aide>
-                )}
-                {!brouillonProgramme &&
-                  programmeData?.alertes.map((alerte) => (
-                    <Message key={alerte} ton="erreur">
-                      {alerte}
-                    </Message>
-                  ))}
-                {programmeEnregistre.isPending || !contexte ? (
-                  <Aide>Chargement…</Aide>
-                ) : ongletBas === 'graphe' ? (
-                  <OngletGraphe
-                    contexte={contexte}
-                    plans={plans}
-                    onChanger={setBrouillonProgramme}
-                    planActif={planActif}
-                    onPlanActif={(index) => {
-                      setPlanActif(index)
-                      setInstant(0)
-                    }}
-                    scenario={scenario}
-                    onScenario={setScenario}
-                    simulation={simulation}
-                    instant={instantCycle}
-                    onInstant={setInstant}
-                    vitesse={vitesse}
-                    onVitesse={setVitesse}
-                  />
-                ) : (
-                  <OngletProgramme
-                    carrefourId={carrefour.id}
-                    modifie={brouillonProgramme !== null}
-                    contexte={contexte}
-                    plans={plans}
-                    onChanger={setBrouillonProgramme}
-                    planActif={planActif}
-                    onPlanActif={(index) => {
-                      setPlanActif(index)
-                      setInstant(0)
-                    }}
-                    resultat={resultat}
-                    instant={instantCycle}
-                    onInstant={setInstant}
-                    vitesse={vitesse}
-                    onVitesse={setVitesse}
-                  />
-                )}
-              </Stack>
-            )}
-          </PanneauBas.Corps>
-        </PanneauBas.Root>
+        <PlanDeFeux
+          disposition={disposition}
+          onglet={ongletBas}
+          onOnglet={ouvrirOnglet}
+          onFermer={() => setPanneauOuvert(false)}
+          carrefourId={carrefour.id}
+          branchesModifiees={brouillonBranches !== null}
+          lignesModifiees={brouillonLignes !== null}
+          programmeModifie={brouillonProgramme !== null}
+          erreurProgramme={erreurProgramme}
+          lignesEnChargement={lignesEnregistrees.isPending}
+          alertesLignes={lignesEnregistrees.data?.alertes ?? AUCUNE_ALERTE}
+          configuration={enregistre}
+          lignes={lignes}
+          onLignes={setBrouillonLignes}
+          ligneActive={ligneActive}
+          onLigneActive={setLigneActive}
+          contexte={contexte}
+          programmeEnChargement={programmeEnregistre.isPending}
+          alertesProgramme={programmeData?.alertes ?? AUCUNE_ALERTE}
+          etapesDeduites={programmeData?.plans[planActif]?.etapes_deduites ?? false}
+          plans={plans}
+          onPlans={setBrouillonProgramme}
+          planActif={planActif}
+          onPlanActif={(index) => {
+            setPlanActif(index)
+            setInstant(0)
+          }}
+          resultat={resultat}
+          scenario={scenario}
+          onScenario={setScenario}
+          simulation={simulation}
+          cycle={cycle}
+          instant={instantCycle}
+          onInstant={setInstant}
+          vitesse={vitesse}
+          onVitesse={setVitesse}
+        />
       )}
 
       {ciblePopup && contenuPopup && createPortal(contenuPopup, ciblePopup)}

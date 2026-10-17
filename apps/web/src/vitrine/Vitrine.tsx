@@ -44,6 +44,7 @@ import {
   Section,
   Segments,
   Selecteur,
+  IconeFeu,
   TeteDeFeu,
   Valeur,
   type EtatLampe,
@@ -406,6 +407,12 @@ function ComposantsProjet() {
               <TeteDeFeu key={e} etat={e} />
             ))}
             <TeteDeFeu etat={null} />
+            <HStack gap="2" fontSize="20px" color="fg.secondary">
+              <IconeFeu />
+              {(['rouge', 'orange', 'vert'] as const).map((e) => (
+                <IconeFeu key={e} etat={e} />
+              ))}
+            </HStack>
             <HStack gap="2">
               <Pastille couleur="feu.vert" />
               <Pastille couleur="conflit.pieton" forme="carre" />
@@ -469,6 +476,8 @@ function ComposantsProjet() {
             {OUTILS.map((o) => (
               <BarreOutils.Outil key={o.libelle} {...o} actif={outil === o.libelle} onClick={() => setOutil(o.libelle)} />
             ))}
+            <BarreOutils.Separateur />
+            <BarreOutils.Outil glyphe={<IconeFeu />} libelle="Plan" raccourci="⇥" title="Plan de feux (Tab)" actif={outil === 'Plan'} onClick={() => setOutil('Plan')} />
             <BarreOutils.Separateur />
             <Button variant="encre" size="md" borderRadius="9px">
               Enregistrer

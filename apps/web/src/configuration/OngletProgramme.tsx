@@ -15,6 +15,7 @@ import {
   nouveauPlan,
   saisirDegagement,
 } from './programme'
+import { collanteAuLarge, colonnes } from './disposition'
 
 const MODES: Record<PlanSaisi['mode'], string> = {
   cycle: 'Cycle par étapes',
@@ -55,7 +56,7 @@ export function OngletProgramme(props: Props) {
   }
 
   return (
-    <Grid templateColumns={{ base: '1fr', lg: 'minmax(0, 1fr) minmax(0, 1.3fr)' }} gap="6" alignItems="start">
+    <Grid {...colonnes('minmax(0, 1fr) minmax(0, 1.3fr)')} gap="6" alignItems="start">
       <Stack gap="3">
         <HStack gap="1.5" wrap="wrap">
           {plans.length > 0 && (
@@ -371,7 +372,7 @@ export function OngletProgramme(props: Props) {
           </>
         )}
       </Stack>
-      <Stack gap="3" position={{ lg: 'sticky' }} top="0">
+      <Stack gap="3" {...collanteAuLarge}>
         {plan?.mode === 'cycle' && resultat ? (
           <>
             <Heading as="h3" textStyle="sm" fontWeight="semibold">

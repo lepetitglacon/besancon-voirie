@@ -15,10 +15,10 @@ import { CarteSuivi } from './configuration/CarteSuivi'
 import { MENU_CONFIGURATION, type ActionConfiguration } from './configuration/actions'
 import {
   ConfigurationCarrefour,
-  hauteurPanneau,
   type AffichageConfiguration,
   type ConfigurationCarrefourHandle,
 } from './configuration/ConfigurationCarrefour'
+import { hauteurPanneau, largeurPanneau, type Disposition } from './configuration/disposition'
 import {
   Aide,
   BandeauMode,
@@ -185,7 +185,8 @@ function App() {
     /** Proposition IA à charger à l'ouverture (« Ouvrir » d'une notification). */
     ouvrirAnalyseIa?: { id: string }
   }) | null>(null)
-  const [panneauBasOuvert, setPanneauBasOuvert] = useState(false)
+  /** Où est posé le plan de feux de la configuration ; null : fermé. */
+  const [planDeFeux, setPlanDeFeux] = useState<Disposition | null>(null)
   /** Carrefour dont la fiche temps réel est ouverte. */
   const [ficheTempsReel, setFicheTempsReel] = useState<CarrefourChoisi | null>(null)
   const brouillons = useBrouillons()
@@ -634,6 +635,10 @@ function App() {
     panneauConfiguration.current?.executer(valeur as ActionConfiguration)
   }
 
+  // Le plan de feux ouvert repousse les contrôles flottants au-dessus de lui, ou à sa gauche.
+  const panneauBas = configuration !== null && planDeFeux === 'bas'
+  const panneauDroite = configuration !== null && planDeFeux === 'droite'
+
   return (
     <>
       <MenuContextuel
@@ -779,7 +784,7 @@ function App() {
           onAffichage={setAffichageConfiguration}
           onPlacerFeu={placerFeu}
           ouvrirAnalyseIa={configuration.ouvrirAnalyseIa ?? null}
-          onPanneauBas={setPanneauBasOuvert}
+          onPanneau={setPlanDeFeux}
           onModifierFeux={() => {
             setConfiguration(null)
             modifier(configuration.carrefour)
@@ -958,8 +963,8 @@ function App() {
       {!tempsReel && !sumo && <CarteSuivi
         position="fixed"
         // À gauche des contrôles de la carte (36 px à 16 px du bord).
-        right="64px"
-        bottom={configuration && panneauBasOuvert ? `calc(${hauteurPanneau} + 12px)` : '3'}
+        right={panneauDroite ? `calc(${largeurPanneau} + 64px)` : '64px'}
+        bottom={panneauBas ? `calc(${hauteurPanneau} + 12px)` : '3'}
         zIndex="2"
         brouillons={brouillons}
         ouvert={configuration?.carrefour.id ?? null}
@@ -969,15 +974,15 @@ function App() {
       />}
 
       {/* Menu du site en haut à droite. */}
-      <MenuSite position="fixed" top="4" right="4" zIndex="3" />
+      <MenuSite position="fixed" top="4" right={panneauDroite ? `calc(${largeurPanneau} + 16px)` : '4'} zIndex="3" />
       <PagesSite />
 
       {/* Contrôles en bas à droite : zoom (plus « nord » quand la carte est tournée), puis les
-          panneaux. Au-dessus du panneau du bas quand il est ouvert. */}
+          panneaux. Au-dessus du plan de feux posé en bas, à sa gauche quand il est à droite. */}
       <Stack
         position="fixed"
-        bottom={configuration && panneauBasOuvert ? `calc(${hauteurPanneau} + 16px)` : '4'}
-        right="4"
+        bottom={panneauBas ? `calc(${hauteurPanneau} + 16px)` : '4'}
+        right={panneauDroite ? `calc(${largeurPanneau} + 16px)` : '4'}
         zIndex="2"
         gap="3"
         align="flex-end"
