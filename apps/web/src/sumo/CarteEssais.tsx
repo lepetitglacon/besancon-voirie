@@ -24,6 +24,7 @@ const minutes = (secondes: number) => `${Math.round(secondes / 60)} min`
 export function CarteEssais({ essais, erreur, choisi, onChoisir, onNouvel, suivi, formulaire, ...props }: Props) {
   return (
     <CarteEnTete
+      redimensionnable="sumo"
       surtitre="Simulation SUMO"
       titre={formulaire ? 'Nouvel essai' : 'Essais'}
       badges={

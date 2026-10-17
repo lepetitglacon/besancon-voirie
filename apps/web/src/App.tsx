@@ -834,6 +834,7 @@ function App() {
         <ModeSumo />
       ) : tempsReel ? (
         <CarteEnTete
+          redimensionnable={ficheTempsReel ? 'fiche' : 'temps-reel'}
           position="fixed"
           top="3"
           left="3"
@@ -881,6 +882,7 @@ function App() {
       ) : (
         <>
           <CarteEnTete
+            redimensionnable="edition"
             position="fixed"
             top="3"
             left="3"

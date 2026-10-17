@@ -834,6 +834,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   return (
     <>
       <CarteEnTete
+        redimensionnable="configuration"
         position="fixed"
         top="3"
         left="3"
