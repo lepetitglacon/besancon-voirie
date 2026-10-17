@@ -163,7 +163,8 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
         <Section libelle="Lignes de feux · un appui à chaque changement">
           <PlanCarrefour
             carrefourId={carrefour.id}
-            h="220px"
+            h="auto"
+            aspectRatio="1"
             ligne={ligneVue}
             onLigne={(code) => setLigneVue((actuelle) => (actuelle === code ? null : code))}
             etats={etatsReleves}
