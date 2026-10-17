@@ -8,7 +8,7 @@
 /** Ce qui peut appeler une étape ou la prolonger, noté à l'instant où on le voit. */
 export type EvenementReleve = 'bus' | 'tram' | 'boucle' | 'pieton';
 
-export type CouleurReleve = 'vert' | 'rouge';
+export type CouleurReleve = 'vert' | 'jaune' | 'rouge';
 
 /** Une saisie, horodatée par le téléphone (ms epoch). */
 export type SaisieReleve = { t: number; ligne: string; couleur: CouleurReleve } | { t: number; evenement: EvenementReleve };
@@ -24,11 +24,25 @@ export function couleurCourante(saisies: readonly SaisieReleve[], ligne: string)
   return null;
 }
 
-/** Un appui sur une ligne : elle passe au vert, ou au rouge si on l'a vue au vert. */
-export const basculerLigne = (saisies: readonly SaisieReleve[], ligne: string, t: number): SaisieReleve[] => [
+/**
+ * Couleur qui suit dans l'ordre d'un feu : vert, jaune, rouge, puis vert. Une ligne piétonne n'a pas
+ * de jaune (R12) : elle passe du vert au rouge.
+ */
+export function couleurSuivante(actuelle: CouleurReleve | null, avecJaune = true): CouleurReleve {
+  if (actuelle === 'vert') return avecJaune ? 'jaune' : 'rouge';
+  if (actuelle === 'jaune') return 'rouge';
+  return 'vert';
+}
+
+/** Un appui sur une ligne : elle passe à la couleur qui suit celle où on l'a vue (au vert la première fois). */
+export const basculerLigne = (saisies: readonly SaisieReleve[], ligne: string, t: number, avecJaune = true): SaisieReleve[] => [
   ...saisies,
-  { t, ligne, couleur: couleurCourante(saisies, ligne) === 'vert' ? 'rouge' : 'vert' },
+  { t, ligne, couleur: couleurSuivante(couleurCourante(saisies, ligne), avecJaune) },
 ];
+
+/** Force la couleur d'une ligne (un changement raté, une erreur) ; rien si elle l'a déjà. */
+export const fixerCouleur = (saisies: readonly SaisieReleve[], ligne: string, couleur: CouleurReleve, t: number): SaisieReleve[] =>
+  couleurCourante(saisies, ligne) === couleur ? [...saisies] : [...saisies, { t, ligne, couleur }];
 
 /** Écart de cycle ou de vert au-delà duquel le relevé contredit le programme (README §3.3). */
 export const ECART_RELEVE_S = 2;
@@ -50,8 +64,10 @@ function ecartType(valeurs: readonly number[]): number {
 export interface SyntheseReleve {
   /** Cycle mesuré entre deux passages au vert d'une même ligne ; null avant deux cycles. */
   cycle: { cycle_s: number; ecart_type_s: number; cycles: number } | null;
-  /** Durée médiane du vert de chaque ligne (passage au vert → au rouge), null si jamais mesurée. */
+  /** Durée médiane du vert de chaque ligne (passage au vert → au jaune ou au rouge), null si jamais mesurée. */
   verts: Record<string, number | null>;
+  /** Durée médiane du jaune de chaque ligne (passage au jaune → au rouge), null si jamais vu. */
+  jaunes: Record<string, number | null>;
   /** Instants des passages au vert de chaque ligne : les tops du calage (ms epoch). */
   tops: Record<string, number[]>;
   /** Nombre de chaque événement vu. */
@@ -62,6 +78,7 @@ export function analyserReleve(saisies: readonly SaisieReleve[], lignes: readonl
   const changements = saisies.filter(estChangementCouleur);
   const tops: Record<string, number[]> = {};
   const verts: Record<string, number | null> = {};
+  const jaunes: Record<string, number | null> = {};
   /** Intervalles entre deux passages au vert, ligne par ligne (s). */
   const intervalles: Array<{ ligne: string; d: number }> = [];
   for (const ligne of lignes) {
@@ -69,12 +86,16 @@ export function analyserReleve(saisies: readonly SaisieReleve[], lignes: readonl
     const sesTops = siens.filter((c) => c.couleur === 'vert').map((c) => c.t);
     tops[ligne] = sesTops;
     sesTops.slice(1).forEach((t, i) => intervalles.push({ ligne, d: (t - sesTops[i]!) / 1000 }));
-    const durees = siens.flatMap((c, i) => {
-      const suivant = siens[i + 1];
-      return c.couleur === 'vert' && suivant?.couleur === 'rouge' ? [(suivant.t - c.t) / 1000] : [];
-    });
-    const m = mediane(durees);
-    verts[ligne] = m === null ? null : arrondi(m);
+    // Durée de chaque `de` jusqu'au changement suivant, s'il est l'un de `vers`.
+    const durees = (de: CouleurReleve, vers: readonly CouleurReleve[]) =>
+      siens.flatMap((c, i) => {
+        const suivant = siens[i + 1];
+        return c.couleur === de && suivant && vers.includes(suivant.couleur) ? [(suivant.t - c.t) / 1000] : [];
+      });
+    const mVert = mediane(durees('vert', ['jaune', 'rouge']));
+    const mJaune = mediane(durees('jaune', ['rouge']));
+    verts[ligne] = mVert === null ? null : arrondi(mVert);
+    jaunes[ligne] = mJaune === null ? null : arrondi(mJaune);
   }
 
   // Un appui oublié donne un intervalle de deux cycles : on écarte ce qui s'éloigne trop de la médiane.
@@ -90,6 +111,7 @@ export function analyserReleve(saisies: readonly SaisieReleve[], lignes: readonl
   return {
     cycle: cycle_s !== null && cycles >= 2 ? { cycle_s: arrondi(cycle_s), ecart_type_s: arrondi(ecartType(retenus)), cycles } : null,
     verts,
+    jaunes,
     tops,
     evenements,
   };
@@ -164,7 +186,7 @@ export function vertsDansLeCycle(
     siens.forEach((c, i) => {
       const suivant = siens[i + 1];
       const repere = reperes.filter((r) => r <= c.t).at(-1);
-      if (c.couleur !== 'vert' || suivant?.couleur !== 'rouge' || repere === undefined) return;
+      if (c.couleur !== 'vert' || !suivant || suivant.couleur === 'vert' || repere === undefined) return;
       decalages.push((((c.t - repere) / 1000 + reference.debut_s) % cycle_s + cycle_s) % cycle_s);
       durees.push((suivant.t - c.t) / 1000);
     });

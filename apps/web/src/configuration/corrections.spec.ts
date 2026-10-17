@@ -80,6 +80,15 @@ describe('corrections tirées d’un relevé', () => {
     expect(remarques[0]).toMatch(/priorité/)
   })
 
+  it('corrige le jaune mesuré quand il diffère du plan d’une seconde ou plus', () => {
+    // Le jaune de F1 et F2 relevé à 4 s (plan : 3 s), juste avant leur rouge.
+    const avecJaune = releve(5).flatMap((s) =>
+      'ligne' in s && s.couleur === 'rouge' && s.ligne !== 'P1' ? [{ ...s, t: s.t - 4000, couleur: 'jaune' as const }, s] : [s],
+    )
+    const { corrections } = corriger(avecJaune)
+    expect(corrections.find((c) => c.cle === 'jaune')?.appliquer(plan).jaune_s).toBe(4)
+  })
+
   it('n’a rien à corriger quand le relevé suit le programme', () => {
     expect(corriger(releve(5))).toEqual({ corrections: [], remarques: [] })
   })

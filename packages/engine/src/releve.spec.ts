@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyserReleve, basculerLigne, couleurCourante, ecartsAuPlan, vertsDansLeCycle, type SaisieReleve } from './releve.js';
+import { analyserReleve, basculerLigne, couleurCourante, ecartsAuPlan, fixerCouleur, vertsDansLeCycle, type SaisieReleve } from './releve.js';
 
 /** Un feu observé : F1 vert 30 s sur un cycle de 90 s, à partir de `debut` (s). */
 const cycles = (n: number, cycle_s = 90, vert_s = 30, debut = 0): SaisieReleve[] =>
@@ -9,11 +9,25 @@ const cycles = (n: number, cycle_s = 90, vert_s = 30, debut = 0): SaisieReleve[]
   ]).flat();
 
 describe('saisie au carrefour', () => {
-  it('passe une ligne au vert, puis au rouge, à chaque appui', () => {
-    const un = basculerLigne([], 'F1', 1000);
-    expect(couleurCourante(un, 'F1')).toBe('vert');
-    expect(couleurCourante(basculerLigne(un, 'F1', 2000), 'F1')).toBe('rouge');
-    expect(couleurCourante(un, 'F2')).toBeNull();
+  it('passe une ligne au vert, au jaune, au rouge puis au vert, un appui à chaque fois', () => {
+    let saisies: SaisieReleve[] = [];
+    const vues = [1, 2, 3, 4].map((t) => {
+      saisies = basculerLigne(saisies, 'F1', t * 1000);
+      return couleurCourante(saisies, 'F1');
+    });
+    expect(vues).toEqual(['vert', 'jaune', 'rouge', 'vert']);
+    expect(couleurCourante(saisies, 'F2')).toBeNull();
+  });
+
+  it('passe une ligne piétonne du vert au rouge, sans jaune', () => {
+    const vert = basculerLigne([], 'P1', 1000, false);
+    expect(couleurCourante(basculerLigne(vert, 'P1', 2000, false), 'P1')).toBe('rouge');
+  });
+
+  it('force une couleur, sans doublon si la ligne l’a déjà', () => {
+    const vert = basculerLigne([], 'F1', 1000);
+    expect(fixerCouleur(vert, 'F1', 'rouge', 2000).at(-1)).toEqual({ t: 2000, ligne: 'F1', couleur: 'rouge' });
+    expect(fixerCouleur(vert, 'F1', 'vert', 2000)).toHaveLength(1);
   });
 });
 
@@ -22,6 +36,7 @@ describe('synthèse du relevé', () => {
     const r = analyserReleve([...cycles(5), { t: 5000, evenement: 'bus' }], ['F1', 'F2']);
     expect(r.cycle).toEqual({ cycle_s: 90, ecart_type_s: 0, cycles: 4 });
     expect(r.verts).toEqual({ F1: 30, F2: null });
+    expect(r.jaunes).toEqual({ F1: null, F2: null });
     expect(r.tops.F1).toHaveLength(5);
     expect(r.evenements.bus).toBe(1);
   });
@@ -29,6 +44,17 @@ describe('synthèse du relevé', () => {
   it('écarte un cycle doublé par un appui oublié', () => {
     const saisies = cycles(5).filter((s) => s.t !== 180_000);
     expect(analyserReleve(saisies, ['F1']).cycle).toMatchObject({ cycle_s: 90, cycles: 2 });
+  });
+
+  it('mesure le vert jusqu’au jaune, et le jaune jusqu’au rouge', () => {
+    const avecJaune: SaisieReleve[] = [0, 90, 180].flatMap((d) => [
+      { t: d * 1000, ligne: 'F1', couleur: 'vert' as const },
+      { t: (d + 27) * 1000, ligne: 'F1', couleur: 'jaune' as const },
+      { t: (d + 30) * 1000, ligne: 'F1', couleur: 'rouge' as const },
+    ]);
+    const r = analyserReleve(avecJaune, ['F1']);
+    expect(r.verts.F1).toBe(27);
+    expect(r.jaunes.F1).toBe(3);
   });
 
   it('attend deux cycles avant de donner un cycle mesuré', () => {

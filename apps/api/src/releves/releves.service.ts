@@ -29,6 +29,8 @@ const resume = (r: LigneReleve): ReleveResume => ({
   cycle_s: r.synthese.cycle?.cycle_s ?? null,
   ecart_type_cycle_s: r.ecart_type_cycle_s,
   verts: r.synthese.verts,
+  // Relevés d'avant la saisie du jaune : pas de jaunes dans leur synthèse.
+  jaunes: r.synthese.jaunes ?? {},
   evenements: r.synthese.evenements,
 });
 

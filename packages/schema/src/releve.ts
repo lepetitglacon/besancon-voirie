@@ -10,7 +10,7 @@ export const EvenementReleve = z.enum(['bus', 'tram', 'boucle', 'pieton']);
 const Instant = z.number().int().positive();
 
 export const SaisieReleve = z.union([
-  z.strictObject({ t: Instant, ligne: CodeLigne, couleur: z.enum(['vert', 'rouge']) }),
+  z.strictObject({ t: Instant, ligne: CodeLigne, couleur: z.enum(['vert', 'jaune', 'rouge']) }),
   z.strictObject({ t: Instant, evenement: EvenementReleve }),
 ]);
 export type SaisieReleve = z.infer<typeof SaisieReleve>;
@@ -40,8 +40,9 @@ export interface ReleveResume {
   cycles_observes: number;
   cycle_s: number | null;
   ecart_type_cycle_s: number | null;
-  /** Durée médiane du vert de chaque ligne relevée. */
+  /** Durée médiane du vert, puis du jaune, de chaque ligne relevée. */
   verts: Record<string, number | null>;
+  jaunes: Record<string, number | null>;
   evenements: Record<z.infer<typeof EvenementReleve>, number>;
 }
 

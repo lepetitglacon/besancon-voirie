@@ -4,9 +4,12 @@ import {
   analyserReleve,
   basculerLigne,
   couleurCourante,
+  couleurSuivante,
   ecartsAuPlan,
   estChangementCouleur,
+  fixerCouleur,
   planEnVigueur,
+  type CouleurReleve,
   type EvenementReleve,
   type SaisieReleve,
 } from '@voirie/engine'
@@ -15,7 +18,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api } from '../api'
 import { PlanCarrefour } from '../carrefour/PlanCarrefour'
-import { Aide, Chiffre, HAUTEUR_POIGNEE_TIROIR, IconeFeu, Message, Section, TiroirBas, Valeur } from '../ds'
+import { Aide, Chiffre, HAUTEUR_POIGNEE_TIROIR, IconeFeu, Message, Section, TiroirBas, Valeur, type EtatLampe } from '../ds'
 import { usePreference } from '../preferences'
 import { useMaintenant } from '../tempsReel/useMaintenant'
 import { ecrirePseudo, lirePseudo, useSeance } from './seance'
@@ -26,6 +29,11 @@ const EVENEMENTS: Array<{ type: EvenementReleve; glyphe: string; libelle: string
   { type: 'boucle', glyphe: '🚗', libelle: 'Boucle', aide: 'Un véhicule s’arrête sur une boucle de détection' },
   { type: 'pieton', glyphe: '🚶', libelle: 'Bouton', aide: 'Un piéton appuie sur le bouton d’appel' },
 ]
+
+const COULEURS: CouleurReleve[] = ['vert', 'jaune', 'rouge']
+const FOND: Record<CouleurReleve, string> = { vert: 'feu.vert', jaune: 'feu.orange', rouge: 'feu.rouge' }
+/** Couleur des étiquettes du plan : celle où l'on a vu la ligne en dernier. */
+const LAMPE: Record<CouleurReleve | 'aucune', EtatLampe | null> = { vert: 'vert', jaune: 'orange', rouge: 'rouge', aucune: null }
 
 /** L'API reçoit au plus 200 tops par envoi. */
 const TOPS_PAR_ENVOI = 200
@@ -97,7 +105,7 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
   const [ligneVue, setLigneVue] = useState<string | null>(null)
   /** Plan du carrefour sorti ou rangé : mémorisé d'un relevé à l'autre. */
   const [planOuvert, setPlanOuvert] = usePreference<boolean>('plan-releve-ouvert', false)
-  const etatsReleves = new Map(codes.map((code) => [code, couleurCourante(saisies, code)] as const))
+  const etatsReleves = new Map(codes.map((code) => [code, LAMPE[couleurCourante(saisies, code) ?? 'aucune']] as const))
 
   const saisir = (suivantes: SaisieReleve[]) => {
     navigator.vibrate?.(15)
@@ -164,35 +172,57 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
       {codes.length === 0 ? (
         <Message ton="avertissement">Ce carrefour n’a pas encore de lignes de feux : elles se déclarent dans la configuration.</Message>
       ) : (
-        <Section libelle="Lignes de feux · un appui à chaque changement">
+        <Section libelle="Lignes de feux · un appui à chaque changement (vert, jaune, rouge)">
           <Grid templateColumns="repeat(2, minmax(0, 1fr))" gap="2.5">
             {carrefour.lignes.map((ligne) => {
               const couleur = couleurCourante(saisies, ligne.code)
               const depuis = [...saisies].reverse().find((s) => estChangementCouleur(s) && s.ligne === ligne.code)?.t
-              const prochaine = couleur === 'vert' ? 'rouge' : 'vert'
+              const avecJaune = !ligne.pieton
+              const prochaine = couleurSuivante(couleur, avecJaune)
               return (
-                <Button
-                  key={ligne.code}
-                  h="24"
-                  flexDirection="column"
-                  gap="0.5"
-                  borderRadius="l3"
-                  bg={couleur === 'vert' ? 'feu.vert' : couleur === 'rouge' ? 'feu.rouge' : 'bg.muted'}
-                  color={couleur ? 'white' : 'fg'}
-                  aria-label={`${ligne.code}${couleur ? ` au ${couleur}` : ''} : passe au ${prochaine}`}
-                  outline={ligneVue === ligne.code ? '3px solid' : undefined}
-                  outlineColor="brand.solid"
-                  outlineOffset="2px"
-                  onClick={() => saisir(basculerLigne(saisies, ligne.code, Date.now()))}
-                >
-                  <Text textStyle="2xl" fontWeight="bold">
-                    {ligne.code}
-                  </Text>
-                  <Text textStyle="xs">
-                    {couleur && depuis ? `${couleur} depuis ${secondes(maintenant - depuis)}` : 'appuyer au vert'}
-                    {ligne.pieton && ' · piéton'}
-                  </Text>
-                </Button>
+                <Stack key={ligne.code} gap="1.5">
+                  <Button
+                    h="20"
+                    flexDirection="column"
+                    gap="0.5"
+                    borderRadius="l3"
+                    bg={couleur ? FOND[couleur] : 'bg.muted'}
+                    color={couleur === 'jaune' ? 'gray.900' : couleur ? 'white' : 'fg'}
+                    aria-label={`${ligne.code}${couleur ? ` au ${couleur}` : ''} : passe au ${prochaine}`}
+                    outline={ligneVue === ligne.code ? '3px solid' : undefined}
+                    outlineColor="brand.solid"
+                    outlineOffset="2px"
+                    onClick={() => saisir(basculerLigne(saisies, ligne.code, Date.now(), avecJaune))}
+                  >
+                    <Text textStyle="2xl" fontWeight="bold">
+                      {ligne.code}
+                    </Text>
+                    <Text textStyle="xs">
+                      {couleur && depuis ? `${couleur} depuis ${secondes(maintenant - depuis)}` : 'appuyer au vert'}
+                      {ligne.pieton && ' · piéton'}
+                    </Text>
+                  </Button>
+                  {/* Couleur forcée : un changement raté, ou un appui de trop. */}
+                  <HStack gap="1.5">
+                    {(avecJaune ? COULEURS : COULEURS.filter((c) => c !== 'jaune')).map((c) => (
+                      <Button
+                        key={c}
+                        flex="1"
+                        size="xs"
+                        variant="outline"
+                        borderColor={FOND[c]}
+                        borderWidth="2px"
+                        bg={couleur === c ? FOND[c] : undefined}
+                        color={couleur === c ? (c === 'jaune' ? 'gray.900' : 'white') : 'fg'}
+                        aria-pressed={couleur === c}
+                        aria-label={`${ligne.code} au ${c}`}
+                        onClick={() => saisir(fixerCouleur(saisies, ligne.code, c, Date.now()))}
+                      >
+                        {c[0]!.toUpperCase()}
+                      </Button>
+                    ))}
+                  </HStack>
+                </Stack>
               )
             })}
           </Grid>
@@ -249,6 +279,7 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
               <Table.Row>
                 <Table.ColumnHeader>Ligne</Table.ColumnHeader>
                 <Table.ColumnHeader textAlign="end">Vert mesuré</Table.ColumnHeader>
+                <Table.ColumnHeader textAlign="end">Jaune</Table.ColumnHeader>
                 <Table.ColumnHeader textAlign="end">Passages</Table.ColumnHeader>
               </Table.Row>
             </Table.Header>
@@ -258,6 +289,9 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
                   <Table.Cell fontWeight="semibold">{code}</Table.Cell>
                   <Table.Cell textAlign="end">
                     <Valeur>{releve.verts[code] === null ? '–' : `${releve.verts[code]} s`}</Valeur>
+                  </Table.Cell>
+                  <Table.Cell textAlign="end">
+                    <Valeur>{releve.jaunes[code] === null || releve.jaunes[code] === undefined ? '–' : `${releve.jaunes[code]} s`}</Valeur>
                   </Table.Cell>
                   <Table.Cell textAlign="end">
                     <Valeur>{releve.tops[code]?.length ?? 0}</Valeur>

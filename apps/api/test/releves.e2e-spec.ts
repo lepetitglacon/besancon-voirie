@@ -72,6 +72,7 @@ describe('Relevés terrain (e2e)', () => {
       cycle_s: 90,
       ecart_type_cycle_s: 0,
       verts: { F1: 30 },
+      jaunes: { F1: null },
       evenements: { bus: 1, tram: 0, boucle: 0, pieton: 0 },
       observe_le: new Date(debut).toISOString(),
     });

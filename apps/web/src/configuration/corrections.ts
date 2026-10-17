@@ -17,6 +17,11 @@ export interface Correction {
 /** Une ligne vue au vert sur moins de cette part des cycles relevés est servie à la demande. */
 const PART_DES_CYCLES_APPEL = 0.7
 
+/** Écart de jaune qui vaut une correction (s), et bornes du jaune comme dans la saisie. */
+const ECART_JAUNE_S = 1
+const JAUNE_MIN_S = 2
+const JAUNE_MAX_S = 6
+
 const arrondi = (x: number) => Math.round(x * 10) / 10
 
 export function proposerCorrections(
@@ -73,7 +78,22 @@ export function proposerCorrections(
     }
   }
 
-  // 3. Ce que les corrections n'expliquent pas, et ce que le relevé a vu.
+  // 3. Jaune : la médiane des jaunes relevés (lignes véhicules), s'il diffère du plan d'une seconde ou plus.
+  const jaunesVus = Object.values(releve.jaunes ?? {}).filter((j): j is number => j !== null)
+  if (jaunesVus.length > 0) {
+    const tries = [...jaunesVus].sort((a, b) => a - b)
+    const mesure_s = tries[Math.floor(tries.length / 2)]!
+    const jaune_s = Math.min(JAUNE_MAX_S, Math.max(JAUNE_MIN_S, Math.round(mesure_s)))
+    if (Math.abs(mesure_s - plan.jaune_s) >= ECART_JAUNE_S && jaune_s !== plan.jaune_s) {
+      corrections.push({
+        cle: 'jaune',
+        message: `Jaune : ${plan.jaune_s} → ${jaune_s} s (mesuré ${arrondi(mesure_s)} s)`,
+        appliquer: (p) => ({ ...p, jaune_s }),
+      })
+    }
+  }
+
+  // 4. Ce que les corrections n'expliquent pas, et ce que le relevé a vu.
   if (releve.cycle) {
     const reste_s = arrondi(releve.cycle.cycle_s - resultat.cycle_s - ajout_s)
     if (Math.abs(reste_s) >= ECART_RELEVE_S) {
