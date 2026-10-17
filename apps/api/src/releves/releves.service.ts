@@ -47,9 +47,10 @@ export class RelevesService {
     `);
     const codes = lignes.map((l) => l.code);
 
-    const inconnues = [...new Set(saisies.flatMap((s) => ('ligne' in s && !codes.includes(s.ligne) ? [s.ligne] : [])))];
+    // Changements de couleur et événements rattachés : la ligne doit exister.
+    const inconnues = [...new Set(saisies.flatMap((s) => (s.ligne && !codes.includes(s.ligne) ? [s.ligne] : [])))];
     if (inconnues.length > 0) throw new BadRequestException(`Pas de ligne ${inconnues.join(', ')} à ce carrefour`);
-    if (!saisies.some((s) => 'ligne' in s)) throw new BadRequestException('Aucun changement de couleur relevé');
+    if (!saisies.some((s) => 'couleur' in s)) throw new BadRequestException('Aucun changement de couleur relevé');
     const maintenant = Date.now();
     if (saisies.some((s) => s.t < maintenant - ANCIENNETE_MAX_MS || s.t > maintenant + AVANCE_MAX_MS)) {
       throw new BadRequestException('Relevé daté de plus d’un mois, ou dans le futur');

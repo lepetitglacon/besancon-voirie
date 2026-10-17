@@ -83,7 +83,7 @@ describe('corrections tirées d’un relevé', () => {
   it('corrige le jaune mesuré quand il diffère du plan d’une seconde ou plus', () => {
     // Le jaune de F1 et F2 relevé à 4 s (plan : 3 s), juste avant leur rouge.
     const avecJaune = releve(5).flatMap((s) =>
-      'ligne' in s && s.couleur === 'rouge' && s.ligne !== 'P1' ? [{ ...s, t: s.t - 4000, couleur: 'jaune' as const }, s] : [s],
+      'couleur' in s && s.couleur === 'rouge' && s.ligne !== 'P1' ? [{ ...s, t: s.t - 4000, couleur: 'jaune' as const }, s] : [s],
     )
     const { corrections } = corriger(avecJaune)
     expect(corrections.find((c) => c.cle === 'jaune')?.appliquer(plan).jaune_s).toBe(4)

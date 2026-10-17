@@ -10,10 +10,15 @@ export type EvenementReleve = 'bus' | 'tram' | 'boucle' | 'pieton';
 
 export type CouleurReleve = 'vert' | 'jaune' | 'rouge';
 
-/** Une saisie, horodatée par le téléphone (ms epoch). */
-export type SaisieReleve = { t: number; ligne: string; couleur: CouleurReleve } | { t: number; evenement: EvenementReleve };
+/**
+ * Une saisie, horodatée par le téléphone (ms epoch) : un changement de couleur d'une ligne, ou un
+ * événement, rattaché à la ligne qu'il concerne quand on l'a indiquée.
+ */
+export type SaisieReleve =
+  | { t: number; ligne: string; couleur: CouleurReleve }
+  | { t: number; evenement: EvenementReleve; ligne?: string };
 
-export const estChangementCouleur = (s: SaisieReleve): s is Extract<SaisieReleve, { ligne: string }> => 'ligne' in s;
+export const estChangementCouleur = (s: SaisieReleve): s is Extract<SaisieReleve, { couleur: CouleurReleve }> => 'couleur' in s;
 
 /** Couleur d'une ligne d'après la dernière saisie ; null tant qu'on ne l'a pas vue changer. */
 export function couleurCourante(saisies: readonly SaisieReleve[], ligne: string): CouleurReleve | null {
@@ -72,6 +77,8 @@ export interface SyntheseReleve {
   tops: Record<string, number[]>;
   /** Nombre de chaque événement vu. */
   evenements: Record<EvenementReleve, number>;
+  /** Les mêmes, par ligne de feux à laquelle on les a rattachés. */
+  evenementsParLigne: Record<string, Partial<Record<EvenementReleve, number>>>;
 }
 
 export function analyserReleve(saisies: readonly SaisieReleve[], lignes: readonly string[]): SyntheseReleve {
@@ -106,7 +113,15 @@ export function analyserReleve(saisies: readonly SaisieReleve[], lignes: readonl
   // Plusieurs lignes relevées voient les mêmes cycles : on compte ceux de la ligne la plus suivie.
   const cycles = Math.max(0, ...lignes.map((ligne) => gardes.filter((g) => g.ligne === ligne).length));
   const evenements: Record<EvenementReleve, number> = { bus: 0, tram: 0, boucle: 0, pieton: 0 };
-  for (const s of saisies) if (!estChangementCouleur(s)) evenements[s.evenement]++;
+  const evenementsParLigne: Record<string, Partial<Record<EvenementReleve, number>>> = {};
+  for (const s of saisies) {
+    if (estChangementCouleur(s)) continue;
+    evenements[s.evenement]++;
+    if (s.ligne) {
+      const siens = (evenementsParLigne[s.ligne] ??= {});
+      siens[s.evenement] = (siens[s.evenement] ?? 0) + 1;
+    }
+  }
 
   return {
     cycle: cycle_s !== null && cycles >= 2 ? { cycle_s: arrondi(cycle_s), ecart_type_s: arrondi(ecartType(retenus)), cycles } : null,
@@ -114,6 +129,7 @@ export function analyserReleve(saisies: readonly SaisieReleve[], lignes: readonl
     jaunes,
     tops,
     evenements,
+    evenementsParLigne,
   };
 }
 

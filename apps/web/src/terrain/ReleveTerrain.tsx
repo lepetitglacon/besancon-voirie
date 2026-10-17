@@ -35,6 +35,17 @@ const FOND: Record<CouleurReleve, string> = { vert: 'feu.vert', jaune: 'feu.oran
 /** Couleur des étiquettes du plan : celle où l'on a vu la ligne en dernier. */
 const LAMPE: Record<CouleurReleve | 'aucune', EtatLampe | null> = { vert: 'vert', jaune: 'orange', rouge: 'rouge', aucune: null }
 
+/**
+ * Lignes proposées pour rattacher un événement : les lignes piétonnes d'abord pour un appui sur le
+ * bouton, les lignes de tram et bus d'abord pour un tram ou un bus.
+ */
+function ordrePourEvenement(lignes: CarrefourTempsReel['lignes'], saisie: SaisieReleve | undefined) {
+  const evenement = saisie && !estChangementCouleur(saisie) ? saisie.evenement : null
+  const enTete = (l: CarrefourTempsReel['lignes'][number]) =>
+    evenement === 'pieton' ? l.pieton : evenement === 'tram' || evenement === 'bus' ? l.tc : false
+  return [...lignes.filter(enTete), ...lignes.filter((l) => !enTete(l))]
+}
+
 /** L'API reçoit au plus 200 tops par envoi. */
 const TOPS_PAR_ENVOI = 200
 
@@ -107,7 +118,18 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
   const [planOuvert, setPlanOuvert] = usePreference<boolean>('plan-releve-ouvert', false)
   const etatsReleves = new Map(codes.map((code) => [code, LAMPE[couleurCourante(saisies, code) ?? 'aucune']] as const))
 
+  /** Événement tapé à l'instant, en attente de la ligne qu'il concerne. */
+  const [evenementEnAttente, setEvenementEnAttente] = useState<number | null>(null)
+  const termine = seance.termine !== undefined
+  const rattacher = (t: number, ligne: string | null) => {
+    if (ligne) {
+      modifier((s) => ({ ...s, saisies: s.saisies.map((x) => (x.t === t && !estChangementCouleur(x) ? { ...x, ligne } : x)) }))
+    }
+    setEvenementEnAttente(null)
+  }
+
   const saisir = (suivantes: SaisieReleve[]) => {
+    if (termine) return
     navigator.vibrate?.(15)
     modifier((s) => ({ ...s, saisies: suivantes }))
   }
@@ -192,6 +214,7 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
                     outline={ligneVue === ligne.code ? '3px solid' : undefined}
                     outlineColor="brand.solid"
                     outlineOffset="2px"
+                    disabled={termine}
                     onClick={() => saisir(basculerLigne(saisies, ligne.code, Date.now(), avecJaune))}
                   >
                     <Text textStyle="2xl" fontWeight="bold">
@@ -215,6 +238,7 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
                         bg={couleur === c ? FOND[c] : undefined}
                         color={couleur === c ? (c === 'jaune' ? 'gray.900' : 'white') : 'fg'}
                         aria-pressed={couleur === c}
+                        disabled={termine}
                         aria-label={`${ligne.code} au ${c}`}
                         onClick={() => saisir(fixerCouleur(saisies, ligne.code, c, Date.now()))}
                       >
@@ -240,7 +264,12 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
               gap="0"
               title={e.aide}
               aria-label={e.aide}
-              onClick={() => saisir([...saisies, { t: Date.now(), evenement: e.type }])}
+              disabled={termine}
+              onClick={() => {
+                const t = Date.now()
+                saisir([...saisies, { t, evenement: e.type }])
+                setEvenementEnAttente(t)
+              }}
             >
               <Text textStyle="xl">{e.glyphe}</Text>
               <Text textStyle="xs">
@@ -250,11 +279,28 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
             </Button>
           ))}
         </Grid>
+        {evenementEnAttente !== null && !termine && (
+          <Stack gap="1.5" p="2" bg="bg.muted" borderRadius="l2">
+            <Aide color="fg">Pour quelle ligne ?</Aide>
+            <HStack gap="1.5" wrap="wrap">
+              {ordrePourEvenement(carrefour.lignes, saisies.find((s) => s.t === evenementEnAttente)).map((l) => (
+                <Button key={l.code} size="sm" variant="outline" minW="12" onClick={() => rattacher(evenementEnAttente, l.code)}>
+                  {l.code}
+                </Button>
+              ))}
+              <Button size="sm" variant="ghost" onClick={() => rattacher(evenementEnAttente, null)}>
+                Aucune
+              </Button>
+            </HStack>
+          </Stack>
+        )}
         {derniere && (
           <HStack gap="2">
             <Aide flex="1">
               Dernière saisie {heure(derniere.t)} :{' '}
-              {estChangementCouleur(derniere) ? `${derniere.ligne} au ${derniere.couleur}` : EVENEMENTS.find((e) => e.type === derniere.evenement)?.libelle}
+              {estChangementCouleur(derniere)
+                ? `${derniere.ligne} au ${derniere.couleur}`
+                : `${EVENEMENTS.find((e) => e.type === derniere.evenement)?.libelle}${derniere.ligne ? ` pour ${derniere.ligne}` : ''}`}
             </Aide>
             <Button size="xs" variant="ghost" onClick={() => modifier((s) => ({ ...s, saisies: s.saisies.slice(0, -1) }))}>
               Annuler
@@ -309,8 +355,38 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
         {releve.cycle && liste.length === 0 && plan?.cycle_s && <Message ton="ok">Conforme au plan « {plan.code} » à 2 s près.</Message>}
       </Section>
 
+      <Section libelle="Fin du relevé">
+        {termine ? (
+          <HStack gap="2">
+            <Message ton="ok" flex="1">
+              Relevé terminé à {heure(seance.termine!)}
+              {saisies[0] && ` · ${Math.round((seance.termine! - saisies[0].t) / 60000)} min`} : vérifiez la mesure, puis envoyez.
+            </Message>
+            {!seance.releve && (
+              <Button size="xs" variant="ghost" onClick={() => modifier(({ termine: _fin, ...s }) => s)}>
+                Reprendre
+              </Button>
+            )}
+          </HStack>
+        ) : (
+          <Button
+            size="lg"
+            variant="outline"
+            disabled={!saisies.some(estChangementCouleur)}
+            onClick={() => {
+              setEvenementEnAttente(null)
+              modifier((s) => ({ ...s, termine: Date.now() }))
+            }}
+          >
+            J’ai fini
+          </Button>
+        )}
+      </Section>
+
       <Section libelle="Envoyer">
-        {seance.releve ? (
+        {!termine && !seance.releve ? (
+          <Aide>« J’ai fini » d’abord : le relevé s’envoie une fois terminé.</Aide>
+        ) : seance.releve ? (
           <Message ton="ok">
             Relevé envoyé : il sera publié après relecture.
             {saisiesApresEnvoi > 0 && ` ${saisiesApresEnvoi} saisie(s) depuis : commencez un nouveau relevé pour les envoyer.`}

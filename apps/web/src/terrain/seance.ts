@@ -12,6 +12,8 @@ export interface Seance {
   envoyes: number[]
   /** Relevé envoyé à l'API (une fois par séance) et le nombre de saisies qu'il contenait. */
   releve?: { id: string; saisies: number }
+  /** « J'ai fini » : fin du relevé (ms epoch) ; plus de saisie tant qu'on ne reprend pas. */
+  termine?: number
 }
 
 const VIDE: Seance = { saisies: [], envoyes: [] }

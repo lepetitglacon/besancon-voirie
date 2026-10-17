@@ -39,11 +39,28 @@ describe('synthèse du relevé', () => {
     expect(r.jaunes).toEqual({ F1: null, F2: null });
     expect(r.tops.F1).toHaveLength(5);
     expect(r.evenements.bus).toBe(1);
+    expect(r.evenementsParLigne).toEqual({});
   });
 
   it('écarte un cycle doublé par un appui oublié', () => {
     const saisies = cycles(5).filter((s) => s.t !== 180_000);
     expect(analyserReleve(saisies, ['F1']).cycle).toMatchObject({ cycle_s: 90, cycles: 2 });
+  });
+
+  it('compte les événements rattachés à chaque ligne', () => {
+    const r = analyserReleve(
+      [
+        ...cycles(3),
+        { t: 1000, evenement: 'bus', ligne: 'F1' },
+        { t: 2000, evenement: 'bus', ligne: 'F1' },
+        { t: 3000, evenement: 'boucle', ligne: 'F2' },
+        { t: 4000, evenement: 'tram' },
+      ],
+      ['F1', 'F2'],
+    );
+    expect(r.evenements).toEqual({ bus: 2, tram: 1, boucle: 1, pieton: 0 });
+    expect(r.evenementsParLigne).toEqual({ F1: { bus: 2 }, F2: { boucle: 1 } });
+    expect(r.verts.F1).toBe(30);
   });
 
   it('mesure le vert jusqu’au jaune, et le jaune jusqu’au rouge', () => {

@@ -103,11 +103,22 @@ export function proposerCorrections(
     }
   }
   const { bus, tram, boucle, pieton } = releve.evenements
+  // Lignes auxquelles on a rattaché des événements d'un type : « F1 (2), F3 ».
+  const lignesDe = (types: readonly (keyof typeof releve.evenements)[]) =>
+    Object.entries(releve.evenementsParLigne ?? {})
+      .map(([ligne, n]) => [ligne, types.reduce((total, t) => total + (n[t] ?? 0), 0)] as const)
+      .filter(([, n]) => n > 0)
+      .map(([ligne, n]) => (n > 1 ? `${ligne} (${n})` : ligne))
+  const ou = (lignes: string[]) => (lignes.length > 0 ? ` sur ${lignes.join(', ')}` : '')
   if (bus + tram > 0) {
-    remarques.push(`${bus + tram} passage(s) de bus ou de tram vus : si un vert s'allonge à leur arrivée, ajoutez une priorité (onglet Graphe).`)
+    remarques.push(
+      `${bus + tram} passage(s) de bus ou de tram vus${ou(lignesDe(['bus', 'tram']))} : si un vert s'allonge à leur arrivée, ajoutez une priorité (onglet Graphe).`,
+    )
   }
   if (boucle + pieton > 0 && !corrections.some((c) => c.cle.startsWith('appel:'))) {
-    remarques.push(`${boucle + pieton} appel(s) vus (boucle, bouton) sans étape manquante : le carrefour sert peut-être ces étapes à chaque cycle.`)
+    remarques.push(
+      `${boucle + pieton} appel(s) vus (boucle, bouton)${ou(lignesDe(['boucle', 'pieton']))} sans étape manquante : le carrefour sert peut-être ces étapes à chaque cycle.`,
+    )
   }
   return { corrections, remarques }
 }
