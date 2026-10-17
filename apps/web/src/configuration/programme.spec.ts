@@ -7,6 +7,7 @@ import {
   basculerLigneEtape,
   changerMode,
   deplacerEtape,
+  etirerEtape,
   feuxDesLignes,
   modifierArc,
   nouveauPlan,
@@ -52,6 +53,13 @@ describe('brouillon du programme', () => {
     const plan: PlanEtapes = { ...nouveauPlan([], contexte), etapes: [{ lignes: ['P1'], duree_s: 20 }] }
     expect(basculerLigneEtape(plan, 0, 'F1', ['F1', 'F2', 'P1']).etapes[0]!.lignes).toEqual(['F1', 'P1'])
     expect(basculerLigneEtape(plan, 0, 'P1', ['F1', 'F2', 'P1']).etapes[0]!.lignes).toEqual([])
+  })
+
+  it('étire une étape tirée sur le diagramme, à la seconde, entre 1 et 300 s', () => {
+    const plan: PlanEtapes = { ...nouveauPlan([], contexte), etapes: [{ lignes: ['F1'], duree_s: 20 }, { lignes: ['F2'], duree_s: 20 }] }
+    expect(etirerEtape(plan, 0, 20, 27.4).etapes.map((e) => e.duree_s)).toEqual([27, 20])
+    expect(etirerEtape(plan, 1, 45, 10).etapes[1]!.duree_s).toBe(1)
+    expect(etirerEtape(plan, 0, 20, 20.3)).toBe(plan)
   })
 
   it('remplace un rouge de dégagement calculé, puis revient au calcul', () => {

@@ -3,7 +3,7 @@
 > **Objectif** : sortir le plan de feux du tiroir du bas, lui donner sa place dans la barre d'outils,
 > et l'adapter à ses deux usages : la conception au bureau et la correction devant le feu.
 > **Statut** : brouillon
-> **Dernière mise à jour** : 2026-10-17
+> **Dernière mise à jour** : 2026-10-17 (étapes 1 à 3 faites)
 > **Worktree** : `refonte-plan-de-feux` (port 5427)
 
 ## Ce qui existe
@@ -97,8 +97,13 @@ Chaque étape se merge seule dans `main`.
   À partir de `xl` (1 280 px), panneau latéral droit (640 px au plus, 800 px laissés à la carte), onglets numérotés
   sous le titre ; en dessous, panneau du bas comme avant. Les onglets passent sur deux colonnes selon la largeur
   du panneau (requête de conteneur), plus selon celle de la fenêtre.
-  Reste : la bande chronogramme en bas, à faire avec l'étape 3 (le diagramme vit dans `OngletProgramme`).
-- [ ] **Étape 3 — Mode Conception** : étapes guidées, chronogramme éditable.
+- [x] **Étape 3 — Mode Conception** :
+  - onglets numérotés avec leur état (pastille : à faire, non enregistré, en erreur, enregistré) et bouton
+    « Étape suivante » en bas de chaque onglet ;
+  - chronogramme éditable : tirer le bord droit d'une étape change sa durée, à la seconde (`etirerEtape`) ;
+  - panneau à droite : le diagramme (onglet Programme) ou la simulation (onglet Graphe) passe dans une bande
+    sous la carte ([BandeChronogramme](../apps/web/src/configuration/BandeChronogramme.tsx)), barres et contrôles
+    au-dessus d'elle. Panneau en bas : le diagramme reste dans l'onglet, éditable aussi.
 - [ ] **Étape 4 — Mode Terrain** : écran de relevé mobile, stockage local. Côté front seulement, relevé gardé sur le téléphone.
 - [ ] **Étape 5 — Relevés côté API** : table `releve` (+ événements), `POST /api/releves`, migration horodatée
   (penser au `pnpm db:verifier voirie` avant merge).

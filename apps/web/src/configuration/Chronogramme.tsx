@@ -17,9 +17,17 @@ interface Props {
   onInstant: (t: number) => void
   /** Demandes d'un scénario de simulation, marquées sur la rangée de leur ligne. */
   demandes?: readonly Demande[]
+  /** Étire l'étape `index` pour que son vert finisse à `finVoulue` : rend le bord de chaque étape déplaçable. */
+  onEtirer?: (index: number, finActuelle: number, finVoulue: number) => void
+  /**
+   * Largeur du dessin, en unités du viewBox (400 par défaut). La donner égale à la largeur affichée,
+   * en pixels, garde le texte à sa taille quelle que soit la place.
+   */
+  largeur?: number
 }
 
 const LARGEUR = 400
+const LARGEUR_POIGNEE = 5
 const MARGE_GAUCHE = 30
 const MARGE_DROITE = 8
 const HAUT_ETAPES = 16
@@ -30,27 +38,29 @@ const HAUT_AXE = 16
 /**
  * Diagramme de feux (chronogramme) : une rangée par ligne de feux sur un cycle (ou une simulation),
  * vert, jaune et rouge, avec les étapes au-dessus. Cliquer ou glisser place le curseur de
- * lecture, que la carte reflète.
+ * lecture, que la carte reflète. Avec `onEtirer`, tirer le bord droit d'une étape change sa durée.
  */
-export function Chronogramme({ chronologie: resultat, lignes, instant, onInstant, demandes = [] }: Props) {
+export function Chronogramme({ chronologie: resultat, lignes, instant, onInstant, demandes = [], onEtirer, largeur = LARGEUR }: Props) {
   const { duree_s: cycle_s } = resultat
-  const largeurUtile = LARGEUR - MARGE_GAUCHE - MARGE_DROITE
+  const largeurUtile = largeur - MARGE_GAUCHE - MARGE_DROITE
   const x = (t: number) => MARGE_GAUCHE + (t / cycle_s) * largeurUtile
   const y = (rang: number) => HAUT_ETAPES + ECART + rang * (HAUT_LIGNE + ECART)
   const hauteur = y(lignes.length) + HAUT_AXE
   const pas = cycle_s > 150 ? 30 : cycle_s > 60 ? 10 : 5
   const graduations = Array.from({ length: Math.floor(cycle_s / pas) + 1 }, (_, i) => i * pas)
 
-  const placer = (e: PointerEvent<SVGSVGElement>) => {
-    const cadre = e.currentTarget.getBoundingClientRect()
-    const vx = ((e.clientX - cadre.left) / cadre.width) * LARGEUR
-    onInstant(Math.min(cycle_s - 0.01, Math.max(0, ((vx - MARGE_GAUCHE) / largeurUtile) * cycle_s)))
+  /** Instant du cycle sous le pointeur, borné au cycle. */
+  const instantSous = (e: PointerEvent<SVGElement>) => {
+    const cadre = (e.currentTarget.ownerSVGElement ?? e.currentTarget).getBoundingClientRect()
+    const vx = ((e.clientX - cadre.left) / cadre.width) * largeur
+    return Math.min(cycle_s, Math.max(0, ((vx - MARGE_GAUCHE) / largeurUtile) * cycle_s))
   }
+  const placer = (e: PointerEvent<SVGSVGElement>) => onInstant(Math.min(cycle_s - 0.01, instantSous(e)))
 
   return (
     <svg
       className="chronogramme"
-      viewBox={`0 0 ${LARGEUR} ${hauteur}`}
+      viewBox={`0 0 ${largeur} ${hauteur}`}
       role="img"
       aria-label={`Diagramme de feux sur ${cycle_s} s`}
       onPointerDown={(e) => {
@@ -73,6 +83,28 @@ export function Chronogramme({ chronologie: resultat, lignes, instant, onInstant
             <text x={(x(etape.debut_s) + x(etape.fin_s)) / 2} y={HAUT_ETAPES / 2} textAnchor="middle" dominantBaseline="central">
               É{etape.index + 1}
             </text>
+          )}
+          {onEtirer && (
+            <rect
+              className="poignee"
+              x={x(etape.fin_s) - LARGEUR_POIGNEE / 2}
+              y={0}
+              width={LARGEUR_POIGNEE}
+              height={HAUT_ETAPES}
+              rx={1.5}
+              onPointerDown={(e) => {
+                // Le glisser change la durée : il ne doit pas déplacer le curseur de lecture.
+                e.stopPropagation()
+                e.currentTarget.setPointerCapture(e.pointerId)
+              }}
+              onPointerMove={(e) => {
+                if (e.currentTarget.hasPointerCapture(e.pointerId)) onEtirer(etape.index, etape.fin_s, instantSous(e))
+              }}
+            >
+              <title>
+                Tirer pour changer la durée de l'étape {etape.index + 1} ({Math.round(etape.fin_s - etape.debut_s)} s de vert)
+              </title>
+            </rect>
           )}
         </g>
       ))}

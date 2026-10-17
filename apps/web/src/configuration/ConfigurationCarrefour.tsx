@@ -185,6 +185,13 @@ function dimensionsZone([ouest, sud, est, nord]: EmpriseIa) {
 
 const LAMPES: Record<EtatFeu, EtatLampe | null> = { vert: 'vert', jaune: 'orange', rouge: 'rouge', libre: null }
 
+/** Où est le plan de feux : côté de l'écran, et hauteur prise en bas de la carte (panneau ou bande du diagramme). */
+export interface PlacePanneau {
+  disposition: Disposition
+  /** Valeur CSS ; null : rien en bas de la carte. */
+  bas: string | null
+}
+
 /** Ce que le parent relaie depuis la carte et le menu contextuel. */
 export interface ConfigurationCarrefourHandle {
   clicFeu: (feu: FeuResume, position: LonLat) => void
@@ -211,7 +218,7 @@ interface Props {
   /** Proposition IA à charger à l'ouverture (« Ouvrir » d'une notification). Un nouvel objet la recharge. */
   ouvrirAnalyseIa?: { id: string } | null
   /** Le plan de feux s'ouvre (en bas ou à droite) ou se ferme (null) : les contrôles flottants s'écartent. */
-  onPanneau: (disposition: Disposition | null) => void
+  onPanneau: (panneau: PlacePanneau | null) => void
   /** Revient au choix des feux du carrefour. */
   onModifierFeux: () => void
   onSupprimer: () => void
@@ -244,7 +251,10 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   const disposition: Disposition = useBreakpointValue<Disposition>({ base: 'bas', xl: 'droite' }) ?? 'bas'
   /** Où est posé le plan de feux ; null : fermé. */
   const panneau = panneauOuvert ? disposition : null
-  useEffect(() => onPanneau(panneau), [onPanneau, panneau])
+  /** Hauteur (px) de la bande du diagramme sous la carte, quand le plan de feux est à droite. */
+  const [hauteurBande, setHauteurBande] = useState(0)
+  const basCarte = panneau === 'bas' ? hauteurPanneau : panneau === 'droite' && hauteurBande > 0 ? `${hauteurBande}px` : null
+  useEffect(() => onPanneau(panneau && { disposition: panneau, bas: basCarte }), [onPanneau, panneau, basCarte])
   useEffect(() => () => onPanneau(null), [onPanneau])
 
   // Brouillons des trois étapes, conservés hors de la configuration (voir brouillons.ts).
@@ -723,15 +733,17 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   // Seulement quand le panneau s'ouvre, se ferme ou change de côté : au montage, un easeTo interromprait
   // le vol vers le carrefour (qui remet lui-même le décalage à zéro, voir CarteCarrefours).
   const { carte } = useMap()
-  const panneauPrecedent = useRef<Disposition | null>(null)
+  const panneauPrecedent = useRef<string | null>(null)
+  const bande = panneau === 'droite' ? hauteurBande : 0
   useEffect(() => {
-    if (panneauPrecedent.current === panneau) return
-    panneauPrecedent.current = panneau
-    const { right, bottom } = panneau ? emprisePanneau(panneau) : { right: 0, bottom: 0 }
+    const cle = panneau && `${panneau}:${bande}`
+    if (panneauPrecedent.current === cle) return
+    panneauPrecedent.current = cle
+    const { right, bottom } = panneau ? emprisePanneau(panneau, bande) : { right: 0, bottom: 0 }
     const actuel = carte?.getPadding()
     if (!carte || ((actuel?.bottom ?? 0) === bottom && (actuel?.right ?? 0) === right)) return
     carte.easeTo({ padding: { top: 0, left: 0, right, bottom }, duration: 300 })
-  }, [carte, panneau])
+  }, [carte, panneau, bande])
   useEffect(
     () => () => {
       if (carte && ((carte.getPadding().bottom ?? 0) > 0 || (carte.getPadding().right ?? 0) > 0)) carte.easeTo({ padding: { top: 0, right: 0, bottom: 0, left: 0 } })
@@ -814,8 +826,8 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
         ? CONSIGNES_SOUS_OUTILS[outil][sousOutil]
         : CONSIGNES[outil]
   // Barres du bas : outils, sous-outils au-dessus, puis la consigne. Au-dessus du plan de feux posé
-  // en bas ; centrées sur ce qui reste de la carte quand il est à droite.
-  const basBarre = panneau === 'bas' ? `calc(${hauteurPanneau} + 16px)` : BAS_BARRE_OUTILS
+  // en bas, ou de la bande du diagramme ; centrées sur ce qui reste de la carte quand il est à droite.
+  const basBarre = basCarte ? `calc(${basCarte} + 16px)` : BAS_BARRE_OUTILS
   const centreBarres = panneau === 'droite' ? `calc((var(--ecran-w) - ${largeurPanneau}) / 2)` : '50%'
   const sousOutilsAffiches = avecSousOutils(outil) && !cadrage
 
@@ -1072,6 +1084,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
           onInstant={setInstant}
           vitesse={vitesse}
           onVitesse={setVitesse}
+          onHauteurBande={setHauteurBande}
         />
       )}
 

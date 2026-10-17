@@ -13,10 +13,13 @@ export const LARGEUR_PANNEAU_PX = 640
 export const LARGEUR_CARTE_MIN_PX = 800
 export const largeurPanneau = `min(${LARGEUR_PANNEAU_PX}px, calc(var(--ecran-w) - ${LARGEUR_CARTE_MIN_PX}px))`
 
-/** Place que le plan de feux prend à la carte, en pixels, pour la recentrer dans ce qui reste. */
-export const emprisePanneau = (disposition: Disposition) =>
+/**
+ * Place que le plan de feux prend à la carte, en pixels, pour la recentrer dans ce qui reste.
+ * À droite, `bande` est la hauteur du diagramme posé sous la carte.
+ */
+export const emprisePanneau = (disposition: Disposition, bande = 0) =>
   disposition === 'droite'
-    ? { right: Math.min(LARGEUR_PANNEAU_PX, window.innerWidth - LARGEUR_CARTE_MIN_PX), bottom: 0 }
+    ? { right: Math.min(LARGEUR_PANNEAU_PX, window.innerWidth - LARGEUR_CARTE_MIN_PX), bottom: bande }
     : { right: 0, bottom: (window.innerHeight * HAUTEUR_PANNEAU_VH) / 100 }
 
 /**

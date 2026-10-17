@@ -433,6 +433,18 @@ svg.chronogramme {
   font-weight: 700;
 }
 
+/* Bord déplaçable d'une étape : plus précis que `.etape rect`, qu'il doit surcharger. */
+.chronogramme .etape rect.poignee {
+  fill: var(--chakra-colors-brand-solid);
+  stroke: none;
+  opacity: 0.55;
+  cursor: ew-resize;
+}
+
+.chronogramme .etape rect.poignee:hover {
+  opacity: 1;
+}
+
 .chronogramme .transition {
   fill: var(--chakra-colors-border);
   opacity: 0.6;

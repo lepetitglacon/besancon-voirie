@@ -17,8 +17,9 @@ import {
   ConfigurationCarrefour,
   type AffichageConfiguration,
   type ConfigurationCarrefourHandle,
+  type PlacePanneau,
 } from './configuration/ConfigurationCarrefour'
-import { hauteurPanneau, largeurPanneau, type Disposition } from './configuration/disposition'
+import { largeurPanneau } from './configuration/disposition'
 import {
   Aide,
   BandeauMode,
@@ -186,7 +187,7 @@ function App() {
     ouvrirAnalyseIa?: { id: string }
   }) | null>(null)
   /** Où est posé le plan de feux de la configuration ; null : fermé. */
-  const [planDeFeux, setPlanDeFeux] = useState<Disposition | null>(null)
+  const [planDeFeux, setPlanDeFeux] = useState<PlacePanneau | null>(null)
   /** Carrefour dont la fiche temps réel est ouverte. */
   const [ficheTempsReel, setFicheTempsReel] = useState<CarrefourChoisi | null>(null)
   const brouillons = useBrouillons()
@@ -635,9 +636,10 @@ function App() {
     panneauConfiguration.current?.executer(valeur as ActionConfiguration)
   }
 
-  // Le plan de feux ouvert repousse les contrôles flottants au-dessus de lui, ou à sa gauche.
-  const panneauBas = configuration !== null && planDeFeux === 'bas'
-  const panneauDroite = configuration !== null && planDeFeux === 'droite'
+  // Le plan de feux ouvert repousse les contrôles flottants au-dessus de lui (ou de la bande du
+  // diagramme), et à sa gauche quand il est à droite.
+  const basCarte = configuration !== null ? (planDeFeux?.bas ?? null) : null
+  const panneauDroite = configuration !== null && planDeFeux?.disposition === 'droite'
 
   return (
     <>
@@ -964,7 +966,7 @@ function App() {
         position="fixed"
         // À gauche des contrôles de la carte (36 px à 16 px du bord).
         right={panneauDroite ? `calc(${largeurPanneau} + 64px)` : '64px'}
-        bottom={panneauBas ? `calc(${hauteurPanneau} + 12px)` : '3'}
+        bottom={basCarte ? `calc(${basCarte} + 12px)` : '3'}
         zIndex="2"
         brouillons={brouillons}
         ouvert={configuration?.carrefour.id ?? null}
@@ -978,10 +980,10 @@ function App() {
       <PagesSite />
 
       {/* Contrôles en bas à droite : zoom (plus « nord » quand la carte est tournée), puis les
-          panneaux. Au-dessus du plan de feux posé en bas, à sa gauche quand il est à droite. */}
+          panneaux. Au-dessus du plan de feux posé en bas (ou de sa bande), à sa gauche quand il est à droite. */}
       <Stack
         position="fixed"
-        bottom={panneauBas ? `calc(${hauteurPanneau} + 16px)` : '4'}
+        bottom={basCarte ? `calc(${basCarte} + 16px)` : '4'}
         right={panneauDroite ? `calc(${largeurPanneau} + 16px)` : '4'}
         zIndex="2"
         gap="3"
