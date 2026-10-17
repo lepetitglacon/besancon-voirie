@@ -65,6 +65,7 @@ export function EtiquettesFeux({ feux, ligne, etats, onLigne }: PropsEtiquettes)
     <Marker key={f.id} longitude={f.position[0]} latitude={f.position[1]}>
       <EtiquetteFeu
         lignes={f.lignes}
+        deduit={f.deduit}
         actif={ligne !== null && f.lignes.includes(ligne)}
         etat={f.lignes.map((code) => etats?.get(code)).find((e) => e) ?? null}
         cursor={onLigne && f.lignes.length > 0 ? 'pointer' : undefined}

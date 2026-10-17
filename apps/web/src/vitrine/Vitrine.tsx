@@ -492,6 +492,7 @@ function ComposantsProjet() {
             <EtiquetteFeu lignes={['F2']} etat="vert" />
             <EtiquetteFeu lignes={['P1']} etat="rouge" />
             <EtiquetteFeu lignes={['F3', 'F4']} actif />
+            <EtiquetteFeu lignes={['F5']} deduit />
             <EtiquetteFeu lignes={[]} />
           </HStack>
           <MiniCarte emprise={EMPRISE_EXEMPLE} h="220px">
