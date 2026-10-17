@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import { debutsDeVert, decalageDuTop, planEnVigueur, synchroniser } from '@voirie/engine';
 import {
   typeLigne,
@@ -203,7 +203,21 @@ export class TempsReelService {
   }
 
   /** Carrefours programmés de l'emprise, prêts à rejouer : lignes, feux physiques, plans et décalages. */
-  async feux([minLon, minLat, maxLon, maxLat]: Bbox): Promise<FeuxTempsReel> {
+  feux([minLon, minLat, maxLon, maxLat]: Bbox): Promise<FeuxTempsReel> {
+    return this.rejouables(sql`
+      c.geom && ST_MakeEnvelope(${minLon}, ${minLat}, ${maxLon}, ${maxLat}, 4326)
+        AND EXISTS (SELECT 1 FROM plan_feux p WHERE p.carrefour_id = c.id)
+    `);
+  }
+
+  /** Un carrefour, programmé ou non : ce que le relevé terrain compare au programme. */
+  async carrefour(carrefourId: string): Promise<CarrefourTempsReel> {
+    const { carrefours } = await this.rejouables(sql`c.id = ${carrefourId}`);
+    if (!carrefours[0]) throw new NotFoundException('Carrefour inconnu');
+    return carrefours[0];
+  }
+
+  private async rejouables(filtre: SQL): Promise<FeuxTempsReel> {
     const { rows: carrefours } = await this.db.execute<{
       id: string;
       nom: string;
@@ -214,8 +228,7 @@ export class TempsReelService {
     }>(sql`
       SELECT c.id, c.nom, c.pres_tram, c.controleur, ST_X(c.geom) AS lon, ST_Y(c.geom) AS lat
       FROM carrefour c
-      WHERE c.geom && ST_MakeEnvelope(${minLon}, ${minLat}, ${maxLon}, ${maxLat}, 4326)
-        AND EXISTS (SELECT 1 FROM plan_feux p WHERE p.carrefour_id = c.id)
+      WHERE ${filtre}
       LIMIT 500
     `);
     if (carrefours.length === 0) return { carrefours: [] };

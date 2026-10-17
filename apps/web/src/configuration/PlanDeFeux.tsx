@@ -1,5 +1,6 @@
 import { Box, Button, HStack, IconButton, Stack, Tabs } from '@chakra-ui/react'
 import type { ComponentProps } from 'react'
+import { Link } from 'react-router'
 import { Aide, IconeFeu, Message, PanneauBas, Pastille, Valeur } from '../ds'
 import { BandeChronogramme } from './BandeChronogramme'
 import { hauteurPanneau, largeurPanneau, type Disposition } from './disposition'
@@ -123,6 +124,9 @@ export function PlanDeFeux(props: Props) {
               t = {Math.floor(instant)} s / {Math.round(cycle)} s
             </Valeur>
           )}
+          <Button asChild size="xs" variant="ghost" title="Relever ce carrefour sur place, sur le téléphone">
+            <Link to={`/terrain/${props.carrefourId}`}>Relevé terrain ↗</Link>
+          </Button>
           <IconButton aria-label="Fermer le plan de feux" title="Fermer (Tab)" onClick={onFermer}>
             ×
           </IconButton>

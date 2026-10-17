@@ -3,7 +3,7 @@
 > **Objectif** : sortir le plan de feux du tiroir du bas, lui donner sa place dans la barre d'outils,
 > et l'adapter à ses deux usages : la conception au bureau et la correction devant le feu.
 > **Statut** : brouillon
-> **Dernière mise à jour** : 2026-10-17 (étapes 1 à 3 faites)
+> **Dernière mise à jour** : 2026-10-17 (étapes 1 à 4 faites)
 > **Worktree** : `refonte-plan-de-feux` (port 5427)
 
 ## Ce qui existe
@@ -104,7 +104,16 @@ Chaque étape se merge seule dans `main`.
   - panneau à droite : le diagramme (onglet Programme) ou la simulation (onglet Graphe) passe dans une bande
     sous la carte ([BandeChronogramme](../apps/web/src/configuration/BandeChronogramme.tsx)), barres et contrôles
     au-dessus d'elle. Panneau en bas : le diagramme reste dans l'onglet, éditable aussi.
-- [ ] **Étape 4 — Mode Terrain** : écran de relevé mobile, stockage local. Côté front seulement, relevé gardé sur le téléphone.
+- [x] **Étape 4 — Mode Terrain** : page `/terrain/:carrefourId` ([ReleveTerrain](../apps/web/src/terrain/ReleveTerrain.tsx)),
+  sans la carte, ouverte par « Relever » (fiche temps réel) ou « Relevé terrain » (plan de feux) :
+  - un gros bouton par ligne : chaque appui la passe au vert puis au rouge, avec le temps écoulé ;
+  - événements : bus, tram, boucle, bouton piéton, comptés ;
+  - mesuré ([releve.ts](../apps/web/src/terrain/releve.ts)) : cycle (médiane, écart-type, appuis oubliés écartés),
+    vert médian par ligne, écarts de 2 s ou plus avec le plan en vigueur ;
+  - les passages au vert partent au calage par l'API des tops existante, lot par lot, sans doublon ;
+  - séance gardée dans le stockage du téléphone, écran maintenu allumé, vibration à l'appui.
+  Côté API, seulement `GET /api/temps-reel/carrefours/:id` (le rejeu d'un carrefour, même sans plan).
+  Les événements et les verts restent sur le téléphone : leur envoi (table `releve`) est l'étape 5.
 - [ ] **Étape 5 — Relevés côté API** : table `releve` (+ événements), `POST /api/releves`, migration horodatée
   (penser au `pnpm db:verifier voirie` avant merge).
 - [ ] **Étape 6 — Comparer et corriger** : superposition, détection des écarts, corrections vers le brouillon.

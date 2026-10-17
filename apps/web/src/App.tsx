@@ -5,6 +5,7 @@ import { Badge, Box, Button, HStack, Kbd, Popover, Portal, Stack, Text } from '@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { Layers, Map as MapIcon, Ruler } from 'lucide-react'
 import { useMap } from 'react-map-gl/maplibre'
+import { Link } from 'react-router'
 import { api } from './api'
 import { ChoixLignesBus } from './bus/ChoixLignesBus'
 import { CHOIX_LIGNES_BUS_DEFAUT, filtrerReseauBus, lignesBus, lignesMasquees, type ChoixLignesBus as Choix } from './bus/lignesBus'
@@ -29,6 +30,7 @@ import {
   Bascule,
   BoutonCarte,
   CarteEnTete,
+  IconeFeu,
   ControleZoom,
   Curseur,
   MenuContextuel,
@@ -813,9 +815,16 @@ function App() {
                 <Badge colorPalette="gray">{feuxTempsReel.data.carrefours.length} carrefour(s) programmé(s) dans la vue</Badge>
               )}
               {ficheTempsReel && (
-                <Button size="2xs" variant="ghost" ms="auto" onClick={() => setFicheTempsReel(null)}>
-                  Fermer
-                </Button>
+                <>
+                  <Button asChild size="2xs" variant="outline" ms="auto" title="Relever ce carrefour sur place : cycle, verts, déclenchements">
+                    <Link to={`/terrain/${ficheTempsReel.carrefour.id}`}>
+                      <IconeFeu /> Relever
+                    </Link>
+                  </Button>
+                  <Button size="2xs" variant="ghost" onClick={() => setFicheTempsReel(null)}>
+                    Fermer
+                  </Button>
+                </>
               )}
             </>
           }

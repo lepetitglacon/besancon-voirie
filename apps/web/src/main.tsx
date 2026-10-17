@@ -8,6 +8,7 @@ import './index.css'
 import App from './App.tsx'
 import { Fournisseur } from './ds'
 import { PAGES } from './site/pages'
+import { ReleveTerrain } from './terrain/ReleveTerrain'
 import { Vitrine } from './vitrine'
 
 const queryClient = new QueryClient({
@@ -29,6 +30,15 @@ createRoot(document.getElementById('root')!).render(
             }
           />
           <Route path="/vitrine" element={<Navigate to={PAGES.designSystem.chemin} replace />} />
+          {/* Relevé devant le feu, sur le téléphone : sans la carte. */}
+          <Route
+            path="/terrain/:carrefourId"
+            element={
+              <QueryClientProvider client={queryClient}>
+                <ReleveTerrain />
+              </QueryClientProvider>
+            }
+          />
           {/* La carte, avec les pages du site (à propos, mentions…) ouvertes par-dessus. */}
           <Route
             path="*"

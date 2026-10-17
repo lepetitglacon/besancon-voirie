@@ -14,6 +14,12 @@ export class TempsReelController {
     return this.tempsReel.feux(bbox);
   }
 
+  /** GET /api/temps-reel/carrefours/:id : la même chose pour un carrefour, même sans plan (relevé terrain). */
+  @Get('temps-reel/carrefours/:id')
+  carrefour(@Param('id', ParseUUIDPipe) id: string) {
+    return this.tempsReel.carrefour(id);
+  }
+
   @Get('carrefours/:id/tops')
   tops(@Param('id', ParseUUIDPipe) id: string) {
     return this.tempsReel.tops(id);

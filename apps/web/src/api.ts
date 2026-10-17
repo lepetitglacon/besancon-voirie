@@ -10,6 +10,7 @@ import type {
   BranchesCarrefour,
   CadrePhotoIa,
   CarrefourResume,
+  CarrefourTempsReel,
   CarrefoursGeoJson,
   ConfigurationBranches,
   ContourOsm,
@@ -118,6 +119,7 @@ export const api = {
     }),
   /** Carrefours programmés de l'emprise : de quoi rejouer leurs feux à l'heure réelle. */
   feuxTempsReel: (bbox: Bbox) => requete<FeuxTempsReel>(`/api/temps-reel/feux?bbox=${parametreBbox(bbox)}`),
+  carrefourTempsReel: (carrefourId: string) => requete<CarrefourTempsReel>(`/api/temps-reel/carrefours/${carrefourId}`),
   tops: (carrefourId: string) => requete<TopsCarrefour>(`/api/carrefours/${carrefourId}/tops`),
   /** Débuts de vert relevés sur place, pour caler le cycle sur l'heure réelle. */
   ajouterTops: (carrefourId: string, ajout: AjoutTops) =>
