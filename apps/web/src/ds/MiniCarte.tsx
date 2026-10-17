@@ -23,13 +23,13 @@ const STYLE_PHOTO: StyleSpecification = {
 
 /** Marge autour des points cadrés, en pixels. */
 const MARGE_PX = 24
-/** Jeu autour de l'emprise des points, où l'on peut encore se déplacer : sa taille, mais au moins ~150 m. */
-const JEU_RELATIF = 1
-const JEU_MIN_DEG = 0.002
+/** Jeu autour de l'emprise, où l'on peut encore se déplacer : la moitié de sa taille, au moins ~40 m. */
+const JEU_RELATIF = 0.5
+const JEU_MIN_DEG = 0.0005
 
 interface Props extends Omit<BoxProps, 'children'> {
-  /** Points à cadrer, [lon, lat] : la carte s'ouvre sur leur emprise. */
-  points: ReadonlyArray<readonly [number, number]>
+  /** Emprise [ouest, sud, est, nord] sur laquelle la carte s'ouvre, et dont elle ne s'éloigne pas. */
+  emprise: readonly [number, number, number, number]
   /** Zoom maximal du cadrage, pour qu'un seul point ne colle pas la carte au sol. */
   zoomMax?: number
   /** Couches et marqueurs dessinés sur la photo. */
@@ -37,26 +37,20 @@ interface Props extends Omit<BoxProps, 'children'> {
 }
 
 /**
- * Petite carte sur photo aérienne, cadrée sur quelques points (un carrefour, ses feux). On y zoome,
- * on s'y déplace et on l'incline (clic droit ou deux doigts), sans sortir des abords des points.
+ * Petite carte sur photo aérienne, cadrée sur une emprise (un carrefour). On y zoome, on s'y
+ * déplace et on l'incline (clic droit ou deux doigts), sans sortir de ses abords.
  */
-export function MiniCarte({ points, zoomMax = 19.5, children, h = '240px', ...props }: Props) {
-  const emprise = useMemo(() => {
-    const lons = points.map(([lon]) => lon)
-    const lats = points.map(([, lat]) => lat)
-    return [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)] as [number, number, number, number]
-  }, [points])
+export function MiniCarte({ emprise, zoomMax = 20, children, h = '240px', ...props }: Props) {
   const limites = useMemo(() => {
     const [ouest, sud, est, nord] = emprise
     const jeuLon = Math.max(JEU_MIN_DEG, (est - ouest) * JEU_RELATIF)
     const jeuLat = Math.max(JEU_MIN_DEG, (nord - sud) * JEU_RELATIF)
     return [ouest - jeuLon, sud - jeuLat, est + jeuLon, nord + jeuLat] as [number, number, number, number]
   }, [emprise])
-  if (points.length === 0) return null
   return (
     <Box h={h} borderRadius="l2" overflow="hidden" borderWidth="1px" borderColor="border.subtle" {...props}>
       <Map
-        initialViewState={{ bounds: emprise, fitBoundsOptions: { padding: MARGE_PX, maxZoom: zoomMax } }}
+        initialViewState={{ bounds: [...emprise], fitBoundsOptions: { padding: MARGE_PX, maxZoom: zoomMax } }}
         mapStyle={STYLE_PHOTO}
         style={{ width: '100%', height: '100%' }}
         maxBounds={limites}

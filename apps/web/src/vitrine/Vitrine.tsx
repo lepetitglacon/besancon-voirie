@@ -20,6 +20,7 @@ import {
 } from '@chakra-ui/react'
 import { ArrowLeft } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
+import { empriseCarrefour } from '@voirie/engine'
 import { Marker } from 'react-map-gl/maplibre'
 import { Link, useLocation } from 'react-router'
 import {
@@ -62,6 +63,9 @@ const FEUX_EXEMPLE: Array<{ lignes: string[]; position: [number, number]; etat: 
   { lignes: ['F3'], position: [6.0254684, 47.2427661], etat: 'rouge' },
   { lignes: ['F4', 'F5'], position: [6.0257, 47.2425], etat: null },
 ]
+
+/** Espace utile du même carrefour : ses feux et 25 m autour. */
+const EMPRISE_EXEMPLE = empriseCarrefour([], FEUX_EXEMPLE.map((f) => f.position))!
 
 /** Vitrine du design system : chaque composant, dans ses états, en clair comme en sombre. */
 export default function Vitrine() {
@@ -490,7 +494,7 @@ function ComposantsProjet() {
             <EtiquetteFeu lignes={['F3', 'F4']} actif />
             <EtiquetteFeu lignes={[]} />
           </HStack>
-          <MiniCarte points={FEUX_EXEMPLE.map((f) => f.position)} h="220px">
+          <MiniCarte emprise={EMPRISE_EXEMPLE} h="220px">
             {FEUX_EXEMPLE.map((f) => (
               <Marker key={f.lignes.join()} longitude={f.position[0]} latitude={f.position[1]}>
                 <EtiquetteFeu lignes={f.lignes} etat={f.etat} />

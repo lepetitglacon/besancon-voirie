@@ -8,14 +8,10 @@ import { Chronogramme } from '../configuration/Chronogramme'
 import { Lecture } from '../configuration/Lecture'
 import { SIGNAUX } from '../configuration/libelles'
 import { Aide, Bascule, Chiffre, Message, Pastille, Segments, Valeur } from '../ds'
-import { usePreference } from '../preferences'
 import { useMaintenant } from '../tempsReel/useMaintenant'
 import { libellePlage, NATURES, STATUTS } from './libelles'
-import { PlanCarrefour } from './PlanCarrefour'
+import type { ThemeFiche } from './CouchesCarrefour'
 
-/** Thèmes de la fiche, dans la carte de gauche du mode Temps réel. */
-type Theme = 'feux' | 'carrefour' | 'releves'
-const THEMES: readonly string[] = ['feux', 'carrefour', 'releves'] satisfies Theme[]
 
 const MODES: Record<FichePlan['mode'], string> = {
   cycle: 'cycle par étapes',
@@ -35,22 +31,23 @@ interface Props {
   slug: string
   /** En tête du thème « Feux » : l'état des feux en temps réel. */
   maintenant: ReactNode
+  /** Thème affiché : il décide aussi des couches dessinées sur la grande carte (CouchesCarrefour). */
+  theme: ThemeFiche
+  onTheme: (theme: ThemeFiche) => void
+  /** Ligne de feux mise en avant sur la carte (thème Carrefour). */
+  ligne: string | null
+  onChoisirLigne: (code: string) => void
+  onSurvolerLigne: (code: string | null) => void
 }
 
 /**
  * Fiche d'un carrefour (`/carrefours/:slug`), rangée par thème : les feux (état maintenant, plans et
- * leur diagramme), le carrefour (plan, branches, lignes de feux), les relevés terrain.
+ * leur diagramme), le carrefour (branches, lignes de feux), les relevés terrain. La grande carte
+ * dessine sur le carrefour les couches du thème.
  */
-export function FicheCarrefour({ slug, maintenant }: Props) {
-  const [themeLu, setTheme] = usePreference<Theme>('theme-fiche', 'feux')
-  // Thème d'une version précédente (« maintenant », « plans ») : les feux.
-  const theme: Theme = THEMES.includes(themeLu) ? themeLu : 'feux'
+export function FicheCarrefour({ slug, maintenant, theme, onTheme, ligne, onChoisirLigne, onSurvolerLigne }: Props) {
   const fiche = useQuery({ queryKey: ['fiche', slug], queryFn: () => api.fiche(slug) })
   const nombre = (n: number | undefined) => (n ? ` · ${n}` : '')
-  /** Ligne de feux choisie (clic) ou survolée dans le thème Carrefour : le plan met ses liaisons en avant. */
-  const [ligneChoisie, setLigneChoisie] = useState<string | null>(null)
-  const [ligneSurvolee, setLigneSurvolee] = useState<string | null>(null)
-  const ligne = ligneSurvolee ?? ligneChoisie
 
   return (
     <Stack gap="3">
@@ -58,7 +55,7 @@ export function FicheCarrefour({ slug, maintenant }: Props) {
         size="xs"
         aria-label="Thème de la fiche"
         valeur={theme}
-        onChange={setTheme}
+        onChange={onTheme}
         options={[
           { valeur: 'feux', libelle: 'Feux' },
           { valeur: 'carrefour', libelle: 'Carrefour' },
@@ -76,8 +73,8 @@ export function FicheCarrefour({ slug, maintenant }: Props) {
         <Carrefour
           fiche={fiche.data}
           ligne={ligne}
-          onChoisir={(code) => setLigneChoisie((actuelle) => (actuelle === code ? null : code))}
-          onSurvoler={setLigneSurvolee}
+          onChoisir={onChoisirLigne}
+          onSurvoler={onSurvolerLigne}
         />
       ) : (
         <Releves fiche={fiche.data} />
@@ -174,7 +171,7 @@ function Plan({ plan, lignes, enVigueur }: { plan: FichePlan; lignes: Fiche['lig
 
 interface PropsCarrefour {
   fiche: Fiche
-  /** Ligne de feux mise en avant sur le plan. */
+  /** Ligne de feux mise en avant sur la carte. */
   ligne: string | null
   onChoisir: (code: string) => void
   onSurvoler: (code: string | null) => void
@@ -198,7 +195,6 @@ function Carrefour({ fiche, ligne, onChoisir, onSurvoler }: PropsCarrefour) {
         <Chiffre valeur={branches.length} libelle="branches" />
         <Chiffre valeur={lignes.length} libelle="lignes" />
       </HStack>
-      <PlanCarrefour carrefourId={carrefour.id} ligne={ligne} onLigne={onChoisir} />
 
       {branches.length > 0 && (
         <Stack gap="1">
@@ -226,7 +222,7 @@ function Carrefour({ fiche, ligne, onChoisir, onSurvoler }: PropsCarrefour) {
           <Text textStyle="overline" color="fg.muted">
             Lignes de feux
           </Text>
-          <Aide>Survoler ou cliquer une ligne (ou un feu sur le plan) : le plan montre ses mouvements et ses feux.</Aide>
+          <Aide>Survoler ou cliquer une ligne (ou un feu sur la carte) : la carte montre ses mouvements et ses feux.</Aide>
           {lignes.map((l) => (
             <HStack
               key={l.code}

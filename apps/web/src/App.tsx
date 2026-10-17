@@ -63,6 +63,7 @@ import { CoucheSumo } from './sumo/CoucheSumo'
 import { CoucheVehicules } from './sumo/CoucheVehicules'
 import { ModeSumo } from './sumo/ModeSumo'
 import { FicheTempsReel } from './tempsReel/FicheTempsReel'
+import { CouchesCarrefour, type ThemeFiche } from './carrefour/CouchesCarrefour'
 import { FicheCarrefour } from './carrefour/FicheCarrefour'
 import { FIABILITES } from './tempsReel/libelles'
 import { carrefoursSurLeTrace, type ContexteTram } from './tempsReel/priorite'
@@ -291,6 +292,18 @@ function App() {
     if (suivant !== 'temps_reel') setFicheTempsReel(null)
   }
 
+  // Thème de la fiche et ligne de feux mise en avant : la fiche et les couches de la carte les partagent.
+  const [themeLu, setThemeFiche] = usePreference<ThemeFiche>('theme-fiche', 'feux')
+  // Thème d'une version précédente (« maintenant », « plans ») : les feux.
+  const themeFiche: ThemeFiche = (['feux', 'carrefour', 'releves'] as const).includes(themeLu) ? themeLu : 'feux'
+  /** Ligne choisie, avec son carrefour : ouvrir un autre carrefour la fait oublier. */
+  const [choix, setChoix] = useState<{ carrefour: string; ligne: string } | null>(null)
+  const [ligneSurvolee, setLigneSurvolee] = useState<string | null>(null)
+  const idFiche = ficheTempsReel?.carrefour.id ?? null
+  const ligneFiche = ligneSurvolee ?? (choix && choix.carrefour === idFiche ? choix.ligne : null)
+  const choisirLigne = (code: string) =>
+    setChoix((actuel) => (idFiche === null || (actuel?.carrefour === idFiche && actuel.ligne === code) ? null : { carrefour: idFiche, ligne: code }))
+
   // La fiche ouverte en Temps réel et l'adresse /carrefours/:slug se suivent : l'adresse se partage,
   // et le bouton Précédent referme la fiche.
   const slugAdresse = useMatch('/carrefours/:slug')?.params.slug ?? null
@@ -312,8 +325,8 @@ function App() {
     slugSynchro.current = slugAdresse
     const { carrefour } = ficheAdresse.data
     changerMode('temps_reel')
+    // Le cadrage sur le carrefour vient de ses couches (CouchesCarrefour), une fois son emprise connue.
     setFicheTempsReel({ carrefour, position: carrefour.position })
-    carte?.flyTo({ center: carrefour.position, zoom: Math.max(carte.getZoom(), 18) })
   })
   useEffect(() => ouvrirDepuisAdresse(), [slugAdresse, pathname, ficheAdresse.data])
   useEffect(() => {
@@ -776,6 +789,17 @@ function App() {
               }
             />
           )}
+          {tempsReel && ficheTempsReel && (
+            <CouchesCarrefour
+              key={ficheTempsReel.carrefour.id}
+              carrefourId={ficheTempsReel.carrefour.id}
+              theme={themeFiche}
+              ligne={ligneFiche}
+              onLigne={choisirLigne}
+              tempsReel={carrefourTempsReel}
+              tram={contexteTram}
+            />
+          )}
         </CarteCarrefours>
       </Box>
 
@@ -835,6 +859,7 @@ function App() {
       ) : tempsReel ? (
         <CarteEnTete
           redimensionnable={ficheTempsReel ? 'fiche' : 'temps-reel'}
+          data-fiche-carrefour={ficheTempsReel ? '' : undefined}
           position="fixed"
           top="3"
           left="3"
@@ -870,6 +895,11 @@ function App() {
                 key={ficheTempsReel.carrefour.slug}
                 slug={ficheTempsReel.carrefour.slug}
                 maintenant={<FicheTempsReel carrefour={carrefourTempsReel} tram={contexteTram} />}
+                theme={themeFiche}
+                onTheme={setThemeFiche}
+                ligne={ligneFiche}
+                onChoisirLigne={choisirLigne}
+                onSurvolerLigne={setLigneSurvolee}
               />
             ) : (
               <Aide>
