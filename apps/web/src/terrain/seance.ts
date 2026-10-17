@@ -1,5 +1,5 @@
+import type { SaisieReleve } from '@voirie/engine'
 import { useCallback, useState } from 'react'
-import type { Saisie } from './releve'
 
 /**
  * Séance de relevé d'un carrefour, gardée sur le téléphone : elle survit à un rechargement, à une
@@ -7,9 +7,11 @@ import type { Saisie } from './releve'
  * reste alors en mémoire.
  */
 export interface Seance {
-  saisies: Saisie[]
+  saisies: SaisieReleve[]
   /** Instants des passages au vert déjà envoyés au calage : on ne les renvoie pas. */
   envoyes: number[]
+  /** Relevé envoyé à l'API (une fois par séance) et le nombre de saisies qu'il contenait. */
+  releve?: { id: string; saisies: number }
 }
 
 const VIDE: Seance = { saisies: [], envoyes: [] }
@@ -46,4 +48,24 @@ export function useSeance(carrefourId: string) {
     [carrefourId],
   )
   return [seance, modifier] as const
+}
+
+const CLE_PSEUDO = 'voirie:pseudo'
+
+/** Pseudo du dernier relevé envoyé, proposé au suivant. */
+export function lirePseudo(): string {
+  try {
+    return window.localStorage.getItem(CLE_PSEUDO) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function ecrirePseudo(pseudo: string) {
+  try {
+    if (pseudo.trim()) window.localStorage.setItem(CLE_PSEUDO, pseudo.trim())
+    else window.localStorage.removeItem(CLE_PSEUDO)
+  } catch {
+    // Stockage indisponible : le pseudo sera à retaper.
+  }
 }

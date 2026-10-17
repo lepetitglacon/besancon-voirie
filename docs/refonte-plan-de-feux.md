@@ -3,7 +3,7 @@
 > **Objectif** : sortir le plan de feux du tiroir du bas, lui donner sa place dans la barre d'outils,
 > et l'adapter à ses deux usages : la conception au bureau et la correction devant le feu.
 > **Statut** : brouillon
-> **Dernière mise à jour** : 2026-10-17 (étapes 1 à 4 faites)
+> **Dernière mise à jour** : 2026-10-17 (étapes 1 à 5 faites)
 > **Worktree** : `refonte-plan-de-feux` (port 5427)
 
 ## Ce qui existe
@@ -114,8 +114,16 @@ Chaque étape se merge seule dans `main`.
   - séance gardée dans le stockage du téléphone, écran maintenu allumé, vibration à l'appui.
   Côté API, seulement `GET /api/temps-reel/carrefours/:id` (le rejeu d'un carrefour, même sans plan).
   Les événements et les verts restent sur le téléphone : leur envoi (table `releve`) est l'étape 5.
-- [ ] **Étape 5 — Relevés côté API** : table `releve` (+ événements), `POST /api/releves`, migration horodatée
-  (penser au `pnpm db:verifier voirie` avant merge).
+- [x] **Étape 5 — Relevés côté API** : `POST /api/releves` (202, anonyme) enregistre le relevé complet dans la table
+  `releve` existante (saisies brutes dans `brut`), en attente de modération ; pas de migration.
+  - le calcul est passé dans le moteur ([releve.ts](../packages/engine/src/releve.ts), `analyserReleve`) : l'API
+    refait la synthèse, celle du téléphone n'est pas reçue ;
+  - refus : ligne inconnue du carrefour, aucun changement de couleur, saisie de plus d'un mois ou dans le futur,
+    plus de 1 500 saisies ; champ piège rempli : réponse normale, rien d'enregistré ;
+  - `GET /api/carrefours/:id/releves` : relevés du carrefour (hors rejetés), affichés sous l'écran Terrain ;
+  - écran Terrain : « Envoyer le relevé » (pseudo facultatif, retenu), une fois par séance ; le calage par tops
+    devient l'action secondaire.
+  Reste pour la mise en ligne : limite de débit (`@nestjs/throttler`, pas installé) et écran de modération.
 - [ ] **Étape 6 — Comparer et corriger** : superposition, détection des écarts, corrections vers le brouillon.
 
 ## Questions ouvertes

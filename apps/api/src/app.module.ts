@@ -8,6 +8,7 @@ import { HealthController } from './health/health.controller.js';
 import { LignesModule } from './lignes/lignes.module.js';
 import { OsmModule } from './osm/osm.module.js';
 import { ProgrammeModule } from './programme/programme.module.js';
+import { RelevesModule } from './releves/releves.module.js';
 import { SumoModule } from './sumo/sumo.module.js';
 import { TempsReelModule } from './temps-reel/temps-reel.module.js';
 import { TramModule } from './tram/tram.module.js';
@@ -24,6 +25,7 @@ import { TramModule } from './tram/tram.module.js';
     FeuxModule,
     TramModule,
     TempsReelModule,
+    RelevesModule,
     SumoModule,
     OsmModule,
   ],

@@ -1,16 +1,24 @@
-import { Badge, Box, Button, Grid, Heading, HStack, Stack, Table, Text } from '@chakra-ui/react'
+import { Badge, Box, Button, Grid, Heading, HStack, Input, Stack, Table, Text } from '@chakra-ui/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { planEnVigueur } from '@voirie/engine'
+import {
+  analyserReleve,
+  basculerLigne,
+  couleurCourante,
+  ecartsAuPlan,
+  estChangementCouleur,
+  planEnVigueur,
+  type EvenementReleve,
+  type SaisieReleve,
+} from '@voirie/engine'
 import type { CarrefourTempsReel } from '@voirie/schema'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api } from '../api'
 import { Aide, Chiffre, IconeFeu, Message, Section, Valeur } from '../ds'
 import { useMaintenant } from '../tempsReel/useMaintenant'
-import { basculer, couleurCourante, ecarts, estChangement, synthese, type Saisie, type TypeEvenement } from './releve'
-import { useSeance } from './seance'
+import { ecrirePseudo, lirePseudo, useSeance } from './seance'
 
-const EVENEMENTS: Array<{ type: TypeEvenement; glyphe: string; libelle: string; aide: string }> = [
+const EVENEMENTS: Array<{ type: EvenementReleve; glyphe: string; libelle: string; aide: string }> = [
   { type: 'bus', glyphe: '🚌', libelle: 'Bus', aide: 'Un bus arrive au feu' },
   { type: 'tram', glyphe: '🚋', libelle: 'Tram', aide: 'Un tram arrive au feu' },
   { type: 'boucle', glyphe: '🚗', libelle: 'Boucle', aide: 'Un véhicule s’arrête sur une boucle de détection' },
@@ -76,16 +84,31 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
   const maintenant = useMaintenant()
   const codes = carrefour.lignes.map((l) => l.code)
   const plan = planEnVigueur(carrefour.plans, maintenant)
-  const releve = synthese(saisies, codes)
-  const liste = ecarts(releve, plan?.mode === 'cycle' ? plan : null)
+  const releve = analyserReleve(saisies, codes)
+  const liste = ecartsAuPlan(releve, plan?.mode === 'cycle' ? plan : null)
   const aEnvoyer = Object.entries(releve.tops).flatMap(([ligne, instants]) =>
     instants.filter((t) => !seance.envoyes.includes(t)).map((t) => ({ ligne, t })),
   )
 
-  const saisir = (suivantes: Saisie[]) => {
+  const saisir = (suivantes: SaisieReleve[]) => {
     navigator.vibrate?.(15)
     modifier((s) => ({ ...s, saisies: suivantes }))
   }
+
+  const [pseudo, setPseudo] = useState(lirePseudo)
+  /** Champ piège : invisible, seul un robot le remplit. */
+  const [siteWeb, setSiteWeb] = useState('')
+  const releves = useQuery({ queryKey: ['releves', carrefour.id], queryFn: () => api.relevesCarrefour(carrefour.id) })
+  const envoiReleve = useMutation({
+    mutationFn: () =>
+      api.envoyerReleve({ carrefour_id: carrefour.id, pseudo: pseudo.trim() || undefined, saisies, site_web: siteWeb || undefined }),
+    onSuccess: (recu) => {
+      ecrirePseudo(pseudo)
+      modifier((s) => ({ ...s, releve: { id: recu.id, saisies: s.saisies.length } }))
+      return queryClient.invalidateQueries({ queryKey: ['releves', carrefour.id] })
+    },
+  })
+  const saisiesApresEnvoi = seance.releve ? saisies.length - seance.releve.saisies : 0
 
   const envoi = useMutation({
     mutationFn: async () => {
@@ -136,7 +159,7 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
           <Grid templateColumns="repeat(2, minmax(0, 1fr))" gap="2.5">
             {carrefour.lignes.map((ligne) => {
               const couleur = couleurCourante(saisies, ligne.code)
-              const depuis = [...saisies].reverse().find((s) => estChangement(s) && s.ligne === ligne.code)?.t
+              const depuis = [...saisies].reverse().find((s) => estChangementCouleur(s) && s.ligne === ligne.code)?.t
               const prochaine = couleur === 'vert' ? 'rouge' : 'vert'
               return (
                 <Button
@@ -148,7 +171,7 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
                   bg={couleur === 'vert' ? 'feu.vert' : couleur === 'rouge' ? 'feu.rouge' : 'bg.muted'}
                   color={couleur ? 'white' : 'fg'}
                   aria-label={`${ligne.code}${couleur ? ` au ${couleur}` : ''} : passe au ${prochaine}`}
-                  onClick={() => saisir(basculer(saisies, ligne.code, Date.now()))}
+                  onClick={() => saisir(basculerLigne(saisies, ligne.code, Date.now()))}
                 >
                   <Text textStyle="2xl" fontWeight="bold">
                     {ligne.code}
@@ -189,7 +212,7 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
           <HStack gap="2">
             <Aide flex="1">
               Dernière saisie {heure(derniere.t)} :{' '}
-              {estChangement(derniere) ? `${derniere.ligne} au ${derniere.couleur}` : EVENEMENTS.find((e) => e.type === derniere.evenement)?.libelle}
+              {estChangementCouleur(derniere) ? `${derniere.ligne} au ${derniere.couleur}` : EVENEMENTS.find((e) => e.type === derniere.evenement)?.libelle}
             </Aide>
             <Button size="xs" variant="ghost" onClick={() => modifier((s) => ({ ...s, saisies: s.saisies.slice(0, -1) }))}>
               Annuler
@@ -240,21 +263,79 @@ function Releve({ carrefour }: { carrefour: CarrefourTempsReel }) {
         {releve.cycle && liste.length === 0 && plan?.cycle_s && <Message ton="ok">Conforme au plan « {plan.code} » à 2 s près.</Message>}
       </Section>
 
-      <Stack gap="2">
-        <Button variant="solid" size="lg" disabled={aEnvoyer.length === 0} loading={envoi.isPending} onClick={() => envoi.mutate()}>
-          {aEnvoyer.length > 0 ? `Envoyer ${aEnvoyer.length} passage(s) au vert au calage` : 'Rien à envoyer'}
+      <Section libelle="Envoyer">
+        {seance.releve ? (
+          <Message ton="ok">
+            Relevé envoyé : il sera publié après relecture.
+            {saisiesApresEnvoi > 0 && ` ${saisiesApresEnvoi} saisie(s) depuis : commencez un nouveau relevé pour les envoyer.`}
+          </Message>
+        ) : (
+          <>
+            <Input
+              size="sm"
+              placeholder="Pseudo (facultatif, jamais d’email)"
+              aria-label="Pseudo"
+              maxLength={40}
+              value={pseudo}
+              onChange={(e) => setPseudo(e.target.value)}
+            />
+            {/* Champ piège : hors de l'écran et du parcours clavier, ignoré des lecteurs d'écran. */}
+            <Input
+              name="site_web"
+              tabIndex={-1}
+              autoComplete="off"
+              aria-hidden
+              position="absolute"
+              left="-10000px"
+              value={siteWeb}
+              onChange={(e) => setSiteWeb(e.target.value)}
+            />
+            <Button
+              variant="solid"
+              size="lg"
+              disabled={!saisies.some(estChangementCouleur)}
+              loading={envoiReleve.isPending}
+              onClick={() => envoiReleve.mutate()}
+            >
+              Envoyer le relevé
+            </Button>
+            <Aide>Couleurs et événements horodatés, relus avant d’être publiés. Le relevé reste sur ce téléphone, même sans réseau.</Aide>
+          </>
+        )}
+        {envoiReleve.error && <Message ton="erreur">{envoiReleve.error.message}</Message>}
+        <Button variant="outline" size="sm" disabled={aEnvoyer.length === 0} loading={envoi.isPending} onClick={() => envoi.mutate()}>
+          {aEnvoyer.length > 0 ? `Caler le plan : ${aEnvoyer.length} passage(s) au vert` : 'Plan calé sur ce relevé'}
         </Button>
-        <Aide>
-          Les passages au vert calent le plan en vigueur sur l’heure réelle. Le relevé reste sur ce téléphone, même sans réseau.
-        </Aide>
+        <Aide>Les passages au vert calent le plan en vigueur sur l’heure réelle (édition locale seulement pour l’instant).</Aide>
         {envoi.error && <Message ton="erreur">{envoi.error.message}</Message>}
+      </Section>
+
+      {(releves.data?.length ?? 0) > 0 && (
+        <Section libelle={`Relevés de ce carrefour (${releves.data!.length})`}>
+          {releves.data!.map((r) => (
+            <HStack key={r.id} gap="2" textStyle="xs">
+              <Text flex="1">
+                {new Date(r.observe_le).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}
+                {r.pseudo && ` · ${r.pseudo}`}
+              </Text>
+              <Valeur>{r.cycle_s ? `${r.cycle_s} s · ${r.cycles_observes} cycles` : 'cycle non mesuré'}</Valeur>
+              <Badge colorPalette={r.statut === 'valide' ? 'green' : 'gray'}>{r.statut === 'valide' ? 'validé' : 'à relire'}</Badge>
+            </HStack>
+          ))}
+        </Section>
+      )}
+
+      <Stack gap="2">
         <Button
           variant="ghost"
           size="sm"
           colorPalette="red"
           alignSelf="start"
           disabled={saisies.length === 0}
-          onClick={() => window.confirm('Effacer ce relevé et en commencer un autre ?') && modifier(() => ({ saisies: [], envoyes: [] }))}
+          onClick={() =>
+            (seance.releve || window.confirm('Ce relevé n’a pas été envoyé : l’effacer et en commencer un autre ?')) &&
+            modifier(() => ({ saisies: [], envoyes: [] }))
+          }
         >
           Nouveau relevé
         </Button>

@@ -21,6 +21,7 @@ import type {
   ConfigurationLignes,
   ConfigurationProgramme,
   CreerCarrefour,
+  EnvoiReleve,
   DetectionBranches,
   EmpriseIa,
   EssaiSumo,
@@ -36,6 +37,7 @@ import type {
   NatureCarrefour,
   OptionsSumo,
   ProgrammeCarrefour,
+  ReleveResume,
   ReseauBus,
   ReseauTram,
   TopsCarrefour,
@@ -120,6 +122,8 @@ export const api = {
   /** Carrefours programmés de l'emprise : de quoi rejouer leurs feux à l'heure réelle. */
   feuxTempsReel: (bbox: Bbox) => requete<FeuxTempsReel>(`/api/temps-reel/feux?bbox=${parametreBbox(bbox)}`),
   carrefourTempsReel: (carrefourId: string) => requete<CarrefourTempsReel>(`/api/temps-reel/carrefours/${carrefourId}`),
+  envoyerReleve: (envoi: EnvoiReleve) => requete<ReleveResume>('/api/releves', { method: 'POST', body: JSON.stringify(envoi) }),
+  relevesCarrefour: (carrefourId: string) => requete<ReleveResume[]>(`/api/carrefours/${carrefourId}/releves`),
   tops: (carrefourId: string) => requete<TopsCarrefour>(`/api/carrefours/${carrefourId}/tops`),
   /** Débuts de vert relevés sur place, pour caler le cycle sur l'heure réelle. */
   ajouterTops: (carrefourId: string, ajout: AjoutTops) =>
