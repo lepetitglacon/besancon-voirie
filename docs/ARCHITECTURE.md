@@ -595,7 +595,10 @@ Public :
 | GET | `/api/carrefours/:id/programme` | Plans de feux par étapes, rouges de dégagement calculés ([CONFIGURATION.md](CONFIGURATION.md) §5) |
 | GET | `/api/carrefours/:id/tops` | Tops relevés, avec le plan et le décalage de chacun, et la synchronisation de chaque plan (§6.1) |
 | GET | `/api/temps-reel/feux?bbox=…` | Carrefours programmés : position, lignes (où les dessiner, R17/R18, coupe la voie de tram), plans, diagrammes de feux, étape tram, décalages (§6.1) |
-| GET | `/api/carrefours/:slug` | Carrefour complet : branches, lignes, plans, synthèse des relevés validés |
+| GET | `/api/temps-reel/carrefours/:id` | La même chose pour un carrefour, même sans plan (relevé terrain) |
+| GET | `/api/carrefours/:id/releves` | Relevés du carrefour hors rejetés : synthèse (cycle, verts, événements), statut |
+| GET | `/api/releves/:id` | Un relevé et ses saisies horodatées (superposition au programme) |
+| GET | `/api/carrefours/:slug` | Fiche : carrefour, branches, lignes, plans avec diagramme calculé et calage, relevés hors rejetés |
 | GET | `/api/corridors` | Liste + géométrie |
 | GET | `/api/corridors/:slug` | Corridor, carrefours ordonnés, distances, plans, décalages actuels |
 | POST | `/api/releves` | 202 : relevé enregistré `en_attente` |
@@ -902,7 +905,9 @@ POST /api/admin/simulations ─▶ pg-boss « simulation » ─▶ apps/worker
   validation attendent, avec leur motivation, la décision d'un admin (modale « Gestion des
   droits », e-mail à l'intéressé). `AccesGuard` (global) lit `@Peut(action, sujet)` sur chaque
   route d'écriture : 401 sans compte, 403 sans le droit. `EDITION_LOCALE=true` ouvre encore
-  ces routes sans compte, pour le développement local et les tests e2e.
+  ces routes sans compte, pour le développement local et les tests e2e. Le dépôt d'un relevé
+  terrain reste anonyme ; le recaler et le valider (il remplace alors un plan) relève de
+  `programmeur`.
 - **Admin par défaut** : créé par la migration `authentification`, sans mot de passe (connexion
   Google, ou « Mot de passe oublié »).
 - **Anti-abus** : `@nestjs/throttler` sur l'inscription, la connexion et le mot de passe oublié

@@ -17,6 +17,7 @@ export const Sujet = z.enum([
   'AnalyseIa',
   'LigneFeux',
   'Programme',
+  'Releve',
   'TopSynchro',
   'ZoneOsm',
   'ImportOsm',
@@ -86,10 +87,13 @@ export const ROLES: Record<Role, DefinitionRole> = {
   },
   programmeur: {
     libelle: 'Plans de feux',
-    description: 'Saisir les étapes, cycles et plans de feux d’un carrefour.',
+    description: 'Saisir les étapes, cycles et plans de feux d’un carrefour ; recaler et valider les relevés terrain.',
     validation: true,
     demandable: true,
-    regles: [{ action: 'update', subject: 'Programme' }],
+    regles: [
+      { action: 'update', subject: 'Programme' },
+      { action: 'update', subject: 'Releve' },
+    ],
   },
   releveur: {
     libelle: 'Relever les tops de synchro',
@@ -147,6 +151,7 @@ export const SUJETS_EDITION: readonly Sujet[] = [
   'AnalyseIa',
   'LigneFeux',
   'Programme',
+  'Releve',
   'TopSynchro',
   'ZoneOsm',
   'ImportOsm',

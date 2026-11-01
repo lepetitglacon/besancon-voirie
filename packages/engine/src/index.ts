@@ -13,3 +13,5 @@ export * from './graphe.js';
 export * from './polyligne.js';
 export * from './tram.js';
 export * from './synchro.js';
+export * from './releve.js';
+export * from './emprise.js';

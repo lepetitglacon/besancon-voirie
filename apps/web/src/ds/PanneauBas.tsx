@@ -1,17 +1,17 @@
-import { createSlotRecipeContext, type HTMLChakraProps } from '@chakra-ui/react'
+import { createSlotRecipeContext, type HTMLChakraProps, type RecipeVariantProps } from '@chakra-ui/react'
 import type { ReactNode } from 'react'
 import { panneauBas } from '../theme/recettes-projet'
 
-/** Panneau ancré en bas de l'écran (plan de feux, chronogramme) : Root, Entete, Corps. */
+/** Panneau ancré en bas ou à droite de l'écran (plan de feux) : Root, Entete, Corps. */
 
 const { withProvider, withContext } = createSlotRecipeContext({ recipe: panneauBas })
 
-const Racine = withProvider<HTMLDivElement, HTMLChakraProps<'section'>>('section', 'root')
+const Racine = withProvider<HTMLDivElement, HTMLChakraProps<'section'> & RecipeVariantProps<typeof panneauBas>>('section', 'root')
 const EnteteBase = withContext<HTMLDivElement, HTMLChakraProps<'header'>>('header', 'entete')
 const Titre = withContext<HTMLHeadingElement, HTMLChakraProps<'h2'>>('h2', 'titre')
 const Contenu = withContext<HTMLDivElement, HTMLChakraProps<'div'>>('div', 'corps')
 
-export function Root(props: HTMLChakraProps<'section'>) {
+export function Root(props: HTMLChakraProps<'section'> & RecipeVariantProps<typeof panneauBas>) {
   return <Racine {...props} />
 }
 

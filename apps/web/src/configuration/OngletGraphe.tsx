@@ -14,6 +14,7 @@ import { Chronogramme } from './Chronogramme'
 import { GrapheEtapes } from './GrapheEtapes'
 import { Lecture } from './Lecture'
 import { ajouterArc, ajouterPriorite, basculerHorsCycle, changerAppel, modifierArc, retirerArc } from './programme'
+import { colonnes } from './disposition'
 
 export interface Scenario {
   demandes: Demande[]
@@ -29,6 +30,8 @@ interface Props {
   scenario: Scenario
   onScenario: (scenario: Scenario) => void
   simulation: ResultatSimulation | null
+  /** La simulation est dessinée dans la bande sous la carte : pas ici. */
+  diagrammeEnBande?: boolean
   instant: number
   onInstant: (t: number) => void
   vitesse: number | null
@@ -39,7 +42,7 @@ const secondes = (s: number) => `${Math.round(s * 10) / 10} s`
 
 /** Étape 4 : graphe des étapes (appels, priorité tram) et simulation d'un scénario de demandes. */
 export function OngletGraphe(props: Props) {
-  const { contexte, plans, onChanger, planActif, onPlanActif, scenario, onScenario, simulation, instant, onInstant, vitesse, onVitesse } = props
+  const { contexte, plans, onChanger, planActif, onPlanActif, scenario, onScenario, simulation, diagrammeEnBande, instant, onInstant, vitesse, onVitesse } = props
   const [lignePriorite, setLignePriorite] = useState('')
   const plan = plans[planActif]
   const codes = contexte.lignes.map((l) => l.code)
@@ -81,7 +84,7 @@ export function OngletGraphe(props: Props) {
     onScenario({ ...scenario, demandes: scenario.demandes.map((d, j) => (j === k ? demande : d)) })
 
   return (
-    <Grid templateColumns={{ base: '1fr', lg: 'minmax(0, 1fr) minmax(0, 1fr)' }} gap="6" alignItems="start">
+    <Grid {...colonnes('minmax(0, 1fr) minmax(0, 1fr)')} gap="6" alignItems="start">
       <Stack gap="3">
         {selecteur}
         <GrapheEtapes
@@ -267,8 +270,12 @@ export function OngletGraphe(props: Props) {
 
         {simulation && simulation.etapes.length > 0 && (
           <>
-            <Lecture instant={instant} vitesse={vitesse} onVitesse={onVitesse} />
-            <Chronogramme chronologie={simulation} lignes={contexte.lignes} instant={instant} onInstant={onInstant} demandes={scenario.demandes} />
+            {!diagrammeEnBande && (
+              <>
+                <Lecture instant={instant} vitesse={vitesse} onVitesse={onVitesse} />
+                <Chronogramme chronologie={simulation} lignes={contexte.lignes} instant={instant} onInstant={onInstant} demandes={scenario.demandes} />
+              </>
+            )}
             {simulation.attentes.length > 0 && (
               <Table.Root width="auto">
                 <Table.Header>

@@ -1,4 +1,5 @@
-import type { EntreeMenu } from '../ds'
+import { createElement } from 'react'
+import { IconeFeu, type EntreeMenu } from '../ds'
 
 /** Outil actif sur la carte pendant la configuration d'un carrefour. */
 export type OutilCarte = 'selection' | 'ajuster' | 'connecter' | 'feux' | 'pieton' | 'noeud'
@@ -25,7 +26,7 @@ export const MENU_CONFIGURATION: EntreeMenu[] = [
   { valeur: 'osm', glyphe: '⟳', libelle: 'Détecter les branches depuis OSM', raccourci: 'O' },
   { valeur: 'ia', glyphe: '✦', libelle: 'Générer avec OSM + IA (en file)', raccourci: 'I' },
   { valeur: 'json', glyphe: '⇪', libelle: 'Importer un JSON de branches' },
-  { valeur: 'plan', glyphe: '▭', libelle: 'Plan de feux', raccourci: 'Tab' },
+  { valeur: 'plan', glyphe: createElement(IconeFeu), libelle: 'Plan de feux', raccourci: 'Tab' },
   { type: 'separateur' },
   { valeur: 'enregistrer', glyphe: '✓', libelle: 'Enregistrer', raccourci: 'Ctrl S' },
   { valeur: 'fermer', glyphe: '×', libelle: 'Quitter la configuration', raccourci: 'Échap' },

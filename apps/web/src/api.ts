@@ -10,6 +10,7 @@ import type {
   BranchesCarrefour,
   CadrePhotoIa,
   CarrefourResume,
+  CarrefourTempsReel,
   CarrefoursGeoJson,
   ConfigurationBranches,
   ContourOsm,
@@ -20,6 +21,7 @@ import type {
   ConfigurationLignes,
   ConfigurationProgramme,
   CreerCarrefour,
+  EnvoiReleve,
   DetectionBranches,
   EmpriseIa,
   EssaiSumo,
@@ -29,12 +31,16 @@ import type {
   LancerEssaiSumo,
   FeuxGeoJson,
   FeuxTempsReel,
+  FicheCarrefour,
   HistoriqueTroncons,
   LignesCarrefour,
   ModifierCarrefour,
   NatureCarrefour,
   OptionsSumo,
   ProgrammeCarrefour,
+  ReleveDetail,
+  ReleveResume,
+  SaisieReleve,
   ReseauBus,
   ReseauTram,
   TopsCarrefour,
@@ -142,6 +148,15 @@ export const api = {
     }),
   /** Carrefours programmés de l'emprise : de quoi rejouer leurs feux à l'heure réelle. */
   feuxTempsReel: (bbox: Bbox) => requete<FeuxTempsReel>(`/api/temps-reel/feux?bbox=${parametreBbox(bbox)}`),
+  fiche: (slug: string) => requete<FicheCarrefour>(`/api/carrefours/${encodeURIComponent(slug)}`),
+  carrefourTempsReel: (carrefourId: string) => requete<CarrefourTempsReel>(`/api/temps-reel/carrefours/${carrefourId}`),
+  envoyerReleve: (envoi: EnvoiReleve) => requete<ReleveResume>('/api/releves', { method: 'POST', body: JSON.stringify(envoi) }),
+  relevesCarrefour: (carrefourId: string) => requete<ReleveResume[]>(`/api/carrefours/${carrefourId}/releves`),
+  releve: (id: string) => requete<ReleveDetail>(`/api/releves/${id}`),
+  validerReleve: (id: string, plan: string) =>
+    requete<ProgrammeCarrefour>(`/api/releves/${id}/valider`, { method: 'POST', body: JSON.stringify({ plan }) }),
+  corrigerReleve: (id: string, saisies: SaisieReleve[]) =>
+    requete<ReleveDetail>(`/api/releves/${id}`, { method: 'PUT', body: JSON.stringify({ saisies }) }),
   tops: (carrefourId: string) => requete<TopsCarrefour>(`/api/carrefours/${carrefourId}/tops`),
   /** Débuts de vert relevés sur place, pour caler le cycle sur l'heure réelle. */
   ajouterTops: (carrefourId: string, ajout: AjoutTops) =>

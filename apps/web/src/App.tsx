@@ -5,21 +5,24 @@ import { Badge, Box, Button, HStack, Kbd, Popover, Portal, Stack, Text } from '@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { Layers, Map as MapIcon, Ruler } from 'lucide-react'
 import { useMap } from 'react-map-gl/maplibre'
+import { Link, useLocation, useMatch, useNavigate } from 'react-router'
 import { api } from './api'
 import { useDroits } from './auth/session'
 import { ChoixLignesBus } from './bus/ChoixLignesBus'
 import { CHOIX_LIGNES_BUS_DEFAUT, filtrerReseauBus, lignesBus, lignesMasquees, type ChoixLignesBus as Choix } from './bus/lignesBus'
 import { MenuSite } from './site/MenuSite'
+import { avecVue, cheminFiche } from './site/pages'
 import { PagesSite } from './site/PagesSite'
 import { abandonnerBrouillons, useBrouillons, type BrouillonsCarrefour } from './configuration/brouillons'
 import { CarteSuivi } from './configuration/CarteSuivi'
 import { MENU_CONFIGURATION, type ActionConfiguration } from './configuration/actions'
 import {
   ConfigurationCarrefour,
-  hauteurPanneau,
   type AffichageConfiguration,
   type ConfigurationCarrefourHandle,
+  type PlacePanneau,
 } from './configuration/ConfigurationCarrefour'
+import { largeurPanneau } from './configuration/disposition'
 import {
   Aide,
   BandeauMode,
@@ -29,6 +32,7 @@ import {
   Bascule,
   BoutonCarte,
   CarteEnTete,
+  IconeFeu,
   ControleZoom,
   Curseur,
   MenuContextuel,
@@ -60,6 +64,8 @@ import { CoucheSumo } from './sumo/CoucheSumo'
 import { CoucheVehicules } from './sumo/CoucheVehicules'
 import { ModeSumo } from './sumo/ModeSumo'
 import { FicheTempsReel } from './tempsReel/FicheTempsReel'
+import { CouchesCarrefour, type ThemeFiche } from './carrefour/CouchesCarrefour'
+import { FicheCarrefour } from './carrefour/FicheCarrefour'
 import { FIABILITES } from './tempsReel/libelles'
 import { carrefoursSurLeTrace, type ContexteTram } from './tempsReel/priorite'
 import { preparerReseau } from './tram/positionsTrams'
@@ -190,7 +196,8 @@ function App() {
     /** Proposition IA à charger à l'ouverture (« Ouvrir » d'une notification). */
     ouvrirAnalyseIa?: { id: string }
   }) | null>(null)
-  const [panneauBasOuvert, setPanneauBasOuvert] = useState(false)
+  /** Où est posé le plan de feux de la configuration ; null : fermé. */
+  const [planDeFeux, setPlanDeFeux] = useState<PlacePanneau | null>(null)
   /** Carrefour dont la fiche temps réel est ouverte. */
   const [ficheTempsReel, setFicheTempsReel] = useState<CarrefourChoisi | null>(null)
   const brouillons = useBrouillons()
@@ -289,6 +296,50 @@ function App() {
     }
     if (suivant !== 'temps_reel') setFicheTempsReel(null)
   }
+
+  // Thème de la fiche et ligne de feux mise en avant : la fiche et les couches de la carte les partagent.
+  const [themeLu, setThemeFiche] = usePreference<ThemeFiche>('theme-fiche', 'feux')
+  // Thème d'une version précédente (« maintenant », « plans ») : les feux.
+  const themeFiche: ThemeFiche = (['feux', 'carrefour', 'releves'] as const).includes(themeLu) ? themeLu : 'feux'
+  /** Ligne choisie, avec son carrefour : ouvrir un autre carrefour la fait oublier. */
+  const [choix, setChoix] = useState<{ carrefour: string; ligne: string } | null>(null)
+  const [ligneSurvolee, setLigneSurvolee] = useState<string | null>(null)
+  const idFiche = ficheTempsReel?.carrefour.id ?? null
+  const ligneFiche = ligneSurvolee ?? (choix && choix.carrefour === idFiche ? choix.ligne : null)
+  const choisirLigne = (code: string) =>
+    setChoix((actuel) => (idFiche === null || (actuel?.carrefour === idFiche && actuel.ligne === code) ? null : { carrefour: idFiche, ligne: code }))
+
+  // La fiche ouverte en Temps réel et l'adresse /carrefours/:slug se suivent : l'adresse se partage,
+  // et le bouton Précédent referme la fiche.
+  const slugAdresse = useMatch('/carrefours/:slug')?.params.slug ?? null
+  const { pathname } = useLocation()
+  const naviguer = useNavigate()
+  const ficheAdresse = useQuery({ queryKey: ['fiche', slugAdresse], queryFn: () => api.fiche(slugAdresse!), enabled: slugAdresse !== null })
+  /** Slug que l'adresse et la carte ouverte partagent : chacune ne suit l'autre que s'il change. */
+  const slugSynchro = useRef<string | null>(null)
+  const ouvrirDepuisAdresse = useEffectEvent(() => {
+    if (slugAdresse === null) {
+      // Retour à la carte seule (Précédent) : la fiche se referme.
+      if (pathname === '/' && slugSynchro.current !== null) {
+        slugSynchro.current = null
+        setFicheTempsReel(null)
+      }
+      return
+    }
+    if (slugAdresse === slugSynchro.current || !ficheAdresse.data) return
+    slugSynchro.current = slugAdresse
+    const { carrefour } = ficheAdresse.data
+    changerMode('temps_reel')
+    // Le cadrage sur le carrefour vient de ses couches (CouchesCarrefour), une fois son emprise connue.
+    setFicheTempsReel({ carrefour, position: carrefour.position })
+  })
+  useEffect(() => ouvrirDepuisAdresse(), [slugAdresse, pathname, ficheAdresse.data])
+  useEffect(() => {
+    const slug = ficheTempsReel?.carrefour.slug ?? null
+    if (slug === slugSynchro.current) return
+    slugSynchro.current = slug
+    naviguer(avecVue(slug ? cheminFiche(slug) : '/'))
+  }, [ficheTempsReel, naviguer])
 
   const placerFeu = useCallback(
     async (id: string, position: LonLat | null) => {
@@ -640,6 +691,11 @@ function App() {
     panneauConfiguration.current?.executer(valeur as ActionConfiguration)
   }
 
+  // Le plan de feux ouvert repousse les contrôles flottants au-dessus de lui (ou de la bande du
+  // diagramme), et à sa gauche quand il est à droite.
+  const basCarte = configuration !== null ? (planDeFeux?.bas ?? null) : null
+  const panneauDroite = configuration !== null && planDeFeux?.disposition === 'droite'
+
   return (
     <>
       <MenuContextuel
@@ -739,6 +795,17 @@ function App() {
               }
             />
           )}
+          {tempsReel && ficheTempsReel && (
+            <CouchesCarrefour
+              key={ficheTempsReel.carrefour.id}
+              carrefourId={ficheTempsReel.carrefour.id}
+              theme={themeFiche}
+              ligne={ligneFiche}
+              onLigne={choisirLigne}
+              tempsReel={carrefourTempsReel}
+              tram={contexteTram}
+            />
+          )}
         </CarteCarrefours>
       </Box>
 
@@ -785,7 +852,7 @@ function App() {
           onAffichage={setAffichageConfiguration}
           onPlacerFeu={placerFeu}
           ouvrirAnalyseIa={configuration.ouvrirAnalyseIa ?? null}
-          onPanneauBas={setPanneauBasOuvert}
+          onPanneau={setPlanDeFeux}
           onModifierFeux={() => {
             setConfiguration(null)
             modifier(configuration.carrefour)
@@ -797,11 +864,13 @@ function App() {
         <ModeSumo />
       ) : tempsReel ? (
         <CarteEnTete
+          redimensionnable={ficheTempsReel ? 'fiche' : 'temps-reel'}
+          data-fiche-carrefour={ficheTempsReel ? '' : undefined}
           position="fixed"
           top="3"
           left="3"
           zIndex="2"
-          w="340px"
+          w={ficheTempsReel ? '400px' : '340px'}
           maxW="calc(var(--ecran-w) - 24px)"
           surtitre={ficheTempsReel ? 'Temps réel' : 'Besançon Voirie'}
           titre={ficheTempsReel ? ficheTempsReel.carrefour.nom : 'Feux et trams en temps réel'}
@@ -812,16 +881,32 @@ function App() {
                 <Badge colorPalette="gray">{feuxTempsReel.data.carrefours.length} carrefour(s) programmé(s) dans la vue</Badge>
               )}
               {ficheTempsReel && (
-                <Button size="2xs" variant="ghost" ms="auto" onClick={() => setFicheTempsReel(null)}>
-                  Fermer
-                </Button>
+                <>
+                  <Button asChild size="2xs" variant="outline" ms="auto" title="Relever ce carrefour sur place : cycle, verts, déclenchements">
+                    <Link to={`/terrain/${ficheTempsReel.carrefour.id}`}>
+                      <IconeFeu /> Relever
+                    </Link>
+                  </Button>
+                  <Button size="2xs" variant="ghost" onClick={() => setFicheTempsReel(null)}>
+                    Fermer
+                  </Button>
+                </>
               )}
             </>
           }
         >
-          <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted">
+          <Box mt="3" pt="3" borderTopWidth="1px" borderColor="border.muted" maxH="calc(var(--ecran-h) - 150px)" overflowY="auto">
             {ficheTempsReel ? (
-              <FicheTempsReel carrefour={carrefourTempsReel} tram={contexteTram} />
+              <FicheCarrefour
+                key={ficheTempsReel.carrefour.slug}
+                slug={ficheTempsReel.carrefour.slug}
+                maintenant={<FicheTempsReel carrefour={carrefourTempsReel} tram={contexteTram} />}
+                theme={themeFiche}
+                onTheme={setThemeFiche}
+                ligne={ligneFiche}
+                onChoisirLigne={choisirLigne}
+                onSurvolerLigne={setLigneSurvolee}
+              />
             ) : (
               <Aide>
                 Les feux des carrefours programmés sont rejoués sur l'heure légale, calés par des tops relevés sur place.
@@ -833,6 +918,7 @@ function App() {
       ) : (
         <>
           <CarteEnTete
+            redimensionnable="edition"
             position="fixed"
             top="3"
             left="3"
@@ -970,8 +1056,8 @@ function App() {
       {!tempsReel && !sumo && <CarteSuivi
         position="fixed"
         // À gauche des contrôles de la carte (36 px à 16 px du bord).
-        right="64px"
-        bottom={configuration && panneauBasOuvert ? `calc(${hauteurPanneau} + 12px)` : '3'}
+        right={panneauDroite ? `calc(${largeurPanneau} + 64px)` : '64px'}
+        bottom={basCarte ? `calc(${basCarte} + 12px)` : '3'}
         zIndex="2"
         brouillons={brouillons}
         ouvert={configuration?.carrefour.id ?? null}
@@ -981,15 +1067,15 @@ function App() {
       />}
 
       {/* Menu du site en haut à droite. */}
-      <MenuSite position="fixed" top="4" right="4" zIndex="3" />
+      <MenuSite position="fixed" top="4" right={panneauDroite ? `calc(${largeurPanneau} + 16px)` : '4'} zIndex="3" />
       <PagesSite />
 
       {/* Contrôles en bas à droite : zoom (plus « nord » quand la carte est tournée), puis les
-          panneaux. Au-dessus du panneau du bas quand il est ouvert. */}
+          panneaux. Au-dessus du plan de feux posé en bas (ou de sa bande), à sa gauche quand il est à droite. */}
       <Stack
         position="fixed"
-        bottom={configuration && panneauBasOuvert ? `calc(${hauteurPanneau} + 16px)` : '4'}
-        right="4"
+        bottom={basCarte ? `calc(${basCarte} + 16px)` : '4'}
+        right={panneauDroite ? `calc(${largeurPanneau} + 16px)` : '4'}
         zIndex="2"
         gap="3"
         align="flex-end"

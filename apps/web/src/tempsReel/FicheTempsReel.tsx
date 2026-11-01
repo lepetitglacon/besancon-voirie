@@ -52,7 +52,7 @@ export function FicheTempsReel({ carrefour, tram }: Props) {
           </Valeur>
         )}
       </HStack>
-      <HStack gap="3" wrap="wrap" align="end">
+      <HStack gap="3" wrap="wrap" align="end" justify="center">
         {carrefour.lignes.map((ligne) => (
           <Stack key={ligne.code} gap="1" align="center">
             <TeteDeFeu etat={LAMPE[etats.get(ligne.code) ?? 'inconnu']} taille={ligne.pieton ? 7 : 9} opacity={fiabilite === 'inconnue' ? 0.5 : 1} />

@@ -20,6 +20,8 @@ import {
 } from '@chakra-ui/react'
 import { ArrowLeft } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
+import { empriseCarrefour } from '@voirie/engine'
+import { Marker } from 'react-map-gl/maplibre'
 import { Link, useLocation } from 'react-router'
 import {
   Aide,
@@ -28,6 +30,7 @@ import {
   Bascule,
   CarteEnTete,
   Case,
+  EtiquetteFeu,
   EtiquetteVehicule,
   Chiffre,
   Compteur,
@@ -35,6 +38,7 @@ import {
   LibelleSection,
   LigneConflit,
   MenuContextuel,
+  MiniCarte,
   Message,
   ModeCouleur,
   PanneauBas,
@@ -44,12 +48,38 @@ import {
   Section,
   Segments,
   Selecteur,
+  IconeFeu,
   TeteDeFeu,
+  TiroirBas,
   Valeur,
   type EtatLampe,
 } from '../ds'
 import { ChoixLignesBus } from '../bus/ChoixLignesBus'
 import type { LigneBus } from '../bus/lignesBus'
+
+/** Feux du carrefour Foch × Helvétie × Denfert-Rochereau, pour la mini-carte. */
+const FEUX_EXEMPLE: Array<{ lignes: string[]; position: [number, number]; etat: EtatLampe | null }> = [
+  { lignes: ['F1'], position: [6.0259917, 47.2427229], etat: 'vert' },
+  { lignes: ['F2'], position: [6.0259519, 47.2428918], etat: 'rouge' },
+  { lignes: ['F3'], position: [6.0254684, 47.2427661], etat: 'rouge' },
+  { lignes: ['F4', 'F5'], position: [6.0257, 47.2425], etat: null },
+]
+
+/** Espace utile du même carrefour : ses feux et 25 m autour. */
+const EMPRISE_EXEMPLE = empriseCarrefour([], FEUX_EXEMPLE.map((f) => f.position))!
+
+/** Tiroir du bas dans un cadre de téléphone : appui ou glisser sur la poignée. */
+function TiroirExemple() {
+  const [ouvert, setOuvert] = useState(false)
+  return (
+    <Box position="relative" h="300px" maxW="360px" mx="auto" overflow="hidden" bg="bg.muted" borderRadius="l3">
+      <Aide p="3">Contenu de la page : les boutons restent au-dessus du tiroir fermé.</Aide>
+      <TiroirBas titre="Plan du carrefour" ouvert={ouvert} onOuvert={setOuvert} position="absolute">
+        <Box h="180px" bg="bg.subtle" borderRadius="l2" />
+      </TiroirBas>
+    </Box>
+  )
+}
 
 /** Vitrine du design system : chaque composant, dans ses états, en clair comme en sombre. */
 export default function Vitrine() {
@@ -406,6 +436,12 @@ function ComposantsProjet() {
               <TeteDeFeu key={e} etat={e} />
             ))}
             <TeteDeFeu etat={null} />
+            <HStack gap="2" fontSize="20px" color="fg.secondary">
+              <IconeFeu />
+              {(['rouge', 'orange', 'vert'] as const).map((e) => (
+                <IconeFeu key={e} etat={e} />
+              ))}
+            </HStack>
             <HStack gap="2">
               <Pastille couleur="feu.vert" />
               <Pastille couleur="conflit.pieton" forme="carre" />
@@ -463,12 +499,38 @@ function ComposantsProjet() {
         </Exemple>
       </Grid>
 
+      <Exemple nom="Mini-carte et étiquettes de feu (plan d'un carrefour)">
+        <Stack gap="3">
+          <HStack gap="2" wrap="wrap">
+            <EtiquetteFeu lignes={['F1']} />
+            <EtiquetteFeu lignes={['F2']} etat="vert" />
+            <EtiquetteFeu lignes={['P1']} etat="rouge" />
+            <EtiquetteFeu lignes={['F3', 'F4']} actif />
+            <EtiquetteFeu lignes={['F5']} deduit />
+            <EtiquetteFeu lignes={[]} />
+          </HStack>
+          <MiniCarte emprise={EMPRISE_EXEMPLE} h="220px">
+            {FEUX_EXEMPLE.map((f) => (
+              <Marker key={f.lignes.join()} longitude={f.position[0]} latitude={f.position[1]}>
+                <EtiquetteFeu lignes={f.lignes} etat={f.etat} />
+              </Marker>
+            ))}
+          </MiniCarte>
+        </Stack>
+      </Exemple>
+
+      <Exemple nom="Tiroir du bas (pour le pouce)">
+        <TiroirExemple />
+      </Exemple>
+
       <Exemple nom="Barre d'outils">
         <Flex justify="center" py="4" bg="bg.muted" borderRadius="l2">
           <BarreOutils.Root>
             {OUTILS.map((o) => (
               <BarreOutils.Outil key={o.libelle} {...o} actif={outil === o.libelle} onClick={() => setOutil(o.libelle)} />
             ))}
+            <BarreOutils.Separateur />
+            <BarreOutils.Outil glyphe={<IconeFeu />} libelle="Plan" raccourci="⇥" title="Plan de feux (Tab)" actif={outil === 'Plan'} onClick={() => setOutil('Plan')} />
             <BarreOutils.Separateur />
             <Button variant="encre" size="md" borderRadius="9px">
               Enregistrer

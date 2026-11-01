@@ -136,18 +136,23 @@ export const panneauBas = defineSlotRecipe({
   className: 'panneau-bas',
   slots: ['root', 'entete', 'titre', 'corps'],
   base: {
-    root: {
-      display: 'flex',
-      flexDirection: 'column',
-      bg: 'bg.panel',
-      borderTopWidth: '1px',
-      borderColor: 'border.subtle',
-      boxShadow: { _light: '0 -10px 30px rgba(20, 24, 33, 0.12)', _dark: '0 -10px 30px rgba(0, 0, 0, 0.5)' },
-    },
+    root: { display: 'flex', flexDirection: 'column', bg: 'bg.panel', borderColor: 'border.subtle' },
     entete: { display: 'flex', alignItems: 'center', gap: '14px', px: '5', py: '3', borderBottomWidth: '1px', borderColor: 'border.muted' },
     titre: { textStyle: 'lg', fontWeight: 'semibold' },
     corps: { flex: '1', minH: 0, overflow: 'auto', px: '5', py: '3' },
   },
+  variants: {
+    /** Bord de l'écran où le panneau est ancré. */
+    cote: {
+      bas: {
+        root: { borderTopWidth: '1px', boxShadow: { _light: '0 -10px 30px rgba(20, 24, 33, 0.12)', _dark: '0 -10px 30px rgba(0, 0, 0, 0.5)' } },
+      },
+      droite: {
+        root: { borderLeftWidth: '1px', boxShadow: { _light: '-10px 0 30px rgba(20, 24, 33, 0.12)', _dark: '-10px 0 30px rgba(0, 0, 0, 0.5)' } },
+      },
+    },
+  },
+  defaultVariants: { cote: 'bas' },
 })
 
 /** Chiffre clé : « 4 branches », « 90 s cycle ». */

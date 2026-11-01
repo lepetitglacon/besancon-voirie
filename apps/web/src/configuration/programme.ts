@@ -118,6 +118,22 @@ export function deplacerEtape(plan: PlanEtapes, index: number, decalage: -1 | 1)
   return { ...plan, etapes, arcs: plan.arcs.map((a) => ({ ...a, de: suivre(a.de), vers: suivre(a.vers) })) }
 }
 
+/** Bornes de la durée d'une étape (s), comme dans la saisie. */
+export const DUREE_ETAPE_MIN_S = 1
+export const DUREE_ETAPE_MAX_S = 300
+
+/**
+ * Étire une étape pour que son vert finisse à `finVoulue` (s dans le cycle) au lieu de `finActuelle`,
+ * à la seconde près : ce qu'on fait en tirant le bord de l'étape sur le diagramme de feux.
+ */
+export function etirerEtape(plan: PlanEtapes, index: number, finActuelle: number, finVoulue: number): PlanEtapes {
+  const etape = plan.etapes[index]
+  if (!etape) return plan
+  const duree_s = Math.min(DUREE_ETAPE_MAX_S, Math.max(DUREE_ETAPE_MIN_S, Math.round(etape.duree_s + finVoulue - finActuelle)))
+  if (duree_s === etape.duree_s) return plan
+  return { ...plan, etapes: plan.etapes.map((e, i) => (i === index ? { ...e, duree_s } : e)) }
+}
+
 /** Retire une étape et les arcs qui la touchent ; les arcs suivants sont renumérotés. */
 export function retirerEtape(plan: PlanEtapes, index: number): PlanEtapes {
   const suivre = (i: number) => (i > index ? i - 1 : i)

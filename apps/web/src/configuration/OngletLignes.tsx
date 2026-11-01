@@ -6,6 +6,7 @@ import { Aide, Case, Message, Selecteur } from '../ds'
 import { DIRECTIONS, SIGNAUX } from './libelles'
 import { MatriceConflits } from './MatriceConflits'
 import { geometrieEnregistree } from './programme'
+import { colonnes } from './disposition'
 
 export interface BrouillonLignes {
   lignes: LigneFeux[]
@@ -81,7 +82,7 @@ export function OngletLignes({ configuration, brouillon, onChanger, ligneActive,
   }
 
   return (
-    <Grid templateColumns={{ base: '1fr', lg: 'minmax(0, 1.6fr) minmax(0, 1fr)' }} gap="6" alignItems="start">
+    <Grid {...colonnes('minmax(0, 1.6fr) minmax(0, 1fr)')} gap="6" alignItems="start">
       <Stack gap="3">
         <HStack gap="1.5" wrap="wrap">
           <Button size="xs" onClick={() => ajouter('R11v')}>+ Véhicules</Button>

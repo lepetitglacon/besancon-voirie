@@ -27,6 +27,7 @@ export function CarteEssais({ essais, erreur, choisi, onChoisir, onNouvel, suivi
   const peutLancer = useDroits().can('create', 'LancementSumo')
   return (
     <CarteEnTete
+      redimensionnable="sumo"
       surtitre="Simulation SUMO"
       titre={formulaire ? 'Nouvel essai' : 'Essais'}
       badges={

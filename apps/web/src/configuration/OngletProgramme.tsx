@@ -10,11 +10,13 @@ import {
   basculerLigneEtape,
   changerMode,
   deplacerEtape,
+  etirerEtape,
   retirerEtape,
   JOURS,
   nouveauPlan,
   saisirDegagement,
 } from './programme'
+import { collanteAuLarge, colonnes } from './disposition'
 
 const MODES: Record<PlanSaisi['mode'], string> = {
   cycle: 'Cycle par étapes',
@@ -33,6 +35,8 @@ interface Props {
   onPlanActif: (index: number) => void
   /** Calcul du plan actif (null si ce n'est pas un plan à cycle). */
   resultat: ResultatProgramme | null
+  /** Le diagramme de feux est dessiné dans la bande sous la carte : pas ici. */
+  diagrammeEnBande?: boolean
   instant: number
   onInstant: (t: number) => void
   vitesse: number | null
@@ -43,7 +47,7 @@ const secondes = (s: number) => `${Math.round(s * 10) / 10} s`
 
 /** Étape 3 : plans de feux, programme par étapes, transitions et diagramme de feux. */
 export function OngletProgramme(props: Props) {
-  const { carrefourId, modifie, contexte, plans, onChanger, planActif, onPlanActif, resultat, instant, onInstant, vitesse, onVitesse } = props
+  const { carrefourId, modifie, contexte, plans, onChanger, planActif, onPlanActif, resultat, diagrammeEnBande, instant, onInstant, vitesse, onVitesse } = props
   const plan = plans[planActif]
   const codes = contexte.lignes.map((l) => l.code)
   const enConflit = (a: string, b: string) => contexte.conflits.some(([x, y]) => (x === a && y === b) || (x === b && y === a))
@@ -55,7 +59,7 @@ export function OngletProgramme(props: Props) {
   }
 
   return (
-    <Grid templateColumns={{ base: '1fr', lg: 'minmax(0, 1fr) minmax(0, 1.3fr)' }} gap="6" alignItems="start">
+    <Grid {...colonnes('minmax(0, 1fr) minmax(0, 1.3fr)')} gap="6" alignItems="start">
       <Stack gap="3">
         <HStack gap="1.5" wrap="wrap">
           {plans.length > 0 && (
@@ -371,19 +375,24 @@ export function OngletProgramme(props: Props) {
           </>
         )}
       </Stack>
-      <Stack gap="3" position={{ lg: 'sticky' }} top="0">
+      <Stack gap="3" {...collanteAuLarge}>
         {plan?.mode === 'cycle' && resultat ? (
           <>
-            <Heading as="h3" textStyle="sm" fontWeight="semibold">
-              Diagramme de feux · cycle de {secondes(resultat.cycle_s)}
-            </Heading>
-            <Lecture instant={instant} vitesse={vitesse} onVitesse={onVitesse} />
-            <Chronogramme
-              chronologie={{ ...resultat, duree_s: resultat.cycle_s }}
-              lignes={contexte.lignes}
-              instant={instant}
-              onInstant={onInstant}
-            />
+            {!diagrammeEnBande && (
+              <>
+                <Heading as="h3" textStyle="sm" fontWeight="semibold">
+                  Diagramme de feux · cycle de {secondes(resultat.cycle_s)}
+                </Heading>
+                <Lecture instant={instant} vitesse={vitesse} onVitesse={onVitesse} />
+                <Chronogramme
+                  chronologie={{ ...resultat, duree_s: resultat.cycle_s }}
+                  lignes={contexte.lignes}
+                  instant={instant}
+                  onInstant={onInstant}
+                  onEtirer={(index, finActuelle, finVoulue) => changerPlan(etirerEtape(plan, index, finActuelle, finVoulue))}
+                />
+              </>
+            )}
             {resultat.controles.map((c) => (
               <Message key={c.message} ton={c.niveau === 'erreur' ? 'erreur' : 'avertissement'}>
                 {c.message}

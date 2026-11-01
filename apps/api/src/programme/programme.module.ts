@@ -8,5 +8,6 @@ import { ProgrammeService } from './programme.service.js';
   imports: [BranchesModule, LignesModule],
   controllers: [ProgrammeController],
   providers: [ProgrammeService],
+  exports: [ProgrammeService],
 })
 export class ProgrammeModule {}
