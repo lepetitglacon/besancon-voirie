@@ -1,0 +1,67 @@
+# Production (Dokploy) : PostgreSQL/PostGIS/pgRouting + API NestJS + front nginx.
+# Dans Dokploy : application « Docker Compose », fichier docker-compose.prod.yml,
+# domaine sur le service « web », port 80. Variables (onglet Environment) : voir .env.example,
+# au minimum POSTGRES_PASSWORD, JWT_SECRET et URL_PUBLIQUE ; GINKO_API_KEY pour le temps réel
+# tram et bus ; GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET et SMTP_URL pour Google et les e-mails.
+name: besancon-voirie
+
+services:
+  db:
+    image: pgrouting/pgrouting:17-3.5-4.0.1
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-voirie}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}
+      POSTGRES_DB: ${POSTGRES_DB:-voirie}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      target: api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-voirie}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-voirie}
+      API_PORT: 3000
+      EDITION_LOCALE: ${EDITION_LOCALE:-false}
+      # Comptes (docs/ARCHITECTURE.md §12) : URL_PUBLIQUE sert au callback Google et aux liens des e-mails.
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant}
+      JWT_DUREE_JOURS: ${JWT_DUREE_JOURS:-30}
+      URL_PUBLIQUE: ${URL_PUBLIQUE:?URL_PUBLIQUE manquant}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_EXPEDITEUR: ${MAIL_EXPEDITEUR:-}
+      GINKO_API_KEY: ${GINKO_API_KEY:-}
+      TRAM_COLLECTE: ${TRAM_COLLECTE:-true}
+      BUS_COLLECTE: ${BUS_COLLECTE:-true}
+      IA_PARALLELE: ${IA_PARALLELE:-0}
+    volumes:
+      - api-data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    depends_on:
+      - api
+
+volumes:
+  db-data:
+  api-data:
