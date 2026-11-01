@@ -61,6 +61,10 @@ services:
     restart: unless-stopped
     depends_on:
       - api
+    # Explicite : Dokploy ajoute dokploy-network (Traefik) à ce service ; sans `default`, nginx
+    # ne joindrait plus l'API.
+    networks:
+      - default
 
 volumes:
   db-data:
