@@ -8,3 +8,5 @@ export * from './analyses-ia.js';
 export * from './temps-reel.js';
 export * from './sumo.js';
 export * from './zone-osm.js';
+export * from './droits.js';
+export * from './auth.js';

@@ -1,7 +1,7 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Post, Put, Query } from '@nestjs/common';
 import { EnregistrementZoneOsm } from '@voirie/schema';
 import { z } from 'zod';
-import { EditionGuard } from '../common/edition.guard.js';
+import { Peut } from '../auth/acces.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { OsmService } from './osm.service.js';
 
@@ -20,14 +20,14 @@ export class OsmController {
 
   /** PUT /api/osm/zone { polygones, source } : prise en compte au prochain import. */
   @Put('zone')
-  @UseGuards(EditionGuard)
+  @Peut('update', 'ZoneOsm')
   enregistrer(@Body(new ZodValidationPipe(EnregistrementZoneOsm)) zone: EnregistrementZoneOsm) {
     return this.osm.enregistrer(zone);
   }
 
   /** DELETE /api/osm/zone : plus de zone, l'import suivant revient à la commune de Besançon. */
   @Delete('zone')
-  @UseGuards(EditionGuard)
+  @Peut('delete', 'ZoneOsm')
   supprimer() {
     return this.osm.supprimer();
   }
@@ -47,7 +47,7 @@ export class OsmController {
   /** POST /api/osm/import : télécharge les feux de la zone et les synchronise, en tâche de fond. */
   @Post('import')
   @HttpCode(202)
-  @UseGuards(EditionGuard)
+  @Peut('create', 'ImportOsm')
   importer() {
     return this.osm.lancerImport();
   }

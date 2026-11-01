@@ -4,6 +4,7 @@ import { cycleObserve, planEnVigueur, positionCycle, type ResultatProgramme } fr
 import type { ConfianceSynchro, PlanEtapes, PlanSaisi, TopsCarrefour } from '@voirie/schema'
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { useDroits } from '../auth/session'
 import { Aide, Bascule, Message, Selecteur, Valeur } from '../ds'
 import { useMaintenant } from '../tempsReel/useMaintenant'
 
@@ -33,6 +34,7 @@ interface Props {
  */
 export function SynchroPlan({ carrefourId, plans, plan, resultat, modifie, onInstant, onVitesse }: Props) {
   const queryClient = useQueryClient()
+  const droits = useDroits()
   const tops = useQuery({ queryKey: ['tops', carrefourId], queryFn: () => api.tops(carrefourId) })
   const lignes = [...new Set(plan.etapes.filter((e) => !e.hors_cycle).flatMap((e) => e.lignes))]
   const [ligne, setLigne] = useState<string | null>(null)
@@ -106,7 +108,8 @@ export function SynchroPlan({ carrefourId, plans, plan, resultat, modifie, onIns
         </Message>
       )}
 
-      <HStack gap="1.5" wrap="wrap">
+      {!droits.can('create', 'TopSynchro') && <Aide>Le rôle « Relever les tops de synchro » permet d’en enregistrer.</Aide>}
+      {droits.can('create', 'TopSynchro') && <HStack gap="1.5" wrap="wrap">
         <Selecteur size="xs" w="auto" aria-label="Ligne observée" valeur={ligneTop ?? ''} onChange={setLigne}>
           {lignes.map((code) => (
             <option key={code} value={code}>
@@ -127,7 +130,7 @@ export function SynchroPlan({ carrefourId, plans, plan, resultat, modifie, onIns
             </Button>
           </>
         )}
-      </HStack>
+      </HStack>}
       {observe && (
         <Aide>
           Cycle observé {observe.cycle_s} s sur {observe.cycles} cycles (programme : {Math.round(cycle * 10) / 10} s)
@@ -148,11 +151,13 @@ export function SynchroPlan({ carrefourId, plans, plan, resultat, modifie, onIns
                 <Table.Cell whiteSpace="nowrap">{horodatage(top.instant)}</Table.Cell>
                 <Table.Cell fontWeight="semibold">{top.ligne}</Table.Cell>
                 <Table.Cell color="fg.muted">{top.decalage_s === null ? 'hors plan' : `${top.decalage_s} s`}</Table.Cell>
-                <Table.Cell>
-                  <IconButton variant="ghost" colorPalette="red" size="2xs" aria-label="Supprimer le top" title="Supprimer le top" onClick={() => supprimer.mutate(top.id)}>
-                    ✕
-                  </IconButton>
-                </Table.Cell>
+                {droits.can('delete', 'TopSynchro') && (
+                  <Table.Cell>
+                    <IconButton variant="ghost" colorPalette="red" size="2xs" aria-label="Supprimer le top" title="Supprimer le top" onClick={() => supprimer.mutate(top.id)}>
+                      ✕
+                    </IconButton>
+                  </Table.Cell>
+                )}
               </Table.Row>
             ))}
           </Table.Body>

@@ -459,8 +459,8 @@ sur la carte :
 | PATCH | `/api/carrefours/:id` `{ feux?, nature?, nom? }` | Recompose (les feux retirés redeviennent libres), renomme ; le slug ne change pas |
 | DELETE | `/api/carrefours/:id` | Libère les feux ; 409 si le carrefour a des relevés ou des plans de feux |
 
-Les routes d'écriture passent par `EditionGuard`, qui n'autorise l'écriture que si
-`EDITION_LOCALE=true` (développement local), en attendant l'authentification admin (§12).
+Les routes d'écriture demandent un rôle (`@Peut(action, sujet)`, §12) : composer les
+carrefours et placer un feu sont réservés au rôle `compositeur`.
 À chaque composition, la position du carrefour (centre de ses feux) et `pres_tram` (voie
 de tram à moins de 25 m) sont recalculés. Le nom proposé (`proposerNom`, `@voirie/engine`)
 reprend les voies nommées à moins de 20 m des feux, par importance puis distance : trois
@@ -607,7 +607,26 @@ Public :
 | GET | `/api/exports/carrefours.geojson` | Export ODbL |
 | GET | `/api/exports/carrefours.gpkg?srid=2154` | Export Lambert 93 |
 
-Admin (cookie de session, un seul compte) :
+Comptes (§12) :
+
+| Méthode | Route | Effet |
+|---|---|---|
+| GET | `/api/auth/moi` | Session : compte, rôles, règles CASL (`utilisateur: null` pour un visiteur) |
+| POST | `/api/auth/inscription` | Compte local et rôles demandés ; activé par le lien envoyé par e-mail |
+| POST | `/api/auth/verification` `{ jeton }` | Confirme l'adresse et ouvre la session |
+| POST | `/api/auth/connexion` `{ email, motDePasse }` | Stratégie passport « local » |
+| GET | `/api/auth/google[?mode=liaison&retour=]` → `/api/auth/google/callback` | Stratégie passport « google », fusionnée avec le compte de même e-mail |
+| POST | `/api/auth/deconnexion`, `/api/auth/mot-de-passe-oublie`, `/api/auth/reinitialisation` | |
+| PATCH / DELETE | `/api/compte` | Nom affiché ; suppression du compte |
+| PUT | `/api/compte/mot-de-passe` | Change ou définit le mot de passe ; ferme les autres sessions |
+| DELETE | `/api/compte/google` | Délie Google (s'il reste un mot de passe) |
+| POST | `/api/compte/deconnexion-partout` | Révoque tous les JWT du compte |
+| POST / DELETE | `/api/compte/roles[/:role]` | Demande un rôle (motivation), ou y renonce |
+| GET / PATCH | `/api/utilisateurs[/:id]` | Admin : comptes, activation |
+| PUT / DELETE | `/api/utilisateurs/:id/roles/:role` | Admin : accorde ou retire un rôle |
+| GET / POST | `/api/utilisateurs/demandes[/:id/:role]` | Admin : demandes en attente, décision (e-mail à l'intéressé) |
+
+Admin (à venir) :
 
 | Méthode | Route | Effet |
 |---|---|---|
@@ -615,11 +634,11 @@ Admin (cookie de session, un seul compte) :
 | POST | `/api/admin/releves/:id/valider` | Crée ou met à jour `plan_feux`, recalcule le statut du carrefour |
 | POST | `/api/admin/releves/:id/rejeter` | Avec motif |
 | PUT | `/api/admin/carrefours/:id` | Édition (nom, branches, lignes, contrôleur) |
-| POST / PATCH / DELETE | `/api/carrefours[/:id]` | Composition manuelle des carrefours (§5.3). Pour l'instant protégée par `EDITION_LOCALE` |
-| PUT | `/api/carrefours/:id/branches` | Remplace branches et voies (`EDITION_LOCALE`) |
-| PUT | `/api/carrefours/:id/lignes` | Remplace lignes de feux, feux physiques et conflits admis (`EDITION_LOCALE`) |
-| PUT | `/api/carrefours/:id/programme` | Remplace les plans ; cycle et diagramme calculés depuis les étapes (`EDITION_LOCALE`) |
-| POST / DELETE | `/api/carrefours/:id/tops[/:top]` | Ajoute une série de tops `{ ligne, instants }`, ou en retire un (`EDITION_LOCALE`) |
+| POST / PATCH / DELETE | `/api/carrefours[/:id]` | Composition manuelle des carrefours (§5.3) — rôle `compositeur` |
+| PUT | `/api/carrefours/:id/branches` | Remplace branches et voies — rôle `geometre` |
+| PUT | `/api/carrefours/:id/lignes` | Remplace lignes de feux, feux physiques et conflits admis — rôle `signaliste` |
+| PUT | `/api/carrefours/:id/programme` | Remplace les plans ; cycle et diagramme calculés depuis les étapes — rôle `programmeur` |
+| POST / DELETE | `/api/carrefours/:id/tops[/:top]` | Ajoute une série de tops `{ ligne, instants }`, ou en retire un — rôle `releveur` |
 | PUT | `/api/admin/corridors/:id` | Création/édition, recalcul des distances |
 | POST | `/api/admin/simulations` | Phase 2 : met un job en file |
 
@@ -863,17 +882,34 @@ POST /api/admin/simulations ─▶ pg-boss « simulation » ─▶ apps/worker
 
 ---
 
-## 12. Sécurité, contributions et cadre légal
+## 12. Sécurité, comptes et cadre légal
 
-- **Pas de comptes publics.** Les contributions sont anonymes, avec un pseudo libre facultatif et
-  jamais d'email. Aucune donnée personnelle n'est collectée volontairement.
-- **Anti-abus** : `@nestjs/throttler` sur `POST /api/releves`, champ piège anti-robot, taille
-  de corps limitée, modération obligatoire avant publication.
-- **Journaux** : pas de conservation des IP au-delà de ce que le throttler garde en mémoire.
-  Journaux Caddy sans IP, ou avec rotation courte.
-- **Admin** : un compte unique, mot de passe haché (argon2) en variable d'environnement,
-  cookie de session `HttpOnly` / `Secure` / `SameSite=Strict`. Ce cookie est strictement
-  nécessaire, donc pas de bandeau.
+- **Comptes** (`apps/api/src/auth/`) : inscription ouverte, par e-mail et mot de passe (hash
+  argon2, compte activé par un lien envoyé par e-mail) ou par Google. Les deux mènent au même
+  compte : une connexion Google se rattache au compte de même e-mail (vérifié par Google) ; un
+  compte local jamais confirmé perd alors son mot de passe, pour qu'une adresse pré-inscrite
+  par un tiers ne lui donne pas accès. Depuis ses paramètres, on lie ou délie Google, on change
+  son mot de passe, on ferme toutes ses sessions, on supprime son compte.
+- **Session** : un JWT de l'app, le même quel que soit le mode de connexion, dans un cookie
+  `voirie_session` `HttpOnly` / `SameSite=Lax` / `Secure` en HTTPS (30 jours). Il ne porte que
+  l'identifiant et une version : le compte et ses rôles sont relus en base à chaque requête
+  protégée, un rôle retiré ou un compte désactivé prend effet tout de suite, et changer de mot
+  de passe révoque les autres sessions. Ce cookie est strictement nécessaire, donc pas de bandeau.
+- **Droits** : RBAC avec CASL, un rôle par métier (`ROLES`, `packages/schema/src/droits.ts`,
+  partagé par l'API et le front), cumulables : `compositeur`, `geometre`, `analyste_ia`,
+  `signaliste`, `programmeur`, `releveur`, `importeur_osm`, `simulateur`, `admin`. À
+  l'inscription (ou plus tard, dans les paramètres) on demande ses rôles ; ceux soumis à
+  validation attendent, avec leur motivation, la décision d'un admin (modale « Gestion des
+  droits », e-mail à l'intéressé). `AccesGuard` (global) lit `@Peut(action, sujet)` sur chaque
+  route d'écriture : 401 sans compte, 403 sans le droit. `EDITION_LOCALE=true` ouvre encore
+  ces routes sans compte, pour le développement local et les tests e2e.
+- **Admin par défaut** : créé par la migration `authentification`, sans mot de passe (connexion
+  Google, ou « Mot de passe oublié »).
+- **Anti-abus** : `@nestjs/throttler` sur l'inscription, la connexion et le mot de passe oublié
+  (10 par minute et par IP, `trust proxy` derrière nginx), taille de corps limitée.
+- **Données personnelles** : adresse e-mail et nom affiché des comptes, rien d'autre ; pas de
+  conservation des IP au-delà de ce que le throttler garde en mémoire. Suppression du compte
+  depuis ses paramètres (les données saisies sur les carrefours restent).
 - **Pas d'analytics, pas de traceurs**, pas de polices ni de scripts tiers chargés à l'exécution.
 - **Mentions légales** (LCEN, éditeur non professionnel) : identité de l'hébergeur du VPS.
 - **Licences** : code sous AGPL-3.0, données sous ODbL, attribution OSM sur la carte et dans les exports.

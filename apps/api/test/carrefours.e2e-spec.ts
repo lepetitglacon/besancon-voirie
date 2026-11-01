@@ -109,10 +109,10 @@ describe('Composition manuelle des carrefours (e2e)', () => {
     await request(app.getHttpServer()).delete(`/api/carrefours/${carrefourA}`).expect(409);
   });
 
-  it('should refuse writes when edition is disabled', async () => {
+  it('should require an account when edition is disabled', async () => {
     process.env.EDITION_LOCALE = 'false';
     try {
-      await request(app.getHttpServer()).post('/api/carrefours').send({ feux: ids([201]) }).expect(403);
+      await request(app.getHttpServer()).post('/api/carrefours').send({ feux: ids([201]) }).expect(401);
     } finally {
       process.env.EDITION_LOCALE = 'true';
     }

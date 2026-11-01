@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Put } from '@nestjs/common';
 import { ConfigurationProgramme } from '@voirie/schema';
-import { EditionGuard } from '../common/edition.guard.js';
+import { Peut } from '../auth/acces.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { ProgrammeService } from './programme.service.js';
 
@@ -14,7 +14,7 @@ export class ProgrammeController {
   }
 
   @Put()
-  @UseGuards(EditionGuard)
+  @Peut('update', 'Programme')
   enregistrer(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(ConfigurationProgramme)) configuration: ConfigurationProgramme,

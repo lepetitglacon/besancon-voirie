@@ -1,5 +1,5 @@
-import { Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Put, Query, UseGuards } from '@nestjs/common';
-import { EditionGuard } from '../../common/edition.guard.js';
+import { Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Put, Query } from '@nestjs/common';
+import { Peut } from '../../auth/acces.js';
 import { FileIaService } from './file-ia.service.js';
 
 /** File des propositions « OSM + IA » : suivi, résultat, consultation. */
@@ -32,14 +32,14 @@ export class AnalysesIaController {
 
   /** Proposition chargée dans l'éditeur : plus de notification. */
   @Put(':id/consultee')
-  @UseGuards(EditionGuard)
+  @Peut('update', 'AnalyseIa')
   marquerConsultee(@Param('id', ParseUUIDPipe) id: string) {
     return this.file.marquerConsultee(id);
   }
 
   @Delete(':id')
   @HttpCode(204)
-  @UseGuards(EditionGuard)
+  @Peut('delete', 'AnalyseIa')
   retirer(@Param('id', ParseUUIDPipe) id: string) {
     return this.file.retirer(id);
   }

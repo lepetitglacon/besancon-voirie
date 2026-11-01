@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, Sse, type MessageEvent } from '@nestjs/common';
 import { ETAPES_ACTIVES, LancerEssaiSumo, type LancementSumo, type OptionsSumo } from '@voirie/schema';
 import { defer, interval, map, switchMap, takeWhile, startWith, type Observable } from 'rxjs';
+import { Peut } from '../auth/acces.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { LancementsSumoService } from './lancements.service.js';
 
@@ -25,6 +26,7 @@ export class LancementsSumoController {
 
   /** POST /api/sumo/lancements : lance un essai (un seul à la fois, 409 sinon). */
   @Post('lancements')
+  @Peut('create', 'LancementSumo')
   lancer(@Body(new ZodValidationPipe(LancerEssaiSumo)) demande: LancerEssaiSumo): Promise<LancementSumo> {
     return this.lancements.lancer(demande);
   }
@@ -50,6 +52,7 @@ export class LancementsSumoController {
 
   /** DELETE /api/sumo/lancements/:id : arrête le lancement en cours. */
   @Delete('lancements/:id')
+  @Peut('delete', 'LancementSumo')
   annuler(@Param('id') id: string): Promise<LancementSumo> {
     return this.lancements.annuler(id);
   }

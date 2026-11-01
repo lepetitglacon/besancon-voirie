@@ -2,13 +2,17 @@ import { CloseButton, Dialog } from '@chakra-ui/react'
 import type { ReactNode } from 'react'
 import { Route, Routes, useNavigate } from 'react-router'
 import { Accessibilite } from '../accessibilite/Accessibilite'
+import { Connexion } from '../auth/Connexion'
+import { GestionDroits } from '../auth/GestionDroits'
+import { Inscription } from '../auth/Inscription'
+import { MotDePasseOublie, Reinitialisation, VerificationEmail } from '../auth/LiensEmail'
+import { Parametres } from '../auth/Parametres'
 import { APropos } from './APropos'
-import { Connexion } from './Connexion'
 import { MentionsLegales } from './MentionsLegales'
 import { avecVue, PAGES } from './pages'
 
 /** Fenêtre d'une page du site ; la fermer revient à la carte (« / »). */
-function Page({ titre, taille = 'lg', children }: { titre: string; taille?: 'sm' | 'lg'; children: ReactNode }) {
+function Page({ titre, taille = 'lg', children }: { titre: string; taille?: 'sm' | 'md' | 'lg' | 'xl'; children: ReactNode }) {
   const naviguer = useNavigate()
   return (
     <Dialog.Root open size={taille} scrollBehavior="inside" onOpenChange={(e) => !e.open && naviguer(avecVue('/'))}>
@@ -31,42 +35,34 @@ function Page({ titre, taille = 'lg', children }: { titre: string; taille?: 'sm'
   )
 }
 
+const ROUTES: Array<{ page: { chemin: string; titre: string }; taille?: 'sm' | 'md' | 'lg' | 'xl'; contenu: ReactNode }> = [
+  { page: PAGES.connexion, taille: 'sm', contenu: <Connexion /> },
+  { page: PAGES.inscription, taille: 'md', contenu: <Inscription /> },
+  { page: PAGES.motDePasseOublie, taille: 'sm', contenu: <MotDePasseOublie /> },
+  { page: PAGES.reinitialisation, taille: 'sm', contenu: <Reinitialisation /> },
+  { page: PAGES.verification, taille: 'sm', contenu: <VerificationEmail /> },
+  { page: PAGES.parametres, contenu: <Parametres /> },
+  { page: PAGES.droits, taille: 'xl', contenu: <GestionDroits /> },
+  { page: PAGES.accessibilite, contenu: <Accessibilite /> },
+  { page: PAGES.aPropos, contenu: <APropos /> },
+  { page: PAGES.mentions, contenu: <MentionsLegales /> },
+]
+
 /** Routes des pages du site, rendues par-dessus la carte. */
 export function PagesSite() {
   return (
     <Routes>
-      <Route
-        path={PAGES.connexion.chemin}
-        element={
-          <Page titre={PAGES.connexion.titre} taille="sm">
-            <Connexion />
-          </Page>
-        }
-      />
-      <Route
-        path={PAGES.accessibilite.chemin}
-        element={
-          <Page titre={PAGES.accessibilite.titre}>
-            <Accessibilite />
-          </Page>
-        }
-      />
-      <Route
-        path={PAGES.aPropos.chemin}
-        element={
-          <Page titre={PAGES.aPropos.titre}>
-            <APropos />
-          </Page>
-        }
-      />
-      <Route
-        path={PAGES.mentions.chemin}
-        element={
-          <Page titre={PAGES.mentions.titre}>
-            <MentionsLegales />
-          </Page>
-        }
-      />
+      {ROUTES.map(({ page, taille, contenu }) => (
+        <Route
+          key={page.chemin}
+          path={page.chemin}
+          element={
+            <Page titre={page.titre} taille={taille}>
+              {contenu}
+            </Page>
+          }
+        />
+      ))}
       {/* Toute autre adresse : la carte seule. */}
       <Route path="*" element={null} />
     </Routes>

@@ -1,6 +1,6 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { AjoutTops, BboxQuery, type Bbox } from '@voirie/schema';
-import { EditionGuard } from '../common/edition.guard.js';
+import { Peut } from '../auth/acces.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { TempsReelService } from './temps-reel.service.js';
 
@@ -21,13 +21,13 @@ export class TempsReelController {
 
   /** POST /api/carrefours/:id/tops { ligne, instants } : débuts de vert relevés sur place. */
   @Post('carrefours/:id/tops')
-  @UseGuards(EditionGuard)
+  @Peut('create', 'TopSynchro')
   ajouter(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(AjoutTops)) ajout: AjoutTops) {
     return this.tempsReel.ajouterTops(id, ajout);
   }
 
   @Delete('carrefours/:id/tops/:top')
-  @UseGuards(EditionGuard)
+  @Peut('delete', 'TopSynchro')
   supprimer(@Param('id', ParseUUIDPipe) id: string, @Param('top', ParseUUIDPipe) top: string) {
     return this.tempsReel.supprimerTop(id, top);
   }

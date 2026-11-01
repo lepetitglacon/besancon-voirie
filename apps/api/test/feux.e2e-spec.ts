@@ -94,11 +94,11 @@ describe('Placement des feux sur la photo (e2e)', () => {
     await http().put(`/api/feux/${rows[0].id}/position`).send({ position: null }).expect(409);
   });
 
-  it('should answer 404 for an unknown signal and 403 when edition is disabled', async () => {
+  it('should answer 404 for an unknown signal and 401 without an account when edition is disabled', async () => {
     await http().put('/api/feux/00000000-0000-4000-8000-000000000000/position').send({ position: null }).expect(404);
     process.env.EDITION_LOCALE = 'false';
     try {
-      await http().put(`/api/feux/${feu101}/position`).send({ position: MAT_101 }).expect(403);
+      await http().put(`/api/feux/${feu101}/position`).send({ position: MAT_101 }).expect(401);
     } finally {
       process.env.EDITION_LOCALE = 'true';
     }

@@ -1,6 +1,7 @@
 import type { EssaiSumoResume } from '@voirie/schema'
 import { Badge, Box, Button, HStack, Stack, Text, type BoxProps } from '@chakra-ui/react'
 import type { ReactNode } from 'react'
+import { useDroits } from '../auth/session'
 import { Aide, CarteEnTete, Message } from '../ds'
 import { heure } from './indicateurs'
 
@@ -22,6 +23,8 @@ const minutes = (secondes: number) => `${Math.round(secondes / 60)} min`
 
 /** Carte de gauche du mode SUMO : les essais archivés, du plus récent au plus ancien. */
 export function CarteEssais({ essais, erreur, choisi, onChoisir, onNouvel, suivi, formulaire, ...props }: Props) {
+  /** Lancer un essai occupe le serveur : rôle « Lancer des simulations SUMO ». */
+  const peutLancer = useDroits().can('create', 'LancementSumo')
   return (
     <CarteEnTete
       surtitre="Simulation SUMO"
@@ -30,9 +33,11 @@ export function CarteEssais({ essais, erreur, choisi, onChoisir, onNouvel, suivi
         !formulaire && (
           <>
             {essais && <Badge colorPalette="gray">{essais.length} essai(s)</Badge>}
-            <Button size="2xs" ms="auto" onClick={() => onNouvel(null)}>
-              Nouvel essai
-            </Button>
+            {peutLancer && (
+              <Button size="2xs" ms="auto" onClick={() => onNouvel(null)}>
+                Nouvel essai
+              </Button>
+            )}
           </>
         )
       }
@@ -99,7 +104,7 @@ export function CarteEssais({ essais, erreur, choisi, onChoisir, onNouvel, suivi
                   <Aide mt="1.5">{essai.description}</Aide>
                 )}
               </Box>
-              {actif && (
+              {actif && peutLancer && (
                 <Button size="2xs" variant="ghost" mt="0.5" onClick={() => onNouvel(essai.id)}>
                   Relancer avec d'autres réglages
                 </Button>

@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Put } from '@nestjs/common';
 import { ConfigurationLignes } from '@voirie/schema';
-import { EditionGuard } from '../common/edition.guard.js';
+import { Peut } from '../auth/acces.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { LignesService } from './lignes.service.js';
 
@@ -14,7 +14,7 @@ export class LignesController {
   }
 
   @Put()
-  @UseGuards(EditionGuard)
+  @Peut('update', 'LigneFeux')
   enregistrer(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(ConfigurationLignes)) configuration: ConfigurationLignes,

@@ -41,11 +41,30 @@ import type {
   TramsTempsReel,
   TronconsSumoGeoJson,
   TypeJour,
+  ChangerMotDePasse,
+  DemandeRole,
+  DemandeRoleAdmin,
+  Identifiants,
+  Inscription,
+  ModifierCompte,
+  Role,
+  Session,
+  UtilisateurAdmin,
 } from '@voirie/schema'
 
 export interface Sante {
   status: 'ok'
   db: { postgis: string; pgrouting: string }
+}
+
+/** Erreur de l'API, avec son code HTTP (401 : session expirée, 403 : droits insuffisants). */
+export class ErreurApi extends Error {
+  readonly statut: number
+
+  constructor(message: string, statut: number) {
+    super(message)
+    this.statut = statut
+  }
 }
 
 async function requete<T>(url: string, init?: RequestInit): Promise<T> {
@@ -54,10 +73,15 @@ async function requete<T>(url: string, init?: RequestInit): Promise<T> {
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
   })
   if (!reponse.ok) {
-    const corps = (await reponse.json().catch(() => null)) as { message?: unknown; erreurs?: unknown } | null
-    const detail = Array.isArray(corps?.erreurs) ? ` : ${corps.erreurs.join(' ; ')}` : ''
+    const corps = (await reponse.json().catch(() => null)) as {
+      message?: unknown
+      erreurs?: unknown
+      issues?: Array<{ message: string }>
+    } | null
+    const erreurs = Array.isArray(corps?.erreurs) ? corps.erreurs : (corps?.issues?.map((i) => i.message) ?? [])
+    const detail = erreurs.length > 0 ? ` : ${erreurs.join(' ; ')}` : ''
     const message = typeof corps?.message === 'string' ? `${corps.message}${detail}` : `HTTP ${reponse.status}`
-    throw new Error(message)
+    throw new ErreurApi(message, reponse.status)
   }
   return (reponse.status === 204 ? undefined : await reponse.json()) as T
 }
@@ -167,4 +191,46 @@ export const api = {
     requete<{ nom: string; polygones: PolygonesZone; superficie_km2: number }>(`/api/osm/contours/${osmId}`),
   importerOsm: () => requete<ImportOsm>('/api/osm/import', { method: 'POST' }),
   fluxLancementSumo: (id: string) => `/api/sumo/lancements/${encodeURIComponent(id)}/flux`,
+
+  // Compte : connexion, inscription, paramètres (docs/ARCHITECTURE.md §12)
+  session: () => requete<Session>('/api/auth/moi'),
+  connexion: (identifiants: Identifiants) =>
+    requete<Session>('/api/auth/connexion', { method: 'POST', body: JSON.stringify(identifiants) }),
+  deconnexion: () => requete<void>('/api/auth/deconnexion', { method: 'POST' }),
+  inscription: (inscription: Inscription) =>
+    requete<void>('/api/auth/inscription', { method: 'POST', body: JSON.stringify(inscription) }),
+  verifierEmail: (jeton: string) =>
+    requete<Session>('/api/auth/verification', { method: 'POST', body: JSON.stringify({ jeton }) }),
+  motDePasseOublie: (email: string) =>
+    requete<void>('/api/auth/mot-de-passe-oublie', { method: 'POST', body: JSON.stringify({ email }) }),
+  reinitialiserMotDePasse: (jeton: string, motDePasse: string) =>
+    requete<Session>('/api/auth/reinitialisation', { method: 'POST', body: JSON.stringify({ jeton, motDePasse }) }),
+  /** Départ vers Google (navigation complète) : connexion, ou liaison au compte connecté. */
+  urlGoogle: (mode: 'connexion' | 'liaison', retour = '/') =>
+    `/api/auth/google?mode=${mode}&retour=${encodeURIComponent(retour)}`,
+  modifierCompte: (modification: ModifierCompte) =>
+    requete<Session>('/api/compte', { method: 'PATCH', body: JSON.stringify(modification) }),
+  changerMotDePasse: (changement: ChangerMotDePasse) =>
+    requete<Session>('/api/compte/mot-de-passe', { method: 'PUT', body: JSON.stringify(changement) }),
+  delierGoogle: () => requete<Session>('/api/compte/google', { method: 'DELETE' }),
+  deconnexionPartout: () => requete<void>('/api/compte/deconnexion-partout', { method: 'POST' }),
+  demanderRole: (demande: DemandeRole) =>
+    requete<Session>('/api/compte/roles', { method: 'POST', body: JSON.stringify(demande) }),
+  renoncerRole: (role: Role) => requete<Session>(`/api/compte/roles/${role}`, { method: 'DELETE' }),
+  supprimerCompte: () => requete<void>('/api/compte', { method: 'DELETE' }),
+
+  // Gestion des droits (admin)
+  utilisateurs: () => requete<UtilisateurAdmin[]>('/api/utilisateurs'),
+  demandesRoles: () => requete<DemandeRoleAdmin[]>('/api/utilisateurs/demandes'),
+  deciderDemande: (utilisateurId: string, role: Role, decision: 'accorde' | 'refuse') =>
+    requete<void>(`/api/utilisateurs/demandes/${utilisateurId}/${role}`, {
+      method: 'POST',
+      body: JSON.stringify({ decision }),
+    }),
+  activerUtilisateur: (utilisateurId: string, actif: boolean) =>
+    requete<void>(`/api/utilisateurs/${utilisateurId}`, { method: 'PATCH', body: JSON.stringify({ actif }) }),
+  accorderRole: (utilisateurId: string, role: Role) =>
+    requete<void>(`/api/utilisateurs/${utilisateurId}/roles/${role}`, { method: 'PUT' }),
+  retirerRole: (utilisateurId: string, role: Role) =>
+    requete<void>(`/api/utilisateurs/${utilisateurId}/roles/${role}`, { method: 'DELETE' }),
 }

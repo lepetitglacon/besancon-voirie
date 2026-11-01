@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { AuthModule } from './auth/auth.module.js';
 import { BranchesModule } from './branches/branches.module.js';
 import { CarrefoursModule } from './carrefours/carrefours.module.js';
 import { DbModule } from './db/db.module.js';
@@ -17,6 +18,7 @@ import { TramModule } from './tram/tram.module.js';
     // Le .env de la racine du monorepo, puis un éventuel .env local à l'API.
     ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env', '../../.env'] }),
     DbModule,
+    AuthModule,
     CarrefoursModule,
     BranchesModule,
     LignesModule,

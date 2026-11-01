@@ -121,12 +121,12 @@ describe('Tops et feux en temps réel (e2e)', () => {
     expect(apres.plans.jour.confiance).toBe('synchronisee');
   });
 
-  it('POST /tops should reject an unknown signal group, and require edition', async () => {
+  it('POST /tops should reject an unknown signal group, and require an account', async () => {
     await ajouter('F9', [lundi]).expect(400);
     await http().post(`/api/carrefours/${carrefourA}/tops`).send({ ligne: 'F1', instants: [] }).expect(400);
     process.env.EDITION_LOCALE = 'false';
     try {
-      await ajouter('F1', [lundi]).expect(403);
+      await ajouter('F1', [lundi]).expect(401);
     } finally {
       process.env.EDITION_LOCALE = 'true';
     }

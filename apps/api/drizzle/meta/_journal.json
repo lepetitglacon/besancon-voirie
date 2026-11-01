@@ -169,6 +169,13 @@
       "when": 1792008044108,
       "tag": "20261014200044_bus_passage",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793540032720,
+      "tag": "20261101133352_authentification",
+      "breakpoints": true
     }
   ]
 }

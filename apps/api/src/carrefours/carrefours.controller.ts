@@ -1,7 +1,7 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { BboxQuery, CreerCarrefour, ModifierCarrefour, NatureCarrefour, type Bbox } from '@voirie/schema';
 import { z } from 'zod';
-import { EditionGuard } from '../common/edition.guard.js';
+import { Peut } from '../auth/acces.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { CarrefoursService } from './carrefours.service.js';
 
@@ -30,13 +30,13 @@ export class CarrefoursController {
   }
 
   @Post()
-  @UseGuards(EditionGuard)
+  @Peut('create', 'Carrefour')
   creer(@Body(new ZodValidationPipe(CreerCarrefour)) creation: CreerCarrefour) {
     return this.carrefours.creer(creation);
   }
 
   @Patch(':id')
-  @UseGuards(EditionGuard)
+  @Peut('update', 'Carrefour')
   modifier(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(ModifierCarrefour)) modification: ModifierCarrefour,
@@ -46,7 +46,7 @@ export class CarrefoursController {
 
   @Delete(':id')
   @HttpCode(204)
-  @UseGuards(EditionGuard)
+  @Peut('delete', 'Carrefour')
   supprimer(@Param('id', ParseUUIDPipe) id: string) {
     return this.carrefours.supprimer(id);
   }

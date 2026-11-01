@@ -1,6 +1,6 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
 import { ConfigurationBranches, DemandeAnalyseIa } from '@voirie/schema';
-import { EditionGuard } from '../common/edition.guard.js';
+import { Peut } from '../auth/acces.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { BranchesService } from './branches.service.js';
 import { FileIaService } from './ia/file-ia.service.js';
@@ -31,7 +31,7 @@ export class BranchesController {
    */
   @Post('detection-ia')
   @HttpCode(202)
-  @UseGuards(EditionGuard)
+  @Peut('create', 'AnalyseIa')
   demanderDetectionIa(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(DemandeAnalyseIa)) demande: DemandeAnalyseIa,
@@ -46,7 +46,7 @@ export class BranchesController {
   }
 
   @Put()
-  @UseGuards(EditionGuard)
+  @Peut('update', 'Branche')
   enregistrer(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(ConfigurationBranches)) configuration: ConfigurationBranches,

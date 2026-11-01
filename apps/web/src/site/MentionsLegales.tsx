@@ -44,7 +44,15 @@ export function MentionsLegales() {
         </Text>
       </Bloc>
       <Bloc titre="Cookies et données personnelles">
-        <Text>Le site ne dépose aucun cookie et n'utilise aucun outil de mesure d'audience.</Text>
+        <Text>
+          Le site n'utilise aucun outil de mesure d'audience. Il ne dépose qu'un cookie, strictement nécessaire, quand
+          vous vous connectez : votre session (30 jours au plus).
+        </Text>
+        <Text>
+          Un compte garde votre adresse e-mail, votre nom affiché, vos rôles et les motivations de vos demandes. Ces
+          données ne servent qu'au fonctionnement du site et ne sont transmises à personne. Vous pouvez supprimer votre
+          compte à tout moment depuis ses paramètres.
+        </Text>
       </Bloc>
     </Stack>
   )

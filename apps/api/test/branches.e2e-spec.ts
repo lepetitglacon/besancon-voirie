@@ -110,14 +110,14 @@ describe('Branches, voies et connexions (e2e)', () => {
     await envoyer({ branches: trou, connexions: [] }).expect(400);
   });
 
-  it('should answer 404 for an unknown carrefour and 403 when edition is disabled', async () => {
+  it('should answer 404 for an unknown carrefour and 401 without an account when edition is disabled', async () => {
     await http().get('/api/carrefours/00000000-0000-4000-8000-000000000000/branches').expect(404);
     process.env.EDITION_LOCALE = 'false';
     try {
       await http()
         .put(`/api/carrefours/${carrefourA}/branches`)
         .send({ branches: proposition.branches.map((b) => sans(b, 'sens')), connexions: [] })
-        .expect(403);
+        .expect(401);
     } finally {
       process.env.EDITION_LOCALE = 'true';
     }

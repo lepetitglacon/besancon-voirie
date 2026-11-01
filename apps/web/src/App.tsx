@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { LonLat } from '@voirie/engine'
-import type { AnalyseIa, Bbox, CarrefourResume, FeuResume, TypeJour } from '@voirie/schema'
+import { peutEditer, type AnalyseIa, type Bbox, type CarrefourResume, type FeuResume, type TypeJour } from '@voirie/schema'
 import { Badge, Box, Button, HStack, Kbd, Popover, Portal, Stack, Text } from '@chakra-ui/react'
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { Layers, Map as MapIcon, Ruler } from 'lucide-react'
 import { useMap } from 'react-map-gl/maplibre'
 import { api } from './api'
+import { useDroits } from './auth/session'
 import { ChoixLignesBus } from './bus/ChoixLignesBus'
 import { CHOIX_LIGNES_BUS_DEFAUT, filtrerReseauBus, lignesBus, lignesMasquees, type ChoixLignesBus as Choix } from './bus/lignesBus'
 import { MenuSite } from './site/MenuSite'
@@ -156,7 +157,11 @@ function ReglageHeure({ heure, onChange }: { heure: number | null; onChange: (he
 function App() {
   const queryClient = useQueryClient()
   const [bbox, setBbox] = useState<Bbox>()
-  const [mode, setMode] = usePreference<Mode>('mode-carte', 'temps_reel')
+  const droits = useDroits()
+  /** Le mode Édition n'est proposé qu'avec au moins un rôle d'édition (docs/ARCHITECTURE.md §12). */
+  const editeur = peutEditer(droits)
+  const [modeChoisi, setMode] = usePreference<Mode>('mode-carte', 'temps_reel')
+  const mode: Mode = modeChoisi === 'edition' && !editeur ? 'temps_reel' : modeChoisi
   const tempsReel = mode === 'temps_reel'
   const sumo = mode === 'sumo'
   /** Composer et configurer les carrefours : seulement en mode Édition. */
@@ -331,6 +336,7 @@ function App() {
 
   /** Composer ou modifier un carrefour (clic sur un feu libre, N, « Feux ») passe en mode Édition. */
   const demarrer = (nouvelle: Edition) => {
+    if (!droits.can(nouvelle.carrefourId ? 'update' : 'create', 'Carrefour')) return
     enregistrer.reset()
     setMode('edition')
     setFicheTempsReel(null)
@@ -491,7 +497,7 @@ function App() {
     setFicheTempsReel(null)
     setEdition(null)
     setConfiguration({ ...choix, ouvrirAnalyseIa: { id: analyse.id } })
-  }, [setMode])
+  }, [setMode, setFicheTempsReel, setEdition, setConfiguration])
 
   useNotificationsIa(analysesIa.data, ouvrirAnalyseIa)
 
@@ -738,7 +744,7 @@ function App() {
 
       {/* Modes de l'application, toujours visibles en haut au centre. */}
       <BarreOutils.Root position="fixed" left="50%" transform="translateX(-50%)" top="3" zIndex="3" aria-label="Mode de l'application">
-        {MODES.map((m) => (
+        {MODES.filter((m) => m.valeur !== 'edition' || editeur).map((m) => (
           <BarreOutils.Outil
             key={m.valeur}
             // Libellés plus longs que ceux des outils : sur une ligne, la carte s'élargit.
@@ -940,15 +946,21 @@ function App() {
             ) : (
               <>
                 <BarreOutils.Outil glyphe="↖" libelle="Sélection" raccourci="V" actif={!outilZone} onClick={() => setOutilZone(false)} />
-                <BarreOutils.Outil glyphe="⌖" libelle="Carrefour" raccourci="N" onClick={composer} />
-                <BarreOutils.Separateur />
-                <BarreOutils.Outil
-                  glyphe="⬚"
-                  libelle="Zone OSM"
-                  title="Zone d'import des feux depuis OSM"
-                  actif={outilZone}
-                  onClick={() => (outilZone ? setOutilZone(false) : ouvrirZone())}
-                />
+                {droits.can('create', 'Carrefour') && (
+                  <BarreOutils.Outil glyphe="⌖" libelle="Carrefour" raccourci="N" onClick={composer} />
+                )}
+                {droits.can('update', 'ZoneOsm') && (
+                  <>
+                    <BarreOutils.Separateur />
+                    <BarreOutils.Outil
+                      glyphe="⬚"
+                      libelle="Zone OSM"
+                      title="Zone d'import des feux depuis OSM"
+                      actif={outilZone}
+                      onClick={() => (outilZone ? setOutilZone(false) : ouvrirZone())}
+                    />
+                  </>
+                )}
               </>
             )}
           </BarreOutils.Root>}

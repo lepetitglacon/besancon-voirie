@@ -431,3 +431,63 @@ export const zoneOsm = pgTable(
   },
   (t) => [check('zone_osm_unique', sql`${t.id} = 1`)],
 );
+
+/**
+ * Comptes : connexion par mot de passe (hash argon2) et/ou par Google, fusionnés sur l'e-mail
+ * — docs/ARCHITECTURE.md §12. Les droits viennent des rôles accordés (utilisateur_role).
+ */
+export const utilisateur = pgTable('utilisateur', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  /** En minuscules. */
+  email: text('email').notNull().unique(),
+  nom: text('nom').notNull(),
+  motDePasse: text('mot_de_passe'),
+  googleId: text('google_id').unique(),
+  emailVerifieLe: timestamp('email_verifie_le', { withTimezone: true }),
+  actif: boolean('actif').notNull().default(true),
+  /** Incrémentée pour révoquer tous les JWT du compte (mot de passe changé, « déconnecter partout »). */
+  versionJeton: integer('version_jeton').notNull().default(0),
+  creeLe: creeLe(),
+  derniereConnexionLe: timestamp('derniere_connexion_le', { withTimezone: true }),
+});
+
+export const statutDemandeRole = pgEnum('statut_demande_role', ['en_attente', 'accorde', 'refuse']);
+
+/**
+ * Rôles d'un compte, demandés ou accordés (catalogue : ROLES de @voirie/schema). Un rôle
+ * soumis à validation reste en attente, avec sa motivation, jusqu'à la décision d'un admin.
+ */
+export const utilisateurRole = pgTable(
+  'utilisateur_role',
+  {
+    utilisateurId: uuid('utilisateur_id')
+      .notNull()
+      .references(() => utilisateur.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    statut: statutDemandeRole('statut').notNull(),
+    motivation: text('motivation'),
+    decidePar: uuid('decide_par').references(() => utilisateur.id, { onDelete: 'set null' }),
+    decideLe: timestamp('decide_le', { withTimezone: true }),
+    creeLe: creeLe(),
+  },
+  (t) => [primaryKey({ columns: [t.utilisateurId, t.role] }), index('utilisateur_role_statut_idx').on(t.statut)],
+);
+
+export const typeJetonUtilisateur = pgEnum('type_jeton_utilisateur', ['verification_email', 'reinitialisation_mdp']);
+
+/** Liens envoyés par e-mail ; seul le hash SHA-256 du jeton est gardé. */
+export const jetonUtilisateur = pgTable(
+  'jeton_utilisateur',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    utilisateurId: uuid('utilisateur_id')
+      .notNull()
+      .references(() => utilisateur.id, { onDelete: 'cascade' }),
+    type: typeJetonUtilisateur('type').notNull(),
+    hash: text('hash').notNull().unique(),
+    expireLe: timestamp('expire_le', { withTimezone: true }).notNull(),
+    utiliseLe: timestamp('utilise_le', { withTimezone: true }),
+    creeLe: creeLe(),
+  },
+  (t) => [index('jeton_utilisateur_utilisateur_idx').on(t.utilisateurId, t.type)],
+);

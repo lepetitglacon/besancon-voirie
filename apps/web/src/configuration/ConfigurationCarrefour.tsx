@@ -35,6 +35,7 @@ import { useCallback, useEffect, useEffectEvent, useImperativeHandle, useMemo, u
 import { createPortal } from 'react-dom'
 import { useMap } from 'react-map-gl/maplibre'
 import { api } from '../api'
+import { useDroits } from '../auth/session'
 import { NATURES } from '../carrefour/libelles'
 import { ResumeCarrefour } from '../carrefour/ResumeCarrefour'
 import { Aide, BandeauMode, BarreOutils, BAS_BARRE_OUTILS, CarteEnTete, Chiffre, HAUTEUR_BARRE_OUTILS, Indice, Message, notifications, PanneauBas, Valeur, type EtatLampe } from '../ds'
@@ -235,6 +236,11 @@ const focusLibre = () => {
 }
 
 export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, onAffichage, onPlacerFeu, ouvrirAnalyseIa, onPanneauBas, onModifierFeux, onSupprimer, onFermer }: Props) {
+  const droits = useDroits()
+  const peutBranches = droits.can('update', 'Branche')
+  const peutLignes = droits.can('update', 'LigneFeux')
+  const peutProgramme = droits.can('update', 'Programme')
+  const peutIa = droits.can('create', 'AnalyseIa')
   const queryClient = useQueryClient()
   const [outil, setOutil] = useState<OutilCarte>('selection')
   const [sousOutils, setSousOutils] = useState<Record<OutilAvecSousOutils, SousOutil>>({ ajuster: 'deplacer', pieton: 'deplacer' })
@@ -323,7 +329,7 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
     },
   })
   const genererIa = () => {
-    if (iaEnFile || demandeIa.isPending) return
+    if (!peutIa || iaEnFile || demandeIa.isPending) return
     setPopup(null)
     demandeIa.reset()
     setCadrage({ emprise: null })
@@ -583,6 +589,12 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   const erreur = [detection, cadreAuto, demandeIa, chargementIa, importJson, enregistrementBranches, enregistrementLignes, enregistrementProgramme].find((m) => m.error)?.error
 
   const modifications = [brouillonBranches, brouillonLignes, brouillonProgramme].filter((b) => b !== null).length
+  /** Modifications que les rôles du compte permettent d'enregistrer ; les autres restent en brouillon. */
+  const enregistrables = [
+    brouillonBranches && peutBranches,
+    brouillonLignes && peutLignes,
+    brouillonProgramme && peutProgramme,
+  ].filter(Boolean).length
   const enregistrementEnCours = [enregistrementBranches, enregistrementLignes, enregistrementProgramme].some((m) => m.isPending)
   const sansLiaison = branches.flatMap((b) =>
     voiesDe(b, 'entrante').filter((v) => !configuration.connexions.some((c) => c.de === cleVoie(b.code, 'entrante', v.rang))),
@@ -591,9 +603,9 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
   /** Enregistre tout ce qui a changé : branches, puis lignes, puis programme (sauf s'il est en erreur). */
   const enregistrer = async () => {
     try {
-      if (brouillonBranches) await enregistrementBranches.mutateAsync()
-      if (brouillonLignes) await enregistrementLignes.mutateAsync()
-      if (brouillonProgramme && !erreurProgramme) await enregistrementProgramme.mutateAsync()
+      if (brouillonBranches && peutBranches) await enregistrementBranches.mutateAsync()
+      if (brouillonLignes && peutLignes) await enregistrementLignes.mutateAsync()
+      if (brouillonProgramme && peutProgramme && !erreurProgramme) await enregistrementProgramme.mutateAsync()
     } catch {
       // L'erreur s'affiche dans l'en-tête (erreur de la mutation).
     }
@@ -1006,8 +1018,12 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
           glyphe="✦"
           libelle="IA"
           raccourci="I"
-          disabled={iaEnFile || demandeIa.isPending}
-          title="Générer avec OSM + IA : régler le cadre de la photo IGN, puis la détection OSM corrigée par Claude (~1 min, en file)"
+          disabled={!peutIa || iaEnFile || demandeIa.isPending}
+          title={
+            peutIa
+              ? 'Générer avec OSM + IA : régler le cadre de la photo IGN, puis la détection OSM corrigée par Claude (~1 min, en file)'
+              : 'Réservé au rôle « Lancer les analyses IA »'
+          }
           onClick={genererIa}
         />
         <BarreOutils.Outil glyphe="⇪" libelle="JSON" title="Importer un JSON { branches, connexions }" onClick={() => champImport.current?.click()} />
@@ -1023,9 +1039,15 @@ export function ConfigurationCarrefour({ ref, carrefour, position, ciblePopup, o
           variant="encre"
           size="md"
           borderRadius="9px"
-          disabled={modifications === 0}
+          disabled={enregistrables === 0}
           loading={enregistrementEnCours}
-          title={brouillonProgramme && erreurProgramme ? 'Le programme a des erreurs : il ne sera pas enregistré' : 'Enregistrer (Ctrl S)'}
+          title={
+            enregistrables < modifications
+              ? 'Certaines modifications demandent un rôle que vous n’avez pas : elles restent en brouillon'
+              : brouillonProgramme && erreurProgramme
+                ? 'Le programme a des erreurs : il ne sera pas enregistré'
+                : 'Enregistrer (Ctrl S)'
+          }
           onClick={() => void enregistrer()}
         >
           Enregistrer

@@ -1,17 +1,25 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { MapProvider } from 'react-map-gl/maplibre'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import './index.css'
+import { ErreurApi } from './api'
 import App from './App.tsx'
+import { CLE_SESSION } from './auth/session'
 import { Fournisseur } from './ds'
 import { PAGES } from './site/pages'
 import { Vitrine } from './vitrine'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false } },
+  // Session expirée ou révoquée pendant une saisie : on relit la session (menu, outils affichés).
+  mutationCache: new MutationCache({
+    onError: (erreur) => {
+      if (erreur instanceof ErreurApi && erreur.statut === 401) void queryClient.invalidateQueries({ queryKey: CLE_SESSION })
+    },
+  }),
 })
 
 

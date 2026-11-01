@@ -3,6 +3,7 @@ import { ETAPES_ACTIVES, type LancementSumo } from '@voirie/schema'
 import { Badge, Box, Button, HStack, Progress, Stack, Text } from '@chakra-ui/react'
 import { useState } from 'react'
 import { api } from '../api'
+import { useDroits } from '../auth/session'
 import { Aide, Chiffre, Message } from '../ds'
 import { etatSumo } from './etat'
 import { heure } from './indicateurs'
@@ -27,6 +28,7 @@ interface Props {
 /** Avancement d'un lancement : étape, heure simulée, état de la ville, temps restant. */
 export function SuiviLancement({ lancement, onFermer }: Props) {
   const queryClient = useQueryClient()
+  const droits = useDroits()
   const [arret, setArret] = useState(false)
   const actif = ETAPES_ACTIVES.includes(lancement.etape)
   const etape = LIBELLES_ETAPE[lancement.etape]
@@ -94,9 +96,11 @@ export function SuiviLancement({ lancement, onFermer }: Props) {
 
       <HStack gap="1.5" justify="flex-end">
         {actif ? (
-          <Button size="2xs" variant="outline" colorPalette="red" loading={arret} onClick={() => void arreter()}>
-            Arrêter
-          </Button>
+          droits.can('delete', 'LancementSumo') && (
+            <Button size="2xs" variant="outline" colorPalette="red" loading={arret} onClick={() => void arreter()}>
+              Arrêter
+            </Button>
+          )
         ) : (
           <>
             {lancement.essaiId && (
